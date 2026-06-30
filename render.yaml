@@ -1,0 +1,31 @@
+services:
+  # Backend API Service
+  - type: web
+    name: video-creator-api
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node server.js
+    envVars:
+      - key: REPLICATE_API_TOKEN
+        sync: false
+      - key: MODELARK_API_KEY
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: MODELARK_ENDPOINT
+        value: https://ark.ap-southeast.bytepluses.com/api/v3
+
+  # Frontend Static Service
+  - type: static
+    name: video-creator-frontend
+    runtime: static
+    buildCommand: npm run build
+    staticPublishPath: ./build
+    envVars:
+      - key: REACT_APP_API_URL
+        value: https://video-creator-api.onrender.com
+    headers:
+      - path: /*
+        name: Cache-Control
+        value: public, max-age=31536000, immutable

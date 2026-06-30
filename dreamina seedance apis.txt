@@ -1,0 +1,10 @@
+Name
+API Key
+Created by
+api-key-20260629143913
+ark-b20a2f5b-5172-4860-a89d-c6ce983db9b3-4bfde
+
+
+
+MODELARK_API_KEY=ark-b20a2f5b-5172-4860-a89d-c6ce983db9b3-4bfde
+MODELARK_ENDPOINT=https://ark.ap-southeast.bytepluses.com/api/v3

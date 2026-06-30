@@ -1,0 +1,8 @@
+api key = 59N0uUwP4mspiwTe
+
+access key = Username:katush
+Password:2%tV571#Kw!)P(i9NaSR
+Signin url:https://console.byteplus.com/auth/login/user/3003352231
+Primary account ID:3003352231
+Access key ID:AKAPNjY3ZTQzMDIwY2JmNGFhYzk4NGRkZWI4YzQ2NzkxZTQ
+Secret access key:Wmpnek5tVXpNR1JtWmpaaE5EazNPVGcwWldGbE9EUXlPRE0wWVRjelpXTQ==

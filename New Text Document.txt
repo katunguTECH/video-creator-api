@@ -1,0 +1,5 @@
+the page opened successfuly. however when i typep in the text to ai prompt i got this message 
+
+http://localhost:3000/preview
+
+Preview Page Coming Soon
