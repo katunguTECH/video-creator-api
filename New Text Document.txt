@@ -1,5 +1,8 @@
-the page opened successfuly. however when i typep in the text to ai prompt i got this message 
+# Remove the old remote
+git remote remove origin
 
-http://localhost:3000/preview
+# Add the correct remote (replace YOUR_USERNAME with your actual GitHub username)
+git remote add origin https://github.com/katunguTECH/video-creator-api.git
 
-Preview Page Coming Soon
+# Verify it was set correctly
+git remote -v

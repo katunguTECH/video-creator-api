@@ -1,7 +1,7 @@
 const fetch = require('node-fetch');
 
 async function testSimple() {
-  const token = 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;
+  const token = hf_xxxxxxxxxxxxxxxxxxxxx;
   
   console.log('Testing Hugging Face API with CogVideoX-2b...');
   
