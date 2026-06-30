@@ -2,7 +2,6 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 
-// API URL - uses environment variable or falls back to localhost
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function CreateVideo() {
