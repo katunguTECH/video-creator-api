@@ -1,0 +1,4 @@
+# Paystack Keys
+REACT_APP_PAYSTACK_PUBLIC_KEY=pk_test_c956367f821947e308f319c1afd891f7a04f1616
+PAYSTACK_SECRET_KEY=sk_test_6c53bfef068f43daf82954302729b74fcf90ace0
+Install Required Packages

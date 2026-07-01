@@ -1,8 +1,8 @@
-# Remove the old remote
-git remote remove origin
-
-# Add the correct remote (replace YOUR_USERNAME with your actual GitHub username)
-git remote add origin https://github.com/katunguTECH/video-creator-api.git
-
-# Verify it was set correctly
-git remote -v
+🎬✨ NEW AI Video Creator App! ✨🎬
+https://video-creator-frontend.onrender.com
+What it does:
+📝 Describe it → AI creates video
+📸 Photos → Pro slideshow
+🌍 record a video my app Translate the video to 38+ languages
+💰 Small fee per video (this does not go into my pockets, it goes to the service providers to covers AI costs ~$0.02)
+Please test & send feedback! 🙏🚀
