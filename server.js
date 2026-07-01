@@ -14,10 +14,14 @@ const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
 
+// TEMPORARY: Disable payment check for testing
+const DISABLE_PAYMENT_CHECK = true; // Set to false when payment is fully working
+
 console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('📡 Port:', PORT);
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
+console.log('💳 Payment Check:', DISABLE_PAYMENT_CHECK ? '❌ Disabled (Testing Mode)' : '✅ Enabled');
 
 // ============================================
 // FEE CALCULATION SYSTEM
@@ -376,19 +380,29 @@ app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference } = req.body;
     
-    if (process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
+    // Only enforce payment in production with valid secret and payment check enabled
+    const hasValidSecret = process.env.PAYSTACK_SECRET_KEY && 
+                          process.env.PAYSTACK_SECRET_KEY !== 'sk_test_6c53bfef068f43daf82954302729b74fcf90ace0';
+    
+    // Skip payment check if disabled or in test mode
+    if (!DISABLE_PAYMENT_CHECK && isProduction && hasValidSecret && !paymentReference) {
       throw new Error('Payment required. Please complete payment first.');
     }
+    
+    console.log('📝 Generating video with prompt:', prompt.substring(0, 50) + '...');
+    console.log('💳 Payment Reference:', paymentReference || 'Test Mode (No Payment Required)');
+    console.log('🔐 Environment:', isProduction ? 'Production' : 'Development');
+    console.log('💳 Payment Check:', DISABLE_PAYMENT_CHECK ? 'Disabled' : 'Enabled');
     
     const token = process.env.REPLICATE_API_TOKEN;
     
     if (!token) {
       throw new Error('REPLICATE_API_TOKEN not set in .env file');
     }
-    
-    console.log('📝 Generating video with prompt:', prompt.substring(0, 50) + '...');
-    console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
 
+    console.log('🔑 Using Replicate token:', token.substring(0, 10) + '...');
+
+    // Create prediction
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -413,13 +427,18 @@ app.post('/api/generate-video', async (req, res) => {
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('❌ API Error:', errorData);
-      throw new Error(`API returned ${response.status}: ${errorData}`);
+      console.error('❌ Replicate API Error:', errorData);
+      
+      if (response.status === 402) {
+        throw new Error('Insufficient Replicate credits. Please add credits at https://replicate.com/account/billing');
+      }
+      throw new Error(`Replicate API returned ${response.status}: ${errorData}`);
     }
 
     const data = await response.json();
     console.log('✅ Prediction created:', data.id);
 
+    // Poll for completion
     let prediction = data;
     let attempts = 0;
     const maxAttempts = 60;
@@ -470,17 +489,19 @@ app.post('/api/generate-video-alt', async (req, res) => {
   try {
     const { prompt, paymentReference } = req.body;
     
-    if (process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
+    // Skip payment check if disabled
+    if (!DISABLE_PAYMENT_CHECK && isProduction && process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
       throw new Error('Payment required. Please complete payment first.');
     }
+    
+    console.log('📝 Generating with alternative model...');
+    console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
     
     const token = process.env.REPLICATE_API_TOKEN;
     
     if (!token) {
       throw new Error('REPLICATE_API_TOKEN not set in .env file');
     }
-    
-    console.log('📝 Generating with alternative model...');
 
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
@@ -503,8 +524,12 @@ app.post('/api/generate-video-alt', async (req, res) => {
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('❌ API Error:', errorData);
-      throw new Error(`API returned ${response.status}: ${errorData}`);
+      console.error('❌ Replicate API Error:', errorData);
+      
+      if (response.status === 402) {
+        throw new Error('Insufficient Replicate credits. Please add credits at https://replicate.com/account/billing');
+      }
+      throw new Error(`Replicate API returned ${response.status}: ${errorData}`);
     }
 
     const data = await response.json();
@@ -564,7 +589,8 @@ app.post('/api/generate-dreamina', async (req, res) => {
   try {
     const { prompt, duration, resolution, ratio, paymentReference } = req.body;
     
-    if (process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
+    // Skip payment check if disabled
+    if (!DISABLE_PAYMENT_CHECK && isProduction && process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
       throw new Error('Payment required. Please complete payment first.');
     }
     
@@ -575,6 +601,8 @@ app.post('/api/generate-dreamina', async (req, res) => {
     }
 
     console.log('🎬 Generating video with Dreamina-Seedance-2.0...');
+    console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
+    console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
 
     const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
     const modelId = 'dreamina-seedance-2-0-260128';
@@ -895,6 +923,7 @@ app.get('/api/test', (req, res) => {
   res.json({ 
     status: 'Server is running!',
     environment: isProduction ? 'production' : 'development',
+    paymentCheck: DISABLE_PAYMENT_CHECK ? 'Disabled (Testing)' : 'Enabled',
     endpoints: [
       '/api/test', '/api/health',
       '/api/generate-video (Replicate)',
@@ -917,6 +946,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: isProduction ? 'production' : 'development',
     uptime: process.uptime(),
+    paymentCheck: DISABLE_PAYMENT_CHECK ? 'Disabled (Testing)' : 'Enabled',
     replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
     modelark_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
     paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
@@ -964,6 +994,9 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`📡 Health check: http://0.0.0.0:${PORT}/api/health`);
   console.log(`📡 Test: http://0.0.0.0:${PORT}/api/test`);
+  console.log(`💳 Payment Check: ${DISABLE_PAYMENT_CHECK ? '❌ Disabled (Testing)' : '✅ Enabled'}`);
   console.log(`🔑 Paystack Secret: ${process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'}`);
+  console.log(`🔑 Replicate Token: ${process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'}`);
+  console.log(`🔑 ModelArk Token: ${process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
 });
