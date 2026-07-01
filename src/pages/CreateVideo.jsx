@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { PaystackButton } from 'react-paystack';
 
-// API URL - uses environment variable or falls back to localhost
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 function CreateVideo() {
@@ -13,13 +12,18 @@ function CreateVideo() {
   const [music, setMusic] = useState('upbeat');
   const [caption, setCaption] = useState('');
   const [activeTab, setActiveTab] = useState('text');
+  const [duration, setDuration] = useState(5);
   
   // Payment states
   const [email, setEmail] = useState('');
   const [showPayment, setShowPayment] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [amount, setAmount] = useState(200); // 200 KES default
   const [paymentReference, setPaymentReference] = useState(null);
+  
+  // Price states
+  const [priceData, setPriceData] = useState(null);
+  const [isLoadingPrice, setIsLoadingPrice] = useState(false);
+  const [amount, setAmount] = useState(0);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'image/*': [] },
@@ -31,35 +35,63 @@ function CreateVideo() {
     }
   });
 
-  // Calculate price based on video length and model
-  const calculatePrice = () => {
-    let basePrice = 200; // 200 KES base
-    
-    // Add cost for photos (if using photos tab)
-    if (activeTab === 'photos' && photos.length > 0) {
-      basePrice += photos.length * 20; // 20 KES per photo
+  const calculatePrice = async () => {
+    try {
+      setIsLoadingPrice(true);
+      
+      let serviceType = 'replicate_stable_video';
+      let options = { duration: duration };
+      
+      if (activeTab === 'photos') {
+        serviceType = 'photos_to_video';
+        options = { photoCount: photos.length };
+      } else if (activeTab === 'text') {
+        if (prompt.length > 200) {
+          serviceType = 'dreamina_720p';
+        } else {
+          serviceType = 'replicate_stable_video';
+        }
+        options = { duration: duration };
+      }
+      
+      const response = await fetch(`${API_URL}/api/calculate-price`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          serviceType: serviceType,
+          options: options
+        })
+      });
+      
+      const data = await response.json();
+      
+      if (data.success) {
+        setPriceData(data.price);
+        setAmount(data.price.finalPrice);
+      }
+    } catch (error) {
+      console.error('❌ Price calculation error:', error);
+      setAmount(200);
+    } finally {
+      setIsLoadingPrice(false);
     }
-    
-    // Add cost for longer videos (if prompt is long)
-    if (prompt.length > 100) {
-      basePrice += 50;
-    }
-    
-    return basePrice;
   };
+
+  useEffect(() => {
+    calculatePrice();
+  }, [prompt, photos.length, activeTab, duration]);
 
   const handlePaymentSuccess = (reference) => {
     console.log('✅ Payment successful!', reference);
     setPaymentReference(reference);
     setIsProcessing(true);
-    
-    // Proceed with video generation after payment
     handleCreateVideo(reference);
   };
 
   const handlePaymentClose = () => {
     setShowPayment(false);
-    console.log('Payment modal closed');
   };
 
   const initiatePayment = () => {
@@ -78,15 +110,11 @@ function CreateVideo() {
       return;
     }
     
-    // Calculate the price
-    const calculatedAmount = calculatePrice();
-    setAmount(calculatedAmount);
     setShowPayment(true);
   };
 
   const handleCreateVideo = async (reference) => {
     try {
-      // Verify payment on backend
       const verifyResponse = await fetch(`${API_URL}/api/verify-payment`, {
         method: 'POST',
         headers: {
@@ -105,7 +133,6 @@ function CreateVideo() {
         throw new Error(verifyData.error || 'Payment verification failed');
       }
 
-      // Payment verified, proceed to preview
       navigate('/preview', {
         state: { 
           prompt, 
@@ -114,7 +141,8 @@ function CreateVideo() {
           caption, 
           activeTab,
           paymentReference: reference.reference,
-          amount: amount
+          amount: amount,
+          duration: duration
         }
       });
 
@@ -125,14 +153,13 @@ function CreateVideo() {
     }
   };
 
-  // Paystack configuration
   const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 
   const paystackProps = {
     email: email,
-    amount: amount * 100, // Convert to kobo (Paystack uses lowest currency unit)
+    amount: amount * 100,
     publicKey: publicKey,
-    text: `Pay KES ${amount}`,
+    text: `Pay KES ${amount.toFixed(2)}`,
     onSuccess: handlePaymentSuccess,
     onClose: handlePaymentClose,
     metadata: {
@@ -143,9 +170,9 @@ function CreateVideo() {
           value: activeTab === 'text' ? 'Text to Video' : 'Photos to Video'
         },
         {
-          display_name: "Prompt Preview",
-          variable_name: "prompt_preview",
-          value: prompt.substring(0, 50) + '...'
+          display_name: "Duration",
+          variable_name: "duration",
+          value: `${duration}s`
         }
       ]
     }
@@ -155,11 +182,10 @@ function CreateVideo() {
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
       <div className="max-w-2xl mx-auto">
 
-        {/* Header */}
         <h2 className="text-3xl font-bold mb-2 text-center">🎬 Create Your Video</h2>
         <p className="text-gray-400 text-center mb-8">Choose how you want to create</p>
 
-        {/* Email Input - Required for payment */}
+        {/* Email Input */}
         <div className="mb-4">
           <label className="block text-gray-300 mb-2 font-semibold">📧 Your Email</label>
           <input
@@ -171,6 +197,23 @@ function CreateVideo() {
             required
           />
         </div>
+
+        {/* Duration Selector */}
+        {activeTab === 'text' && (
+          <div className="mb-4">
+            <label className="block text-gray-300 mb-2 font-semibold">⏱️ Video Duration</label>
+            <select
+              value={duration}
+              onChange={(e) => setDuration(parseInt(e.target.value))}
+              className="w-full bg-white/10 border border-white/20 rounded-2xl p-4 text-white focus:outline-none focus:border-pink-500"
+            >
+              <option value="3">3 seconds</option>
+              <option value="5">5 seconds</option>
+              <option value="8">8 seconds</option>
+              <option value="10">10 seconds</option>
+            </select>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex bg-white/10 rounded-full p-1 mb-8">
@@ -214,7 +257,6 @@ function CreateVideo() {
               <p className="text-gray-500 text-sm mt-1">Supports JPG, PNG, WEBP</p>
             </div>
 
-            {/* Photo Previews */}
             {photos.length > 0 && (
               <div className="grid grid-cols-3 gap-3 mt-4">
                 {photos.map((photo, index) => (
@@ -258,26 +300,65 @@ function CreateVideo() {
           />
         </div>
 
-        {/* Price Display */}
-        <div className="bg-white/10 rounded-2xl p-4 mb-6 text-center">
-          <p className="text-gray-300">
-            Estimated Cost: <span className="text-pink-400 font-bold">KES {calculatePrice()}</span>
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            {activeTab === 'text' ? 'Per video generation' : `Per slideshow (${photos.length} photos)`}
-          </p>
+        {/* Price Display with Breakdown */}
+        <div className="bg-white/10 rounded-2xl p-4 mb-6">
+          <div className="flex justify-between items-center">
+            <div>
+              <p className="text-gray-300">💰 Total Cost</p>
+              {isLoadingPrice ? (
+                <p className="text-gray-400 text-sm">Calculating...</p>
+              ) : priceData ? (
+                <div>
+                  <p className="text-2xl font-bold text-pink-400">
+                    KES {priceData.finalPrice.toFixed(2)}
+                  </p>
+                  <p className="text-xs text-gray-500">
+                    Base: KES {priceData.baseCost.toFixed(2)} × {priceData.markupMultiplier}x
+                  </p>
+                </div>
+              ) : (
+                <p className="text-yellow-400 text-sm">Select options to calculate price</p>
+              )}
+            </div>
+            <div className="text-right">
+              <span className="text-xs text-gray-500">Includes:</span>
+              <ul className="text-xs text-gray-400">
+                <li>✅ AI video generation</li>
+                <li>✅ Music & effects</li>
+                <li>✅ HD quality</li>
+              </ul>
+            </div>
+          </div>
+          
+          {priceData && priceData.breakdown && (
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <p className="text-xs font-semibold text-gray-400">📊 Price Breakdown</p>
+              <div className="mt-1 space-y-1">
+                {priceData.breakdown.map((item, index) => (
+                  <div key={index} className="flex justify-between text-xs text-gray-400">
+                    <span>{item.item}</span>
+                    <span>KES {item.amount.toFixed(2)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-xs text-yellow-400 border-t border-white/10 pt-1 mt-1">
+                  <span>➕ {priceData.markupMultiplier}x Markup</span>
+                  <span>KES {priceData.markupAmount.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Payment Button */}
         {!showPayment ? (
           <button
             onClick={initiatePayment}
-            disabled={isProcessing}
+            disabled={isProcessing || !priceData}
             className={`w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105 ${
-              isProcessing ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
+              (isProcessing || !priceData) ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
             }`}
           >
-            {isProcessing ? '⏳ Processing...' : '💰 Pay & Generate 🚀'}
+            {isProcessing ? '⏳ Processing...' : `💰 Pay KES ${amount?.toFixed(2) || '...'} & Generate 🚀`}
           </button>
         ) : (
           <div>
@@ -289,12 +370,10 @@ function CreateVideo() {
               />
             ) : (
               <div className="bg-yellow-500/20 border border-yellow-500 rounded-2xl p-4 text-center">
-                <p className="text-yellow-400">⚠️ Payment is currently in test mode</p>
-                <p className="text-gray-400 text-sm mt-1">Set REACT_APP_PAYSTACK_PUBLIC_KEY in your environment</p>
+                <p className="text-yellow-400">⚠️ Payment in test mode</p>
                 <button
                   onClick={() => {
                     setShowPayment(false);
-                    // For testing, bypass payment
                     handleCreateVideo({ reference: 'test_ref_123' });
                   }}
                   className="mt-3 bg-pink-500 hover:bg-pink-600 px-6 py-2 rounded-full text-sm font-bold transition-all"

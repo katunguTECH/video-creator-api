@@ -20,6 +20,156 @@ console.log('📡 Port:', PORT);
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
 
 // ============================================
+// FEE CALCULATION SYSTEM
+// ============================================
+
+// Base costs per API/model (in KES - Kenyan Shillings)
+const BASE_COSTS = {
+  replicate_stable_video: {
+    baseCost: 5,
+    perSecond: 0.5,
+    defaultDuration: 5,
+    minCost: 5,
+    maxCost: 50,
+    name: 'Stable Video Diffusion'
+  },
+  replicate_alternative: {
+    baseCost: 3,
+    perSecond: 0.3,
+    defaultDuration: 5,
+    minCost: 3,
+    maxCost: 30,
+    name: 'Alternative Model'
+  },
+  dreamina_720p: {
+    baseCost: 15,
+    perSecond: 1.5,
+    defaultDuration: 5,
+    minCost: 15,
+    maxCost: 100,
+    name: 'Dreamina 720p'
+  },
+  dreamina_1080p: {
+    baseCost: 25,
+    perSecond: 2.5,
+    defaultDuration: 5,
+    minCost: 25,
+    maxCost: 150,
+    name: 'Dreamina 1080p'
+  },
+  translation: {
+    baseCost: 10,
+    perMinute: 5,
+    defaultDuration: 1,
+    minCost: 10,
+    maxCost: 100,
+    name: 'Video Translation'
+  },
+  photos_to_video: {
+    baseCost: 2,
+    perPhoto: 1,
+    minPhotos: 2,
+    maxPhotos: 20,
+    minCost: 4,
+    maxCost: 30,
+    name: 'Photos to Video'
+  }
+};
+
+const MARKUP_MULTIPLIER = 10;
+
+class FeeCalculator {
+  static calculatePrice(serviceType, options = {}) {
+    const config = BASE_COSTS[serviceType];
+    if (!config) {
+      throw new Error(`Unknown service type: ${serviceType}`);
+    }
+
+    let baseCost = 0;
+    let breakdown = [];
+
+    switch (serviceType) {
+      case 'replicate_stable_video':
+      case 'replicate_alternative':
+      case 'dreamina_720p':
+      case 'dreamina_1080p': {
+        const duration = options.duration || config.defaultDuration;
+        baseCost = config.baseCost + (config.perSecond * duration);
+        baseCost = Math.min(Math.max(baseCost, config.minCost), config.maxCost);
+        
+        breakdown = [
+          { item: 'Base fee', amount: config.baseCost },
+          { item: `${duration}s video`, amount: config.perSecond * duration }
+        ];
+        break;
+      }
+      
+      case 'translation': {
+        const duration = options.duration || config.defaultDuration;
+        baseCost = config.baseCost + (config.perMinute * duration);
+        baseCost = Math.min(Math.max(baseCost, config.minCost), config.maxCost);
+        
+        breakdown = [
+          { item: 'Base translation fee', amount: config.baseCost },
+          { item: `${duration} minute(s)`, amount: config.perMinute * duration }
+        ];
+        break;
+      }
+      
+      case 'photos_to_video': {
+        const photoCount = options.photoCount || 0;
+        if (photoCount < config.minPhotos) {
+          throw new Error(`Minimum ${config.minPhotos} photos required`);
+        }
+        if (photoCount > config.maxPhotos) {
+          throw new Error(`Maximum ${config.maxPhotos} photos allowed`);
+        }
+        
+        baseCost = config.baseCost + (config.perPhoto * photoCount);
+        baseCost = Math.min(Math.max(baseCost, config.minCost), config.maxCost);
+        
+        breakdown = [
+          { item: 'Base slideshow fee', amount: config.baseCost },
+          { item: `${photoCount} photo(s)`, amount: config.perPhoto * photoCount }
+        ];
+        break;
+      }
+      
+      default:
+        throw new Error(`Unknown service type: ${serviceType}`);
+    }
+
+    const finalPrice = parseFloat((baseCost * MARKUP_MULTIPLIER).toFixed(2));
+    const markupAmount = parseFloat((finalPrice - baseCost).toFixed(2));
+
+    return {
+      serviceType,
+      serviceName: config.name,
+      baseCost: parseFloat(baseCost.toFixed(2)),
+      markupMultiplier: MARKUP_MULTIPLIER,
+      markupAmount: markupAmount,
+      finalPrice: finalPrice,
+      breakdown: breakdown,
+      currency: 'KES'
+    };
+  }
+
+  static getServices() {
+    const services = {};
+    Object.keys(BASE_COSTS).forEach(key => {
+      services[key] = {
+        id: key,
+        name: BASE_COSTS[key].name,
+        baseCost: BASE_COSTS[key].baseCost,
+        markupMultiplier: MARKUP_MULTIPLIER,
+        estimatedPrice: BASE_COSTS[key].baseCost * MARKUP_MULTIPLIER
+      };
+    });
+    return services;
+  }
+}
+
+// ============================================
 // MIDDLEWARE
 // ============================================
 
@@ -61,7 +211,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({ 
   storage: storage,
-  limits: { fileSize: 100 * 1024 * 1024 }, // 100MB limit
+  limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
     if (allowedTypes.includes(file.mimetype)) {
@@ -69,6 +219,55 @@ const upload = multer({
     } else {
       cb(new Error('Invalid file type. Please upload a video file (MP4, AVI, MOV, WEBM).'), false);
     }
+  }
+});
+
+// ============================================
+// FEE CALCULATION ENDPOINTS
+// ============================================
+
+// Get price estimate for a service
+app.post('/api/calculate-price', (req, res) => {
+  try {
+    const { serviceType, options } = req.body;
+    
+    if (!serviceType) {
+      throw new Error('Service type is required');
+    }
+    
+    const priceData = FeeCalculator.calculatePrice(serviceType, options);
+    
+    res.json({
+      success: true,
+      price: priceData,
+      formatted: `KES ${priceData.finalPrice.toFixed(2)}`
+    });
+    
+  } catch (error) {
+    console.error('❌ Price calculation error:', error.message);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get all service types and their base costs
+app.get('/api/service-costs', (req, res) => {
+  try {
+    const services = FeeCalculator.getServices();
+    res.json({
+      success: true,
+      services: services,
+      markupMultiplier: MARKUP_MULTIPLIER,
+      currency: 'KES'
+    });
+  } catch (error) {
+    console.error('❌ Error fetching service costs:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
@@ -84,7 +283,6 @@ app.post('/api/verify-payment', async (req, res) => {
 
     if (!secretKey) {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
-      // In test mode, accept any reference
       res.json({
         success: true,
         message: 'Test mode: Payment verified',
@@ -131,7 +329,6 @@ app.post('/api/webhook/paystack', (req, res) => {
     const secret = process.env.PAYSTACK_SECRET_KEY;
     const payload = req.body;
     
-    // For test mode without secret, accept all webhooks
     if (!secret) {
       console.log('⚠️ Webhook received but PAYSTACK_SECRET_KEY not set. Accepting in test mode.');
       console.log('📦 Webhook payload:', payload);
@@ -139,7 +336,6 @@ app.post('/api/webhook/paystack', (req, res) => {
       return;
     }
 
-    // Verify signature
     const hash = crypto
       .createHmac('sha512', secret)
       .update(JSON.stringify(payload))
@@ -152,20 +348,12 @@ app.post('/api/webhook/paystack', (req, res) => {
 
     const event = payload;
 
-    // Handle successful transaction
     if (event.event === 'charge.success') {
       const transaction = event.data;
       console.log(`✅ Payment successful!`);
       console.log(`   Reference: ${transaction.reference}`);
       console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
       console.log(`   Customer: ${transaction.customer.email}`);
-      
-      // Store the transaction in your database
-      // Example: await savePaymentToDatabase(transaction);
-      
-      // Unlock the video generation for this user
-      // You can store the reference to validate future requests
-      
       res.sendStatus(200);
     } else if (event.event === 'charge.failed') {
       console.log(`❌ Payment failed for reference: ${event.data.reference}`);
@@ -180,54 +368,14 @@ app.post('/api/webhook/paystack', (req, res) => {
   }
 });
 
-// Get transaction status
-app.get('/api/payment-status/:reference', async (req, res) => {
-  try {
-    const { reference } = req.params;
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-
-    if (!secretKey) {
-      res.json({
-        success: true,
-        status: 'success',
-        message: 'Test mode: Payment successful'
-      });
-      return;
-    }
-
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json',
-      }
-    });
-
-    const data = await response.json();
-    res.json({
-      success: data.status,
-      status: data.data?.status || 'unknown',
-      data: data.data
-    });
-  } catch (error) {
-    console.error('❌ Error fetching payment status:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
 // ============================================
 // REPLICATE API ENDPOINTS
 // ============================================
 
-// Replicate API endpoint - Primary Model
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference } = req.body;
     
-    // Verify payment (skip if in test mode)
     if (process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
       throw new Error('Payment required. Please complete payment first.');
     }
@@ -240,9 +388,7 @@ app.post('/api/generate-video', async (req, res) => {
     
     console.log('📝 Generating video with prompt:', prompt.substring(0, 50) + '...');
     console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
-    console.log('🔑 Using token:', token.substring(0, 10) + '...');
 
-    // Create prediction
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -268,17 +414,12 @@ app.post('/api/generate-video', async (req, res) => {
     if (!response.ok) {
       const errorData = await response.text();
       console.error('❌ API Error:', errorData);
-      
-      if (response.status === 402) {
-        throw new Error('Insufficient credits. Please add credits at https://replicate.com/account/billing');
-      }
       throw new Error(`API returned ${response.status}: ${errorData}`);
     }
 
     const data = await response.json();
     console.log('✅ Prediction created:', data.id);
 
-    // Poll for completion
     let prediction = data;
     let attempts = 0;
     const maxAttempts = 60;
@@ -325,12 +466,10 @@ app.post('/api/generate-video', async (req, res) => {
   }
 });
 
-// Replicate API endpoint - Alternative Model
 app.post('/api/generate-video-alt', async (req, res) => {
   try {
     const { prompt, paymentReference } = req.body;
     
-    // Verify payment (skip if in test mode)
     if (process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
       throw new Error('Payment required. Please complete payment first.');
     }
@@ -342,7 +481,6 @@ app.post('/api/generate-video-alt', async (req, res) => {
     }
     
     console.log('📝 Generating with alternative model...');
-    console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
 
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
@@ -366,17 +504,12 @@ app.post('/api/generate-video-alt', async (req, res) => {
     if (!response.ok) {
       const errorData = await response.text();
       console.error('❌ API Error:', errorData);
-      
-      if (response.status === 402) {
-        throw new Error('Insufficient credits. Please add credits at https://replicate.com/account/billing');
-      }
       throw new Error(`API returned ${response.status}: ${errorData}`);
     }
 
     const data = await response.json();
     console.log('✅ Alternative prediction created:', data.id);
 
-    // Poll for completion
     let prediction = data;
     let attempts = 0;
     const maxAttempts = 60;
@@ -431,7 +564,6 @@ app.post('/api/generate-dreamina', async (req, res) => {
   try {
     const { prompt, duration, resolution, ratio, paymentReference } = req.body;
     
-    // Verify payment (skip if in test mode)
     if (process.env.PAYSTACK_SECRET_KEY && !paymentReference) {
       throw new Error('Payment required. Please complete payment first.');
     }
@@ -439,17 +571,14 @@ app.post('/api/generate-dreamina', async (req, res) => {
     const token = process.env.MODELARK_API_KEY;
     
     if (!token) {
-      throw new Error('MODELARK_API_KEY not set in .env file. Please add your ModelArk API key.');
+      throw new Error('MODELARK_API_KEY not set in .env file.');
     }
 
     console.log('🎬 Generating video with Dreamina-Seedance-2.0...');
-    console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
-    console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
 
     const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
     const modelId = 'dreamina-seedance-2-0-260128';
 
-    // Create the generation task
     const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
       method: 'POST',
       headers: {
@@ -490,7 +619,6 @@ app.post('/api/generate-dreamina', async (req, res) => {
     const taskId = taskData.id;
     console.log('✅ Task created:', taskId);
 
-    // Poll for completion
     let result = taskData;
     let attempts = 0;
     const maxAttempts = 60;
@@ -511,10 +639,6 @@ app.post('/api/generate-dreamina', async (req, res) => {
       result = await pollResponse.json();
       attempts++;
       console.log(`⏳ Polling attempt ${attempts}: Status = ${result.status}`);
-      
-      if (result.progress) {
-        console.log(`⏳ Progress: ${result.progress}%`);
-      }
     }
 
     if (result.status === 'failed') {
@@ -532,8 +656,6 @@ app.post('/api/generate-dreamina', async (req, res) => {
     }
 
     console.log('✅ Video generated successfully!');
-    console.log('📹 Video URL:', videoUrl);
-
     res.json({
       success: true,
       videoUrl: videoUrl,
@@ -558,88 +680,29 @@ app.post('/api/generate-dreamina', async (req, res) => {
 // VIDEO TRANSLATION ENDPOINTS (FREE)
 // ============================================
 
-// Supported languages for free translation
 const FREE_TRANSLATION_LANGUAGES = {
-  'en': 'English',
-  'es': 'Spanish',
-  'fr': 'French',
-  'de': 'German',
-  'it': 'Italian',
-  'pt': 'Portuguese',
-  'ru': 'Russian',
-  'ja': 'Japanese',
-  'ko': 'Korean',
-  'zh': 'Chinese (Simplified)',
-  'zh-TW': 'Chinese (Traditional)',
-  'ar': 'Arabic',
-  'hi': 'Hindi',
-  'bn': 'Bengali',
-  'ur': 'Urdu',
-  'id': 'Indonesian',
-  'ms': 'Malay',
-  'tl': 'Tagalog',
-  'vi': 'Vietnamese',
-  'th': 'Thai',
-  'sw': 'Swahili',
-  'ha': 'Hausa',
-  'yo': 'Yoruba',
-  'ig': 'Igbo',
-  'zu': 'Zulu',
-  'af': 'Afrikaans',
-  'am': 'Amharic',
-  'ne': 'Nepali',
-  'si': 'Sinhala',
-  'ta': 'Tamil',
-  'te': 'Telugu',
-  'ml': 'Malayalam',
-  'kn': 'Kannada',
-  'pa': 'Punjabi',
-  'gu': 'Gujarati',
-  'mr': 'Marathi',
-  'or': 'Odia',
-  'pl': 'Polish',
-  'uk': 'Ukrainian',
-  'ro': 'Romanian',
-  'nl': 'Dutch',
-  'el': 'Greek',
-  'cs': 'Czech',
-  'sv': 'Swedish',
-  'hu': 'Hungarian',
-  'fi': 'Finnish',
-  'da': 'Danish',
-  'no': 'Norwegian',
-  'he': 'Hebrew',
-  'fa': 'Persian',
-  'tr': 'Turkish',
-  'km': 'Khmer',
-  'lo': 'Lao',
-  'my': 'Burmese',
-  'mn': 'Mongolian',
-  'ka': 'Georgian',
-  'hy': 'Armenian',
-  'az': 'Azerbaijani',
-  'uz': 'Uzbek',
-  'kk': 'Kazakh',
-  'ky': 'Kyrgyz',
-  'tg': 'Tajik',
-  'tk': 'Turkmen',
-  'et': 'Estonian',
-  'lv': 'Latvian',
-  'lt': 'Lithuanian',
-  'bs': 'Bosnian',
-  'hr': 'Croatian',
-  'sr': 'Serbian',
-  'mk': 'Macedonian',
-  'sq': 'Albanian',
-  'mt': 'Maltese',
-  'is': 'Icelandic',
-  'ga': 'Irish',
-  'cy': 'Welsh',
-  'eo': 'Esperanto',
-  'la': 'Latin'
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia', 'pl': 'Polish', 'uk': 'Ukrainian',
+  'ro': 'Romanian', 'nl': 'Dutch', 'el': 'Greek', 'cs': 'Czech',
+  'sv': 'Swedish', 'hu': 'Hungarian', 'fi': 'Finnish', 'da': 'Danish',
+  'no': 'Norwegian', 'he': 'Hebrew', 'fa': 'Persian', 'tr': 'Turkish',
+  'km': 'Khmer', 'lo': 'Lao', 'my': 'Burmese', 'mn': 'Mongolian',
+  'ka': 'Georgian', 'hy': 'Armenian', 'az': 'Azerbaijani', 'uz': 'Uzbek',
+  'kk': 'Kazakh', 'ky': 'Kyrgyz', 'tg': 'Tajik', 'tk': 'Turkmen',
+  'et': 'Estonian', 'lv': 'Latvian', 'lt': 'Lithuanian', 'bs': 'Bosnian',
+  'hr': 'Croatian', 'sr': 'Serbian', 'mk': 'Macedonian', 'sq': 'Albanian',
+  'mt': 'Maltese', 'is': 'Icelandic', 'ga': 'Irish', 'cy': 'Welsh',
+  'eo': 'Esperanto', 'la': 'Latin'
 };
 
-// Get available languages
 app.get('/api/free-languages', (req, res) => {
   res.json({
     success: true,
@@ -648,7 +711,6 @@ app.get('/api/free-languages', (req, res) => {
   });
 });
 
-// Upload video endpoint
 app.post('/api/upload-video', upload.single('video'), (req, res) => {
   try {
     if (!req.file) {
@@ -659,7 +721,6 @@ app.post('/api/upload-video', upload.single('video'), (req, res) => {
     const videoUrl = `/uploads/${req.file.filename}`;
     
     console.log('✅ Video uploaded:', videoPath);
-    console.log('📹 Video URL:', videoUrl);
     
     res.json({
       success: true,
@@ -677,10 +738,6 @@ app.post('/api/upload-video', upload.single('video'), (req, res) => {
   }
 });
 
-// ============================================
-// TRANSLATION ENDPOINT - LIBRETRANSLATE FIRST
-// ============================================
-
 app.post('/api/translate-text', async (req, res) => {
   try {
     const { text, targetLanguage, sourceLanguage } = req.body;
@@ -694,11 +751,7 @@ app.post('/api/translate-text', async (req, res) => {
     }
     
     console.log('🌐 Translating text...');
-    console.log('📝 Text:', text.substring(0, 50) + '...');
-    console.log('🎯 Target:', targetLanguage, '(', FREE_TRANSLATION_LANGUAGES[targetLanguage], ')');
-    
-    // METHOD 1: Try LibreTranslate FIRST
-    console.log('🔄 Trying LibreTranslate (free, no API key)...');
+    console.log('🎯 Target:', targetLanguage);
     
     const servers = [
       'https://libretranslate.com',
@@ -707,13 +760,9 @@ app.post('/api/translate-text', async (req, res) => {
     
     for (const server of servers) {
       try {
-        console.log(`   Trying ${server}...`);
-        
         const response = await fetch(`${server}/translate`, {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             q: text,
             source: sourceLanguage || 'en',
@@ -725,13 +774,11 @@ app.post('/api/translate-text', async (req, res) => {
         if (response.ok) {
           const data = await response.json();
           if (data.translatedText) {
-            console.log(`✅ LibreTranslate (${server}) successful!`);
             res.json({
               success: true,
               originalText: text,
               translatedText: data.translatedText,
               targetLanguage: targetLanguage,
-              sourceLanguage: sourceLanguage || 'en',
               usedModel: 'LibreTranslate (Free)',
               server: server
             });
@@ -739,144 +786,16 @@ app.post('/api/translate-text', async (req, res) => {
           }
         }
       } catch (error) {
-        console.log(`   ❌ ${server} failed:`, error.message);
         continue;
       }
     }
     
-    // METHOD 2: Try Hugging Face
-    const hfToken = process.env.HF_TOKEN;
-    
-    if (hfToken && hfToken !== 'hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx') {
-      try {
-        console.log('🔄 Trying Hugging Face...');
-        
-        const modelMap = {
-          'en-es': 'Helsinki-NLP/opus-mt-en-es',
-          'en-fr': 'Helsinki-NLP/opus-mt-en-fr',
-          'en-de': 'Helsinki-NLP/opus-mt-en-de',
-          'en-zh': 'Helsinki-NLP/opus-mt-en-zh',
-          'en-ja': 'Helsinki-NLP/opus-mt-en-ja',
-          'en-ar': 'Helsinki-NLP/opus-mt-en-ar',
-          'en-sw': 'Helsinki-NLP/opus-mt-en-sw',
-        };
-        
-        const source = sourceLanguage || 'en';
-        const modelKey = `${source}-${targetLanguage}`;
-        let model = modelMap[modelKey];
-        
-        if (!model) {
-          model = 'Helsinki-NLP/opus-mt-mul-en';
-        }
-        
-        console.log('📦 Using model:', model);
-        
-        const response = await fetch(`https://api-inference.huggingface.co/models/${model}`, {
-          method: 'POST',
-          headers: {
-            'Authorization': `Bearer ${hfToken}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            inputs: text,
-            parameters: {
-              max_length: 512
-            }
-          })
-        });
-        
-        if (response.ok) {
-          const data = await response.json();
-          const translatedText = data[0]?.translation_text || data[0] || data;
-          
-          console.log('✅ Hugging Face translation successful!');
-          res.json({
-            success: true,
-            originalText: text,
-            translatedText: translatedText,
-            targetLanguage: targetLanguage,
-            sourceLanguage: source,
-            usedModel: 'Hugging Face (Free)'
-          });
-          return;
-        }
-      } catch (hfError) {
-        console.log('❌ Hugging Face error:', hfError.message);
-      }
-    }
-    
-    // METHOD 3: Manual Translation Map
-    console.log('🔄 Trying manual translation map...');
-    
-    const manualTranslations = {
-      'en': {
-        'sw': {
-          'Welcome to DukaApp!': 'Karibu DukaApp!',
-          'Get loans based on your sales.': 'Pata mikopo kulingana na mauzo yako.',
-          'Start today with a 14-day free trial.': 'Anza leo na jaribio la bure la siku 14.',
-          'You qualify for loans based on your sales!': 'Unastahiki mikopo kulingana na mauzo yako!',
-          'wanna get loans? visit us at DukaApp.online': 'Unataka mikopo? tembelea DukaApp.online',
-          'Qualify only with your sales': 'Sifa tu kwa mauzo yako',
-          'START TODAY': 'ANZA LEO',
-          '14-DAY FREE TRIAL': 'JARIBIO LA BURE LA SIKU 14'
-        },
-        'yo': {
-          'Welcome to DukaApp!': 'Kaabọ si DukaApp!',
-          'Get loans based on your sales.': 'Gba awin ti o da lori awọn tita rẹ.',
-          'Start today with a 14-day free trial.': 'Bẹrẹ loni pẹlu idanwo ọfẹ ọjọ 14.'
-        },
-        'ha': {
-          'Welcome to DukaApp!': 'Barka da zuwa DukaApp!',
-          'Get loans based on your sales.': 'Sami lamuni bisa ga tallace-tallacen ku.',
-          'Start today with a 14-day free trial.': 'Fara yau da gwaji kyauta na kwanaki 14.'
-        }
-      }
-    };
-    
-    const source = sourceLanguage || 'en';
-    const sourceMap = manualTranslations[source];
-    if (sourceMap && sourceMap[targetLanguage]) {
-      let translation = sourceMap[targetLanguage][text];
-      if (translation) {
-        console.log('✅ Manual translation found!');
-        res.json({
-          success: true,
-          originalText: text,
-          translatedText: translation,
-          targetLanguage: targetLanguage,
-          sourceLanguage: source,
-          usedModel: 'Manual Translation Map'
-        });
-        return;
-      }
-    }
-    
-    // METHOD 4: Simulated Translation
-    console.log('⚠️ Using simulated translation...');
-    
-    const languageNames = {
-      'sw': 'Swahili',
-      'es': 'Spanish',
-      'fr': 'French',
-      'de': 'German',
-      'zh': 'Chinese',
-      'ja': 'Japanese',
-      'ar': 'Arabic',
-      'hi': 'Hindi',
-      'yo': 'Yoruba',
-      'ha': 'Hausa',
-      'ig': 'Igbo',
-      'zu': 'Zulu'
-    };
-    
     res.json({
       success: true,
       originalText: text,
-      translatedText: `[${languageNames[targetLanguage] || targetLanguage}] ${text}`,
+      translatedText: `[${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage}] ${text}`,
       targetLanguage: targetLanguage,
-      sourceLanguage: sourceLanguage || 'en',
-      usedModel: 'Simulated Translation (Fallback)',
-      note: 'LibreTranslate unavailable. Using simulated translation.'
+      usedModel: 'Simulated Translation (Fallback)'
     });
     
   } catch (error) {
@@ -888,10 +807,6 @@ app.post('/api/translate-text', async (req, res) => {
   }
 });
 
-// ============================================
-// FREE VIDEO TRANSLATION (SUBTITLES)
-// ============================================
-
 app.post('/api/translate-video-free', async (req, res) => {
   try {
     const { videoPath, targetLanguage, sourceLanguage, text } = req.body;
@@ -900,15 +815,12 @@ app.post('/api/translate-video-free', async (req, res) => {
       throw new Error('Video path or text is required');
     }
     
-    console.log('🎬 Translating video (FREE method)...');
-    console.log('🔤 Target language:', targetLanguage);
+    console.log('🎬 Translating video...');
     
     if (text) {
       const translateResponse = await fetch(`http://localhost:${PORT}/api/translate-text`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           text: text,
           targetLanguage: targetLanguage,
@@ -924,16 +836,13 @@ app.post('/api/translate-video-free', async (req, res) => {
           originalText: text,
           translatedText: translateData.translatedText,
           targetLanguage: targetLanguage,
-          usedModel: translateData.usedModel,
-          note: 'Text translated successfully. For video, upload a video file.'
+          usedModel: translateData.usedModel
         });
         return;
       }
     }
     
     if (videoPath) {
-      console.log('📹 Processing video for subtitles...');
-      
       const outputDir = path.join(__dirname, 'uploads', 'translated');
       if (!fs.existsSync(outputDir)) {
         fs.mkdirSync(outputDir, { recursive: true });
@@ -942,32 +851,16 @@ app.post('/api/translate-video-free', async (req, res) => {
       const subtitlePath = path.join(outputDir, `subtitles-${Date.now()}.srt`);
       const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage;
       
-      const subtitleContent = `1
-00:00:00,000 --> 00:00:05,000
-[Translated to ${languageName}]
-This video has been translated using the free subtitle method.
-
-2
-00:00:05,000 --> 00:00:10,000
-Original audio is preserved.
-Subtitles are displayed in the target language.
-
-3
-00:00:10,000 --> 00:00:15,000
-For full voice translation with lip-sync,
-please consider a paid API.`;
+      const subtitleContent = `1\n00:00:00,000 --> 00:00:05,000\n[Translated to ${languageName}]\nThis video has been translated using the free subtitle method.\n\n2\n00:00:05,000 --> 00:00:10,000\nOriginal audio is preserved.\nSubtitles are displayed in the target language.`;
       
       fs.writeFileSync(subtitlePath, subtitleContent);
       
-      const videoUrl = videoPath.replace(/\\/g, '/');
-      
       res.json({
         success: true,
-        translatedVideoUrl: videoUrl,
+        translatedVideoUrl: videoPath.replace(/\\/g, '/'),
         subtitleUrl: `/uploads/translated/${path.basename(subtitlePath)}`,
         targetLanguage: targetLanguage,
-        usedModel: 'Free Subtitle Translation',
-        note: 'Subtitles generated. Use FFmpeg to embed subtitles for a complete solution.'
+        usedModel: 'Free Subtitle Translation'
       });
       return;
     }
@@ -988,10 +881,7 @@ please consider a paid API.`;
 // ============================================
 
 if (isProduction) {
-  // Serve static files from the React build
   app.use(express.static(path.join(__dirname, 'build')));
-  
-  // Handle React routing
   app.get('*', (req, res) => {
     res.sendFile(path.join(__dirname, 'build', 'index.html'));
   });
@@ -1006,18 +896,17 @@ app.get('/api/test', (req, res) => {
     status: 'Server is running!',
     environment: isProduction ? 'production' : 'development',
     endpoints: [
-      '/api/test',
-      '/api/health',
+      '/api/test', '/api/health',
       '/api/generate-video (Replicate)',
       '/api/generate-video-alt (Replicate Alternative)',
       '/api/generate-dreamina (Dreamina-Seedance-2.0)',
       '/api/upload-video (Upload)',
-      '/api/translate-text (Translation with Fallbacks)',
-      '/api/translate-video-free (Free Video Translation)',
+      '/api/translate-text (Translation)',
       '/api/free-languages (Languages)',
+      '/api/calculate-price (Price Calculator)',
+      '/api/service-costs (Service Costs)',
       '/api/verify-payment (Payment Verification)',
-      '/api/webhook/paystack (Paystack Webhook)',
-      '/api/payment-status/:reference (Payment Status)'
+      '/api/webhook/paystack (Paystack Webhook)'
     ]
   });
 });
@@ -1030,7 +919,6 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
     replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
     modelark_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
-    hf_token: process.env.HF_TOKEN ? '✅ Set' : '❌ Not set',
     paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
     upload_dir: fs.existsSync(path.join(__dirname, 'uploads')) ? '✅ Exists' : '❌ Missing'
   });
@@ -1044,18 +932,12 @@ app.use((req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
     available: [
-      '/api/test',
-      '/api/health',
-      '/api/generate-video',
-      '/api/generate-video-alt',
-      '/api/generate-dreamina',
-      '/api/upload-video',
-      '/api/translate-text',
-      '/api/translate-video-free',
-      '/api/free-languages',
-      '/api/verify-payment',
-      '/api/webhook/paystack',
-      '/api/payment-status/:reference'
+      '/api/test', '/api/health', '/api/generate-video',
+      '/api/generate-video-alt', '/api/generate-dreamina',
+      '/api/upload-video', '/api/translate-text',
+      '/api/free-languages', '/api/calculate-price',
+      '/api/service-costs', '/api/verify-payment',
+      '/api/webhook/paystack'
     ]
   });
 });
