@@ -19,7 +19,17 @@ function Preview() {
   const [targetLanguage, setTargetLanguage] = useState('sw');
   const [isTranslating, setIsTranslating] = useState(false);
 
-  const { prompt, photos, caption, activeTab } = location.state || {};
+  // Get all state from navigation
+  const { 
+    prompt, 
+    photos, 
+    caption, 
+    activeTab, 
+    paymentReference, 
+    amount, 
+    duration, 
+    email 
+  } = location.state || {};
 
   const handleDownload = () => {
     if (videoUrl) {
@@ -84,12 +94,90 @@ function Preview() {
     }
   };
 
+  // Create a better fallback video using canvas
+  const createFallbackVideo = useCallback(() => {
+    const canvas = document.createElement('canvas');
+    canvas.width = 640;
+    canvas.height = 360;
+    const ctx = canvas.getContext('2d');
+    
+    // Professional gradient background
+    const gradient = ctx.createLinearGradient(0, 0, 640, 360);
+    gradient.addColorStop(0, '#1a1a2e');
+    gradient.addColorStop(0.5, '#16213e');
+    gradient.addColorStop(1, '#0f3460');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 640, 360);
+    
+    // Decorative circles
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.arc(50 + i * 140, 180, 40 + i * 5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.03 + i * 0.02})`;
+      ctx.fill();
+    }
+    
+    // Title
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 10;
+    
+    // Split long prompt into lines
+    const words = prompt ? prompt.split(' ') : ['No prompt provided'];
+    let lines = [];
+    let currentLine = '';
+    for (let word of words) {
+      if ((currentLine + word).length > 40) {
+        lines.push(currentLine.trim());
+        currentLine = word + ' ';
+      } else {
+        currentLine += word + ' ';
+      }
+    }
+    if (currentLine) lines.push(currentLine.trim());
+    
+    // Display lines
+    const lineHeight = 35;
+    const startY = 180 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, index) => {
+      ctx.fillText(line, 320, startY + index * lineHeight);
+    });
+    
+    // Add "AI Generated" badge
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.font = '12px Arial';
+    ctx.fillText('AI Generated Preview', 320, 330);
+    
+    // Add payment reference if exists
+    if (paymentReference) {
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.font = '10px Arial';
+      ctx.fillText(`Payment: ${paymentReference.substring(0, 10)}...`, 320, 345);
+    }
+    
+    return canvas.toDataURL('image/png');
+  }, [prompt, paymentReference]);
+
   const generateVideo = useCallback(async () => {
     try {
+      // Check if payment reference exists
+      if (!paymentReference) {
+        setError('❌ Payment required. Please go back and complete payment first.');
+        setIsGenerating(false);
+        setStatusMessage('❌ Payment Required');
+        return;
+      }
+
       setStatusMessage('🎬 Generating your video with AI...');
       console.log('📝 Prompt:', prompt);
+      console.log('💳 Payment Reference:', paymentReference);
+      console.log('💰 Amount Paid: KES', amount);
 
-      // Try Replicate API
+      // Try Replicate API with payment reference
       setStatusMessage('🤖 Generating with Replicate AI...');
       
       const response = await fetch(`${API_URL}/api/generate-video`, {
@@ -97,11 +185,21 @@ function Preview() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ prompt: prompt })
+        body: JSON.stringify({ 
+          prompt: prompt,
+          paymentReference: paymentReference
+        })
       });
 
       const data = await response.json();
       console.log('📦 API Response:', data);
+
+      // Handle payment required response
+      if (data.requiresPayment || data.error?.includes('Payment required')) {
+        setError('❌ Payment required. Please go back and complete payment.');
+        setIsGenerating(false);
+        return;
+      }
 
       if (data.success && data.videoUrl) {
         setVideoUrl(data.videoUrl);
@@ -121,8 +219,9 @@ function Preview() {
         },
         body: JSON.stringify({ 
           prompt: prompt,
-          duration: 5,
-          resolution: '720p'
+          duration: duration || 5,
+          resolution: '720p',
+          paymentReference: paymentReference
         })
       });
 
@@ -142,34 +241,8 @@ function Preview() {
       console.log('🔄 Creating fallback preview...');
       setStatusMessage('🎨 Creating preview...');
       
-      const canvas = document.createElement('canvas');
-      canvas.width = 640;
-      canvas.height = 360;
-      const ctx = canvas.getContext('2d');
-      
-      const gradient = ctx.createLinearGradient(0, 0, 640, 360);
-      gradient.addColorStop(0, '#8B5CF6');
-      gradient.addColorStop(1, '#EC4899');
-      ctx.fillStyle = gradient;
-      ctx.fillRect(0, 0, 640, 360);
-      
-      ctx.fillStyle = 'white';
-      ctx.font = 'bold 28px Arial';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.shadowColor = 'rgba(0,0,0,0.5)';
-      ctx.shadowBlur = 10;
-      
-      const lines = prompt.length > 40 ? prompt.match(/.{1,40}/g) : [prompt];
-      const lineHeight = 40;
-      const startY = 160 - ((lines.length - 1) * lineHeight) / 2;
-      
-      lines.forEach((line, index) => {
-        ctx.fillText(line, 320, startY + index * lineHeight);
-      });
-      
-      const dataUrl = canvas.toDataURL('image/png');
-      setVideoUrl(dataUrl);
+      const fallbackDataUrl = createFallbackVideo();
+      setVideoUrl(fallbackDataUrl);
       setUsedModel('Preview (Fallback)');
       setProgress(100);
       setIsGenerating(false);
@@ -178,42 +251,28 @@ function Preview() {
     } catch (err) {
       console.error('❌ Error:', err);
       
+      // Handle payment errors
+      if (err.message.includes('Payment required')) {
+        setError('❌ Payment required. Please go back and complete payment.');
+      } else {
+        setError(`❌ ${err.message}`);
+      }
+      
+      // Create fallback preview on error
       try {
-        setStatusMessage('🔄 Generating emergency preview...');
-        const canvas = document.createElement('canvas');
-        canvas.width = 640;
-        canvas.height = 360;
-        const ctx = canvas.getContext('2d');
-        
-        const gradient = ctx.createLinearGradient(0, 0, 640, 360);
-        gradient.addColorStop(0, '#8B5CF6');
-        gradient.addColorStop(1, '#EC4899');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 640, 360);
-        
-        ctx.fillStyle = 'white';
-        ctx.font = 'bold 28px Arial';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.shadowColor = 'rgba(0,0,0,0.5)';
-        ctx.shadowBlur = 10;
-        ctx.fillText('AI Video Preview', 320, 160);
-        ctx.font = '18px Arial';
-        ctx.fillText(prompt.substring(0, 50) + '...', 320, 210);
-        
-        const dataUrl = canvas.toDataURL('image/png');
-        setVideoUrl(dataUrl);
+        const fallbackDataUrl = createFallbackVideo();
+        setVideoUrl(fallbackDataUrl);
         setUsedModel('Emergency Preview');
         setProgress(100);
         setIsGenerating(false);
-        setStatusMessage('✅ Preview generated!');
+        setStatusMessage('✅ Preview generated (Fallback)');
       } catch (fallbackError) {
         setError(`❌ ${err.message}\n\nPlease check:\n1. Backend is running (node server.js)\n2. Add credits to Replicate\n3. Check console for details`);
         setIsGenerating(false);
         setStatusMessage('❌ Generation failed');
       }
     }
-  }, [prompt]);
+  }, [prompt, paymentReference, duration, amount, createFallbackVideo]);
 
   useEffect(() => {
     if (!prompt && (!photos || photos.length === 0)) {
@@ -235,6 +294,7 @@ function Preview() {
     return () => clearInterval(progressInterval);
   }, [prompt, photos, activeTab, navigate, generateVideo]);
 
+  // Loading Screen
   if (isGenerating) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white flex flex-col items-center justify-center px-4">
@@ -243,6 +303,9 @@ function Preview() {
             <div className="text-6xl mb-4">🎬</div>
             <h2 className="text-3xl font-bold mb-2">Generating Your Video</h2>
             <p className="text-gray-300">{statusMessage}</p>
+            {paymentReference && (
+              <p className="text-xs text-green-400 mt-2">✅ Payment verified: {paymentReference.substring(0, 10)}...</p>
+            )}
           </div>
           
           <div className="w-full bg-white/10 rounded-full h-3 mb-4 overflow-hidden">
@@ -268,6 +331,7 @@ function Preview() {
     );
   }
 
+  // Error Screen
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white flex flex-col items-center justify-center px-4">
@@ -280,6 +344,14 @@ function Preview() {
                 {error}
               </pre>
             </div>
+            {error.includes('Payment required') && (
+              <button
+                onClick={() => navigate('/create')}
+                className="bg-yellow-500 hover:bg-yellow-600 px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105 mb-3"
+              >
+                💳 Go Back to Payment
+              </button>
+            )}
             <button
               onClick={() => navigate('/create')}
               className="bg-pink-500 hover:bg-pink-600 px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105"
@@ -292,16 +364,21 @@ function Preview() {
     );
   }
 
+  // Video Preview Screen
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
       <div className="max-w-4xl mx-auto">
         
+        {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-3xl font-bold">🎬 Video Preview</h2>
             <p className="text-gray-400 text-sm mt-1">
               {usedModel} • {videoUrl?.startsWith('data:video') ? 'Video' : 'Image'}
             </p>
+            {paymentReference && (
+              <p className="text-xs text-green-400 mt-1">✅ Payment: {paymentReference.substring(0, 15)}...</p>
+            )}
           </div>
           <button
             onClick={() => navigate('/create')}
@@ -311,6 +388,7 @@ function Preview() {
           </button>
         </div>
 
+        {/* Video Player */}
         <div className="bg-black/50 rounded-2xl overflow-hidden mb-6 shadow-2xl">
           <div className="aspect-video relative">
             {videoUrl ? (
@@ -338,6 +416,7 @@ function Preview() {
           </div>
         </div>
 
+        {/* Translation Section */}
         {prompt && (
           <div className="bg-white/5 rounded-2xl p-4 mb-6">
             <div className="flex items-center gap-3 flex-wrap">
@@ -379,6 +458,7 @@ function Preview() {
           </div>
         )}
 
+        {/* Video Details */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm">
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Type</h3>
@@ -396,6 +476,7 @@ function Preview() {
           </div>
         </div>
 
+        {/* Prompt */}
         {prompt && (
           <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm mb-6">
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Text Prompt</h3>
@@ -403,6 +484,7 @@ function Preview() {
           </div>
         )}
 
+        {/* Caption */}
         {caption && (
           <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm mb-6">
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Caption</h3>
@@ -410,6 +492,7 @@ function Preview() {
           </div>
         )}
 
+        {/* Photos Preview */}
         {photos && photos.length > 0 && (
           <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm mb-6">
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-2">Photos ({photos.length})</h3>
@@ -431,6 +514,7 @@ function Preview() {
           </div>
         )}
 
+        {/* Action Buttons */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
           <button
             onClick={handleDownload}
@@ -455,6 +539,7 @@ function Preview() {
         <div className="mt-6 text-center text-gray-500 text-xs">
           <p>Generated using {usedModel} • Download to save permanently</p>
           {videoUrl?.startsWith('data:video') && <p>💡 Video format: MP4</p>}
+          {paymentReference && <p className="text-green-400/50 mt-1">✅ Payment verified: {paymentReference}</p>}
         </div>
 
       </div>

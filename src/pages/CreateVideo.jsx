@@ -19,6 +19,7 @@ function CreateVideo() {
   const [showPayment, setShowPayment] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [paymentReference, setPaymentReference] = useState(null);
+  const [paymentStatus, setPaymentStatus] = useState(null);
   
   // Price states
   const [priceData, setPriceData] = useState(null);
@@ -35,6 +36,7 @@ function CreateVideo() {
     }
   });
 
+  // Calculate price with 10x markup
   const calculatePrice = async () => {
     try {
       setIsLoadingPrice(true);
@@ -73,6 +75,7 @@ function CreateVideo() {
       }
     } catch (error) {
       console.error('❌ Price calculation error:', error);
+      // Fallback pricing
       setAmount(200);
     } finally {
       setIsLoadingPrice(false);
@@ -83,15 +86,31 @@ function CreateVideo() {
     calculatePrice();
   }, [prompt, photos.length, activeTab, duration]);
 
-  const handlePaymentSuccess = (reference) => {
+  const handlePaymentSuccess = async (reference) => {
     console.log('✅ Payment successful!', reference);
     setPaymentReference(reference);
+    setPaymentStatus('processing');
     setIsProcessing(true);
-    handleCreateVideo(reference);
+    
+    // Navigate to preview with payment reference
+    navigate('/preview', {
+      state: { 
+        prompt, 
+        photos: photos.map(p => p.preview), 
+        music, 
+        caption, 
+        activeTab,
+        paymentReference: reference.reference,
+        amount: amount,
+        duration: duration,
+        email: email
+      }
+    });
   };
 
   const handlePaymentClose = () => {
     setShowPayment(false);
+    console.log('Payment modal closed');
   };
 
   const initiatePayment = () => {
@@ -113,51 +132,11 @@ function CreateVideo() {
     setShowPayment(true);
   };
 
-  const handleCreateVideo = async (reference) => {
-    try {
-      const verifyResponse = await fetch(`${API_URL}/api/verify-payment`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          reference: reference.reference,
-          email: email,
-          amount: amount
-        })
-      });
-
-      const verifyData = await verifyResponse.json();
-      
-      if (!verifyData.success) {
-        throw new Error(verifyData.error || 'Payment verification failed');
-      }
-
-      navigate('/preview', {
-        state: { 
-          prompt, 
-          photos: photos.map(p => p.preview), 
-          music, 
-          caption, 
-          activeTab,
-          paymentReference: reference.reference,
-          amount: amount,
-          duration: duration
-        }
-      });
-
-    } catch (error) {
-      console.error('❌ Error processing payment:', error);
-      alert('Payment verification failed. Please try again.');
-      setIsProcessing(false);
-    }
-  };
-
   const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
 
   const paystackProps = {
     email: email,
-    amount: amount * 100,
+    amount: amount * 100, // Paystack uses kobo/cents
     publicKey: publicKey,
     text: `Pay KES ${amount.toFixed(2)}`,
     onSuccess: handlePaymentSuccess,
@@ -173,6 +152,11 @@ function CreateVideo() {
           display_name: "Duration",
           variable_name: "duration",
           value: `${duration}s`
+        },
+        {
+          display_name: "Prompt Preview",
+          variable_name: "prompt_preview",
+          value: prompt.substring(0, 50) + '...'
         }
       ]
     }
@@ -183,7 +167,7 @@ function CreateVideo() {
       <div className="max-w-2xl mx-auto">
 
         <h2 className="text-3xl font-bold mb-2 text-center">🎬 Create Your Video</h2>
-        <p className="text-gray-400 text-center mb-8">Choose how you want to create</p>
+        <p className="text-gray-400 text-center mb-8">Pay once, generate your video instantly</p>
 
         {/* Email Input */}
         <div className="mb-4">
@@ -313,7 +297,7 @@ function CreateVideo() {
                     KES {priceData.finalPrice.toFixed(2)}
                   </p>
                   <p className="text-xs text-gray-500">
-                    Base: KES {priceData.baseCost.toFixed(2)} × {priceData.markupMultiplier}x
+                    Base: KES {priceData.baseCost.toFixed(2)} × {priceData.markupMultiplier}x markup
                   </p>
                 </div>
               ) : (
@@ -354,7 +338,7 @@ function CreateVideo() {
           <button
             onClick={initiatePayment}
             disabled={isProcessing || !priceData}
-            className={`w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105 ${
+            className={`w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105 ${
               (isProcessing || !priceData) ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
             }`}
           >
@@ -374,7 +358,7 @@ function CreateVideo() {
                 <button
                   onClick={() => {
                     setShowPayment(false);
-                    handleCreateVideo({ reference: 'test_ref_123' });
+                    handlePaymentSuccess({ reference: 'test_ref_123' });
                   }}
                   className="mt-3 bg-pink-500 hover:bg-pink-600 px-6 py-2 rounded-full text-sm font-bold transition-all"
                 >
@@ -390,6 +374,16 @@ function CreateVideo() {
             </button>
           </div>
         )}
+
+        {/* Payment Info */}
+        <div className="mt-4 p-3 bg-white/5 rounded-xl text-center">
+          <p className="text-xs text-gray-400">
+            💳 Secure payment via Paystack • Card or M-Pesa accepted
+          </p>
+          <p className="text-xs text-gray-500 mt-1">
+            You'll be redirected to complete your payment
+          </p>
+        </div>
 
       </div>
     </div>
