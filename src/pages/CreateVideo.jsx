@@ -1,9 +1,11 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
-import { PaystackButton } from 'react-paystack';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+
+// Set to true to skip payment for testing
+const TEST_MODE = true;
 
 function CreateVideo() {
   const navigate = useNavigate();
@@ -16,10 +18,7 @@ function CreateVideo() {
   
   // Payment states
   const [email, setEmail] = useState('');
-  const [showPayment, setShowPayment] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [paymentReference, setPaymentReference] = useState(null);
-  const [paymentStatus, setPaymentStatus] = useState(null);
   
   // Price states
   const [priceData, setPriceData] = useState(null);
@@ -41,19 +40,12 @@ function CreateVideo() {
     try {
       setIsLoadingPrice(true);
       
-      let serviceType = 'replicate_stable_video';
+      let serviceType = 'replicate';
       let options = { duration: duration };
       
       if (activeTab === 'photos') {
         serviceType = 'photos_to_video';
         options = { photoCount: photos.length };
-      } else if (activeTab === 'text') {
-        if (prompt.length > 200) {
-          serviceType = 'dreamina_720p';
-        } else {
-          serviceType = 'replicate_stable_video';
-        }
-        options = { duration: duration };
       }
       
       const response = await fetch(`${API_URL}/api/calculate-price`, {
@@ -75,8 +67,7 @@ function CreateVideo() {
       }
     } catch (error) {
       console.error('❌ Price calculation error:', error);
-      // Fallback pricing
-      setAmount(200);
+      setAmount(100);
     } finally {
       setIsLoadingPrice(false);
     }
@@ -86,39 +77,8 @@ function CreateVideo() {
     calculatePrice();
   }, [prompt, photos.length, activeTab, duration]);
 
-  const handlePaymentSuccess = async (reference) => {
-    console.log('✅ Payment successful!', reference);
-    setPaymentReference(reference);
-    setPaymentStatus('processing');
-    setIsProcessing(true);
-    
-    // Navigate to preview with payment reference
-    navigate('/preview', {
-      state: { 
-        prompt, 
-        photos: photos.map(p => p.preview), 
-        music, 
-        caption, 
-        activeTab,
-        paymentReference: reference.reference,
-        amount: amount,
-        duration: duration,
-        email: email
-      }
-    });
-  };
-
-  const handlePaymentClose = () => {
-    setShowPayment(false);
-    console.log('Payment modal closed');
-  };
-
-  const initiatePayment = () => {
-    if (!email) {
-      alert('Please enter your email address');
-      return;
-    }
-    
+  const handleCreate = () => {
+    // Validate inputs
     if (activeTab === 'text' && !prompt.trim()) {
       alert('Please enter a text prompt!');
       return;
@@ -129,37 +89,45 @@ function CreateVideo() {
       return;
     }
     
-    setShowPayment(true);
-  };
-
-  const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-
-  const paystackProps = {
-    email: email,
-    amount: amount * 100, // Paystack uses kobo/cents
-    publicKey: publicKey,
-    text: `Pay KES ${amount.toFixed(2)}`,
-    onSuccess: handlePaymentSuccess,
-    onClose: handlePaymentClose,
-    metadata: {
-      custom_fields: [
-        {
-          display_name: "Video Type",
-          variable_name: "video_type",
-          value: activeTab === 'text' ? 'Text to Video' : 'Photos to Video'
-        },
-        {
-          display_name: "Duration",
-          variable_name: "duration",
-          value: `${duration}s`
-        },
-        {
-          display_name: "Prompt Preview",
-          variable_name: "prompt_preview",
-          value: prompt.substring(0, 50) + '...'
-        }
-      ]
+    if (!email) {
+      alert('Please enter your email address');
+      return;
     }
+    
+    // In test mode, skip payment
+    if (TEST_MODE) {
+      console.log('🧪 Test mode: Skipping payment');
+      navigate('/preview', {
+        state: { 
+          prompt, 
+          photos: photos.map(p => p.preview), 
+          music, 
+          caption, 
+          activeTab,
+          paymentReference: 'test_ref_123',
+          amount: amount || 100,
+          duration: duration,
+          email: email
+        }
+      });
+      return;
+    }
+    
+    // Normal payment flow would go here
+    // For now, redirect with test reference
+    navigate('/preview', {
+      state: { 
+        prompt, 
+        photos: photos.map(p => p.preview), 
+        music, 
+        caption, 
+        activeTab,
+        paymentReference: 'test_ref_123',
+        amount: amount || 100,
+        duration: duration,
+        email: email
+      }
+    });
   };
 
   return (
@@ -167,7 +135,9 @@ function CreateVideo() {
       <div className="max-w-2xl mx-auto">
 
         <h2 className="text-3xl font-bold mb-2 text-center">🎬 Create Your Video</h2>
-        <p className="text-gray-400 text-center mb-8">Pay once, generate your video instantly</p>
+        <p className="text-gray-400 text-center mb-8">
+          {TEST_MODE ? '🧪 Test Mode - No Payment Required' : 'Pay once, generate your video instantly'}
+        </p>
 
         {/* Email Input */}
         <div className="mb-4">
@@ -176,7 +146,7 @@ function CreateVideo() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Enter your email for payment confirmation"
+            placeholder="Enter your email"
             className="w-full bg-white/10 border border-white/20 rounded-2xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
             required
           />
@@ -333,55 +303,30 @@ function CreateVideo() {
           )}
         </div>
 
-        {/* Payment Button */}
-        {!showPayment ? (
-          <button
-            onClick={initiatePayment}
-            disabled={isProcessing || !priceData}
-            className={`w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105 ${
-              (isProcessing || !priceData) ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
-            }`}
-          >
-            {isProcessing ? '⏳ Processing...' : `💰 Pay KES ${amount?.toFixed(2) || '...'} & Generate 🚀`}
-          </button>
-        ) : (
-          <div>
-            <p className="text-center text-gray-300 mb-4">Complete your payment below</p>
-            {publicKey && publicKey !== 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' ? (
-              <PaystackButton 
-                className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105"
-                {...paystackProps} 
-              />
-            ) : (
-              <div className="bg-yellow-500/20 border border-yellow-500 rounded-2xl p-4 text-center">
-                <p className="text-yellow-400">⚠️ Payment in test mode</p>
-                <button
-                  onClick={() => {
-                    setShowPayment(false);
-                    handlePaymentSuccess({ reference: 'test_ref_123' });
-                  }}
-                  className="mt-3 bg-pink-500 hover:bg-pink-600 px-6 py-2 rounded-full text-sm font-bold transition-all"
-                >
-                  🧪 Test Mode: Skip Payment
-                </button>
-              </div>
-            )}
-            <button
-              onClick={() => setShowPayment(false)}
-              className="w-full mt-3 text-gray-400 hover:text-gray-300 text-sm transition-all"
-            >
-              Cancel
-            </button>
-          </div>
+        {/* Create Button */}
+        <button
+          onClick={handleCreate}
+          disabled={isProcessing}
+          className={`w-full bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105 ${
+            isProcessing ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
+          }`}
+        >
+          {isProcessing ? '⏳ Processing...' : TEST_MODE ? '🧪 Generate Video (Test)' : `💰 Pay KES ${amount?.toFixed(2) || '...'} & Generate 🚀`}
+        </button>
+
+        {TEST_MODE && (
+          <p className="text-center text-xs text-yellow-400 mt-3">
+            ⚠️ Test Mode: Payment is disabled for testing
+          </p>
         )}
 
-        {/* Payment Info */}
+        {/* Info */}
         <div className="mt-4 p-3 bg-white/5 rounded-xl text-center">
           <p className="text-xs text-gray-400">
-            💳 Secure payment via Paystack • Card or M-Pesa accepted
+            💳 Powered by Replicate AI • HappyHorse Model
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            You'll be redirected to complete your payment
+            Videos generated in HD quality
           </p>
         </div>
 
