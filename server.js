@@ -9,17 +9,16 @@ const fetch = require('node-fetch');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
 
-// Payment enforcement - set to false for testing
-const ENFORCE_PAYMENT = false; // Set to false to skip payment for now
+// Test mode - set to false for production
+const TEST_MODE = true;
 
 console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
-console.log('💳 Payment Enforcement:', ENFORCE_PAYMENT ? '✅ Enabled' : '❌ Disabled (Testing)');
+console.log('🧪 Test Mode:', TEST_MODE ? '✅ Enabled' : '❌ Disabled');
 console.log('🔑 Replicate Token:', process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set');
 
 // ============================================
@@ -58,7 +57,7 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({ 
+const upload = multer({
   storage: storage,
   limits: { fileSize: 100 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
@@ -72,39 +71,76 @@ const upload = multer({
 });
 
 // ============================================
-// PAYMENT VERIFICATION FUNCTION
+// PRICE CALCULATION ENDPOINT
 // ============================================
-
-async function verifyPayment(reference) {
+app.post('/api/calculate-price', (req, res) => {
   try {
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    
-    // In development, accept test references
-    if (!secretKey || secretKey === 'sk_test_6c53bfef068f43daf82954302729b74fcf90ace0') {
-      return reference === 'test_ref_123' || reference.startsWith('test_');
+    console.log('💰 Price calculation request received');
+    console.log('📦 Request body:', req.body);
+
+    const { serviceType, options } = req.body;
+
+    // Default values
+    const duration = options?.duration || 5;
+    const photoCount = options?.photoCount || 0;
+
+    let baseCost = 0;
+    let breakdown = [];
+    let serviceName = 'HappyHorse Video';
+
+    if (serviceType === 'photos_to_video') {
+      const baseFee = 10;
+      const perPhoto = 2;
+      baseCost = baseFee + (photoCount * perPhoto);
+      breakdown = [
+        { item: 'Base slideshow fee', amount: baseFee },
+        { item: `${photoCount} photo(s)`, amount: photoCount * perPhoto }
+      ];
+      serviceName = 'Photos to Video';
+    } else {
+      const baseFee = 10;
+      const perSecond = 2;
+      baseCost = baseFee + (duration * perSecond);
+      breakdown = [
+        { item: 'AI Video Generation', amount: baseFee },
+        { item: `${duration}s video processing`, amount: duration * perSecond },
+        { item: 'HD Quality', amount: 0 }
+      ];
+      serviceName = 'HappyHorse Video';
     }
-    
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json',
-      }
+
+    // Apply 10x markup
+    const markupMultiplier = 10;
+    const finalPrice = baseCost * markupMultiplier;
+    const markupAmount = baseCost * (markupMultiplier - 1);
+
+    const priceData = {
+      serviceType: serviceType || 'replicate',
+      serviceName: serviceName,
+      baseCost: baseCost,
+      markupMultiplier: markupMultiplier,
+      markupAmount: markupAmount,
+      finalPrice: finalPrice,
+      breakdown: breakdown,
+      currency: 'KES'
+    };
+
+    console.log('✅ Price calculated:', priceData);
+
+    res.json({
+      success: true,
+      price: priceData,
+      formatted: `KES ${finalPrice}`
     });
-    
-    if (!response.ok) {
-      console.error('❌ Paystack verification failed:', response.status);
-      return false;
-    }
-    
-    const data = await response.json();
-    console.log('📦 Paystack verification:', data.status, data.data?.status);
-    return data.status && data.data?.status === 'success';
+
   } catch (error) {
-    console.error('❌ Payment verification error:', error.message);
-    return false;
+    console.error('❌ Price calculation error:', error.message);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
   }
-}
+});
 
 // ============================================
 // GENERATE VIDEO WITH REPLICATE - HAPPYHORSE
@@ -112,32 +148,20 @@ async function verifyPayment(reference) {
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference } = req.body;
-    
-    // Skip payment check if disabled or in test mode
-    if (ENFORCE_PAYMENT && !paymentReference) {
-      console.log('❌ Payment required - No payment reference provided');
-      return res.status(402).json({
-        success: false,
-        error: 'Payment required. Please complete payment first.',
-        requiresPayment: true
-      });
-    }
-    
+
     console.log('🎬 Generating video with Replicate HappyHorse...');
     console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
     console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
-    
+
     const token = process.env.REPLICATE_API_TOKEN;
-    
+
     if (!token) {
       throw new Error('REPLICATE_API_TOKEN not set in .env file');
     }
 
     console.log('🔑 Using Replicate token:', token.substring(0, 10) + '...');
 
-    // Try HappyHorse model (cheaper and faster)
-    console.log('🚀 Creating prediction with HappyHorse...');
-    
+    // Create prediction with HappyHorse
     const response = await fetch('https://api.replicate.com/v1/predictions', {
       method: 'POST',
       headers: {
@@ -162,7 +186,7 @@ app.post('/api/generate-video', async (req, res) => {
       const errorData = await response.text();
       console.error('❌ Replicate API Error:', response.status);
       console.error('❌ Error details:', errorData);
-      
+
       if (response.status === 402) {
         throw new Error('Insufficient Replicate credits. Please add credits at https://replicate.com/account/billing');
       }
@@ -179,20 +203,20 @@ app.post('/api/generate-video', async (req, res) => {
     const maxAttempts = 60;
 
     console.log('⏳ Polling for completion...');
-    
+
     while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < maxAttempts) {
       await new Promise(resolve => setTimeout(resolve, 2000));
-      
+
       const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
         headers: {
           'Authorization': `Token ${token}`,
         }
       });
-      
+
       if (!pollResponse.ok) {
         throw new Error(`Polling failed: ${pollResponse.status}`);
       }
-      
+
       prediction = await pollResponse.json();
       attempts++;
       console.log(`⏳ Polling attempt ${attempts}: Status = ${prediction.status}`);
@@ -225,72 +249,6 @@ app.post('/api/generate-video', async (req, res) => {
 });
 
 // ============================================
-// FEE CALCULATION
-// ============================================
-app.post('/api/calculate-price', (req, res) => {
-  try {
-    const { serviceType, options } = req.body;
-    
-    let baseCost = 0;
-    let breakdown = [];
-    
-    // Simple pricing for HappyHorse
-    const duration = options?.duration || 5;
-    baseCost = 10 + (duration * 2); // 10 KES base + 2 KES per second
-    const markupMultiplier = 10;
-    const finalPrice = baseCost * markupMultiplier;
-    
-    breakdown = [
-      { item: 'AI Video Generation', amount: baseCost },
-      { item: `${duration}s video processing`, amount: duration * 2 },
-      { item: 'HD Quality', amount: 0 }
-    ];
-    
-    res.json({
-      success: true,
-      price: {
-        serviceType: serviceType || 'replicate',
-        serviceName: 'HappyHorse Video',
-        baseCost: baseCost,
-        markupMultiplier: markupMultiplier,
-        markupAmount: baseCost * (markupMultiplier - 1),
-        finalPrice: finalPrice,
-        breakdown: breakdown,
-        currency: 'KES'
-      },
-      formatted: `KES ${finalPrice}`
-    });
-    
-  } catch (error) {
-    console.error('❌ Price calculation error:', error.message);
-    res.status(400).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// ============================================
-// GET SERVICE COSTS
-// ============================================
-app.get('/api/service-costs', (req, res) => {
-  res.json({
-    success: true,
-    services: {
-      replicate: {
-        id: 'replicate',
-        name: 'HappyHorse Video',
-        baseCost: 10,
-        markupMultiplier: 10,
-        estimatedPrice: 100
-      }
-    },
-    markupMultiplier: 10,
-    currency: 'KES'
-  });
-});
-
-// ============================================
 // VIDEO TRANSLATION ENDPOINTS
 // ============================================
 const FREE_TRANSLATION_LANGUAGES = {
@@ -318,12 +276,12 @@ app.post('/api/upload-video', upload.single('video'), (req, res) => {
     if (!req.file) {
       throw new Error('No video file uploaded');
     }
-    
+
     const videoPath = req.file.path;
     const videoUrl = `/uploads/${req.file.filename}`;
-    
+
     console.log('✅ Video uploaded:', videoPath);
-    
+
     res.json({
       success: true,
       videoPath: videoPath,
@@ -343,24 +301,24 @@ app.post('/api/upload-video', upload.single('video'), (req, res) => {
 app.post('/api/translate-text', async (req, res) => {
   try {
     const { text, targetLanguage, sourceLanguage } = req.body;
-    
+
     if (!text) {
       throw new Error('Text is required');
     }
-    
+
     if (!targetLanguage || !FREE_TRANSLATION_LANGUAGES[targetLanguage]) {
       throw new Error(`Target language not supported.`);
     }
-    
+
     console.log('🌐 Translating text...');
     console.log('🎯 Target:', targetLanguage);
-    
+
     // Try LibreTranslate
     const servers = [
       'https://libretranslate.com',
       'https://translate.argosopentech.com'
     ];
-    
+
     for (const server of servers) {
       try {
         const response = await fetch(`${server}/translate`, {
@@ -373,7 +331,7 @@ app.post('/api/translate-text', async (req, res) => {
             format: 'text'
           })
         });
-        
+
         if (response.ok) {
           const data = await response.json();
           if (data.translatedText) {
@@ -391,7 +349,7 @@ app.post('/api/translate-text', async (req, res) => {
         continue;
       }
     }
-    
+
     // Fallback: Simulated translation
     res.json({
       success: true,
@@ -400,7 +358,7 @@ app.post('/api/translate-text', async (req, res) => {
       targetLanguage: targetLanguage,
       usedModel: 'Simulated Translation (Fallback)'
     });
-    
+
   } catch (error) {
     console.error('❌ Translation error:', error.message);
     res.status(500).json({
@@ -414,16 +372,16 @@ app.post('/api/translate-text', async (req, res) => {
 // TEST & HEALTH ENDPOINTS
 // ============================================
 app.get('/api/test', (req, res) => {
-  res.json({ 
+  res.json({
     status: 'Server is running!',
     environment: isProduction ? 'production' : 'development',
-    paymentEnforced: ENFORCE_PAYMENT ? '✅ Yes' : '❌ No',
+    testMode: TEST_MODE ? '✅ Enabled' : '❌ Disabled',
     endpoints: [
       '/api/test',
       '/api/health',
       '/api/generate-video (Replicate - HappyHorse)',
       '/api/calculate-price',
-      '/api/service-costs'
+      '/api/free-languages'
     ]
   });
 });
@@ -434,8 +392,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: isProduction ? 'production' : 'development',
     uptime: process.uptime(),
-    replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
-    paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'
+    replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'
   });
 });
 
@@ -477,7 +434,7 @@ if (!fs.existsSync(uploadsDir)) {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
-  console.log(`💳 Payment Enforcement: ${ENFORCE_PAYMENT ? '✅ Enabled' : '❌ Disabled (Testing)'}`);
+  console.log(`🧪 Test Mode: ${TEST_MODE ? '✅ Enabled' : '❌ Disabled'}`);
   console.log(`🔑 Replicate Token: ${process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
 });

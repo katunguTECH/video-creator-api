@@ -15,15 +15,16 @@ function CreateVideo() {
   const [caption, setCaption] = useState('');
   const [activeTab, setActiveTab] = useState('text');
   const [duration, setDuration] = useState(5);
-  
+
   // Payment states
   const [email, setEmail] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  
+
   // Price states
   const [priceData, setPriceData] = useState(null);
   const [isLoadingPrice, setIsLoadingPrice] = useState(false);
   const [amount, setAmount] = useState(0);
+  const [priceError, setPriceError] = useState(null);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'image/*': [] },
@@ -39,15 +40,18 @@ function CreateVideo() {
   const calculatePrice = async () => {
     try {
       setIsLoadingPrice(true);
-      
+      setPriceError(null);
+
       let serviceType = 'replicate';
       let options = { duration: duration };
-      
+
       if (activeTab === 'photos') {
         serviceType = 'photos_to_video';
         options = { photoCount: photos.length };
       }
-      
+
+      console.log('💰 Calculating price with:', { serviceType, options });
+
       const response = await fetch(`${API_URL}/api/calculate-price`, {
         method: 'POST',
         headers: {
@@ -58,16 +62,37 @@ function CreateVideo() {
           options: options
         })
       });
-      
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
       const data = await response.json();
-      
+      console.log('📦 Price response:', data);
+
       if (data.success) {
         setPriceData(data.price);
         setAmount(data.price.finalPrice);
+      } else {
+        throw new Error(data.error || 'Price calculation failed');
       }
     } catch (error) {
       console.error('❌ Price calculation error:', error);
-      setAmount(100);
+      setPriceError(error.message);
+      // Fallback pricing
+      const fallbackPrice = 100;
+      setAmount(fallbackPrice);
+      setPriceData({
+        finalPrice: fallbackPrice,
+        baseCost: 10,
+        markupMultiplier: 10,
+        markupAmount: 90,
+        breakdown: [
+          { item: 'AI Video Generation', amount: 10 },
+          { item: 'Processing fee', amount: 0 }
+        ],
+        currency: 'KES'
+      });
     } finally {
       setIsLoadingPrice(false);
     }
@@ -83,28 +108,36 @@ function CreateVideo() {
       alert('Please enter a text prompt!');
       return;
     }
-    
+
     if (activeTab === 'photos' && photos.length === 0) {
       alert('Please upload at least one photo!');
       return;
     }
-    
+
     if (!email) {
       alert('Please enter your email address');
       return;
     }
-    
+
+    console.log('🚀 Creating video with:', {
+      prompt: prompt.substring(0, 50) + '...',
+      photos: photos.length,
+      duration,
+      amount,
+      email
+    });
+
     // In test mode, skip payment
     if (TEST_MODE) {
       console.log('🧪 Test mode: Skipping payment');
       navigate('/preview', {
-        state: { 
-          prompt, 
-          photos: photos.map(p => p.preview), 
-          music, 
-          caption, 
+        state: {
+          prompt,
+          photos: photos.map(p => p.preview),
+          music,
+          caption,
           activeTab,
-          paymentReference: 'test_ref_123',
+          paymentReference: 'test_ref_' + Date.now(),
           amount: amount || 100,
           duration: duration,
           email: email
@@ -112,17 +145,16 @@ function CreateVideo() {
       });
       return;
     }
-    
+
     // Normal payment flow would go here
-    // For now, redirect with test reference
     navigate('/preview', {
-      state: { 
-        prompt, 
-        photos: photos.map(p => p.preview), 
-        music, 
-        caption, 
+      state: {
+        prompt,
+        photos: photos.map(p => p.preview),
+        music,
+        caption,
         activeTab,
-        paymentReference: 'test_ref_123',
+        paymentReference: 'test_ref_' + Date.now(),
         amount: amount || 100,
         duration: duration,
         email: email
@@ -283,7 +315,7 @@ function CreateVideo() {
               </ul>
             </div>
           </div>
-          
+
           {priceData && priceData.breakdown && (
             <div className="mt-3 pt-3 border-t border-white/10">
               <p className="text-xs font-semibold text-gray-400">📊 Price Breakdown</p>
@@ -301,6 +333,12 @@ function CreateVideo() {
               </div>
             </div>
           )}
+
+          {priceError && (
+            <div className="mt-2 text-xs text-red-400">
+              ⚠️ Price calculation error: {priceError}
+            </div>
+          )}
         </div>
 
         {/* Create Button */}
@@ -311,7 +349,7 @@ function CreateVideo() {
             isProcessing ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
           }`}
         >
-          {isProcessing ? '⏳ Processing...' : TEST_MODE ? '🧪 Generate Video (Test)' : `💰 Pay KES ${amount?.toFixed(2) || '...'} & Generate 🚀`}
+          {isProcessing ? '⏳ Processing...' : TEST_MODE ? '🧪 Generate Video (Test)' : `💰 Pay KES ${amount?.toFixed(2) || '0.00'} & Generate 🚀`}
         </button>
 
         {TEST_MODE && (

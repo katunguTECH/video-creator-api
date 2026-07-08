@@ -6,29 +6,29 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 function Preview() {
   const location = useLocation();
   const navigate = useNavigate();
-  
+
   const [isGenerating, setIsGenerating] = useState(true);
   const [progress, setProgress] = useState(0);
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState(null);
   const [statusMessage, setStatusMessage] = useState('Initializing AI...');
   const [usedModel, setUsedModel] = useState('');
-  
+
   // Translation states
   const [translatedText, setTranslatedText] = useState('');
   const [targetLanguage, setTargetLanguage] = useState('sw');
   const [isTranslating, setIsTranslating] = useState(false);
 
   // Get all state from navigation
-  const { 
-    prompt, 
-    photos, 
-    caption, 
-    activeTab, 
-    paymentReference, 
-    amount, 
-    duration, 
-    email 
+  const {
+    prompt,
+    photos,
+    caption,
+    activeTab,
+    paymentReference,
+    amount,
+    duration,
+    email
   } = location.state || {};
 
   const handleDownload = () => {
@@ -61,11 +61,11 @@ function Preview() {
       alert('No text to translate');
       return;
     }
-    
+
     setIsTranslating(true);
     try {
       setStatusMessage('🌐 Translating...');
-      
+
       const response = await fetch(`${API_URL}/api/translate-text`, {
         method: 'POST',
         headers: {
@@ -77,9 +77,9 @@ function Preview() {
           sourceLanguage: 'en'
         })
       });
-      
+
       const data = await response.json();
-      
+
       if (data.success) {
         setTranslatedText(data.translatedText);
         setStatusMessage(`✅ Translated to ${data.targetLanguage}`);
@@ -100,7 +100,7 @@ function Preview() {
     canvas.width = 640;
     canvas.height = 360;
     const ctx = canvas.getContext('2d');
-    
+
     // Professional gradient background
     const gradient = ctx.createLinearGradient(0, 0, 640, 360);
     gradient.addColorStop(0, '#1a1a2e');
@@ -108,7 +108,7 @@ function Preview() {
     gradient.addColorStop(1, '#0f3460');
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, 640, 360);
-    
+
     // Decorative circles
     for (let i = 0; i < 5; i++) {
       ctx.beginPath();
@@ -116,7 +116,7 @@ function Preview() {
       ctx.fillStyle = `rgba(255, 255, 255, ${0.03 + i * 0.02})`;
       ctx.fill();
     }
-    
+
     // Title
     ctx.fillStyle = 'white';
     ctx.font = 'bold 28px Arial';
@@ -124,7 +124,7 @@ function Preview() {
     ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(0,0,0,0.5)';
     ctx.shadowBlur = 10;
-    
+
     // Split long prompt into lines
     const words = prompt ? prompt.split(' ') : ['No prompt provided'];
     let lines = [];
@@ -138,109 +138,67 @@ function Preview() {
       }
     }
     if (currentLine) lines.push(currentLine.trim());
-    
+
     // Display lines
     const lineHeight = 35;
     const startY = 180 - ((lines.length - 1) * lineHeight) / 2;
     lines.forEach((line, index) => {
       ctx.fillText(line, 320, startY + index * lineHeight);
     });
-    
+
     // Add "AI Generated" badge
     ctx.shadowBlur = 0;
     ctx.fillStyle = 'rgba(255,255,255,0.2)';
     ctx.font = '12px Arial';
     ctx.fillText('AI Generated Preview', 320, 330);
-    
+
     // Add payment reference if exists
     if (paymentReference) {
       ctx.fillStyle = 'rgba(255,255,255,0.1)';
       ctx.font = '10px Arial';
       ctx.fillText(`Payment: ${paymentReference.substring(0, 10)}...`, 320, 345);
     }
-    
+
     return canvas.toDataURL('image/png');
   }, [prompt, paymentReference]);
 
   const generateVideo = useCallback(async () => {
     try {
-      // Check if payment reference exists
-      if (!paymentReference) {
-        setError('❌ Payment required. Please go back and complete payment first.');
-        setIsGenerating(false);
-        setStatusMessage('❌ Payment Required');
-        return;
-      }
-
       setStatusMessage('🎬 Generating your video with AI...');
       console.log('📝 Prompt:', prompt);
-      console.log('💳 Payment Reference:', paymentReference);
+      console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
       console.log('💰 Amount Paid: KES', amount);
 
-      // Try Replicate API with payment reference
-      setStatusMessage('🤖 Generating with Replicate AI...');
-      
+      // Try Replicate API
+      setStatusMessage('🤖 Generating with Replicate HappyHorse...');
+
       const response = await fetch(`${API_URL}/api/generate-video`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ 
+        body: JSON.stringify({
           prompt: prompt,
-          paymentReference: paymentReference
+          paymentReference: paymentReference || 'test_mode'
         })
       });
 
       const data = await response.json();
       console.log('📦 API Response:', data);
 
-      // Handle payment required response
-      if (data.requiresPayment || data.error?.includes('Payment required')) {
-        setError('❌ Payment required. Please go back and complete payment.');
-        setIsGenerating(false);
-        return;
-      }
-
       if (data.success && data.videoUrl) {
         setVideoUrl(data.videoUrl);
-        setUsedModel(data.usedModel || 'Replicate');
+        setUsedModel(data.usedModel || 'HappyHorse (Replicate)');
         setProgress(100);
         setIsGenerating(false);
         setStatusMessage(`✅ Video generated successfully! 🎉`);
         return;
       }
 
-      // If Replicate fails, try Dreamina
-      setStatusMessage('🔄 Trying Dreamina-Seedance...');
-      const dreaminaResponse = await fetch(`${API_URL}/api/generate-dreamina`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ 
-          prompt: prompt,
-          duration: duration || 5,
-          resolution: '720p',
-          paymentReference: paymentReference
-        })
-      });
-
-      const dreaminaData = await dreaminaResponse.json();
-      console.log('📦 Dreamina Response:', dreaminaData);
-
-      if (dreaminaData.success && dreaminaData.videoUrl) {
-        setVideoUrl(dreaminaData.videoUrl);
-        setUsedModel('Dreamina-Seedance-2.0');
-        setProgress(100);
-        setIsGenerating(false);
-        setStatusMessage('✅ Video generated with Dreamina! 🎉');
-        return;
-      }
-
-      // If all APIs fail, create a fallback preview
+      // If API fails, create fallback
       console.log('🔄 Creating fallback preview...');
       setStatusMessage('🎨 Creating preview...');
-      
+
       const fallbackDataUrl = createFallbackVideo();
       setVideoUrl(fallbackDataUrl);
       setUsedModel('Preview (Fallback)');
@@ -250,14 +208,7 @@ function Preview() {
 
     } catch (err) {
       console.error('❌ Error:', err);
-      
-      // Handle payment errors
-      if (err.message.includes('Payment required')) {
-        setError('❌ Payment required. Please go back and complete payment.');
-      } else {
-        setError(`❌ ${err.message}`);
-      }
-      
+
       // Create fallback preview on error
       try {
         const fallbackDataUrl = createFallbackVideo();
@@ -267,12 +218,12 @@ function Preview() {
         setIsGenerating(false);
         setStatusMessage('✅ Preview generated (Fallback)');
       } catch (fallbackError) {
-        setError(`❌ ${err.message}\n\nPlease check:\n1. Backend is running (node server.js)\n2. Add credits to Replicate\n3. Check console for details`);
+        setError(`❌ ${err.message}\n\nPlease check:\n1. Backend is running\n2. Add credits to Replicate\n3. Check console for details`);
         setIsGenerating(false);
         setStatusMessage('❌ Generation failed');
       }
     }
-  }, [prompt, paymentReference, duration, amount, createFallbackVideo]);
+  }, [prompt, paymentReference, amount, createFallbackVideo]);
 
   useEffect(() => {
     if (!prompt && (!photos || photos.length === 0)) {
@@ -304,18 +255,18 @@ function Preview() {
             <h2 className="text-3xl font-bold mb-2">Generating Your Video</h2>
             <p className="text-gray-300">{statusMessage}</p>
             {paymentReference && (
-              <p className="text-xs text-green-400 mt-2">✅ Payment verified: {paymentReference.substring(0, 10)}...</p>
+              <p className="text-xs text-green-400 mt-2">✅ Payment: {paymentReference.substring(0, 10)}...</p>
             )}
           </div>
-          
+
           <div className="w-full bg-white/10 rounded-full h-3 mb-4 overflow-hidden">
-            <div 
+            <div
               className="bg-gradient-to-r from-pink-500 to-purple-500 h-3 transition-all duration-500 ease-out rounded-full"
               style={{ width: `${Math.min(progress, 100)}%` }}
             ></div>
           </div>
           <p className="text-gray-400 text-sm">{Math.min(progress, 100)}% Complete</p>
-          
+
           <div className="mt-8 flex justify-center space-x-3">
             <div className="w-3 h-3 bg-pink-500 rounded-full animate-bounce" style={{ animationDelay: '0s' }}></div>
             <div className="w-3 h-3 bg-purple-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
@@ -344,14 +295,6 @@ function Preview() {
                 {error}
               </pre>
             </div>
-            {error.includes('Payment required') && (
-              <button
-                onClick={() => navigate('/create')}
-                className="bg-yellow-500 hover:bg-yellow-600 px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105 mb-3"
-              >
-                💳 Go Back to Payment
-              </button>
-            )}
             <button
               onClick={() => navigate('/create')}
               className="bg-pink-500 hover:bg-pink-600 px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105"
@@ -368,7 +311,7 @@ function Preview() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
       <div className="max-w-4xl mx-auto">
-        
+
         {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div>
@@ -498,9 +441,9 @@ function Preview() {
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-2">Photos ({photos.length})</h3>
             <div className="flex gap-2 overflow-x-auto pb-2">
               {photos.slice(0, 6).map((photo, index) => (
-                <img 
-                  key={index} 
-                  src={photo} 
+                <img
+                  key={index}
+                  src={photo}
                   alt={`Photo ${index + 1}`}
                   className="w-20 h-20 object-cover rounded-lg flex-shrink-0 border-2 border-white/20"
                 />
