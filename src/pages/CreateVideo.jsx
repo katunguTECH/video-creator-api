@@ -5,6 +5,11 @@ import { PaystackButton } from 'react-paystack';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
+// Debug: Log environment variables
+console.log('🔑 Environment Variables Check:');
+console.log('REACT_APP_PAYSTACK_PUBLIC_KEY:', process.env.REACT_APP_PAYSTACK_PUBLIC_KEY ? '✅ Set' : '❌ Missing');
+console.log('REACT_APP_API_URL:', process.env.REACT_APP_API_URL ? '✅ Set' : '❌ Missing');
+
 function CreateVideo() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
