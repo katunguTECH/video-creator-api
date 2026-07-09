@@ -175,8 +175,9 @@ function CreateVideo() {
 
   const paystackProps = {
     email: email,
-    amount: Math.round(amount * 100),
+    amount: Math.round(amount * 100), // Convert to kobo
     publicKey: publicKey,
+    currency: 'KES', // Explicitly set currency to KES
     text: `Pay KES ${amount?.toFixed(2) || '0.00'}`,
     onSuccess: handlePaymentSuccess,
     onClose: handlePaymentClose,
