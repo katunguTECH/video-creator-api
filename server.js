@@ -9,17 +9,71 @@ const fetch = require('node-fetch');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
 
 // Test mode - set to false for production
-const TEST_MODE = true;
+const TEST_MODE = false; // Set to false to enforce payments
 
 console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🧪 Test Mode:', TEST_MODE ? '✅ Enabled' : '❌ Disabled');
 console.log('🔑 Replicate Token:', process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set');
+console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
+
+// ============================================
+// PAYMENT VERIFICATION FUNCTION
+// ============================================
+
+async function verifyPayment(reference) {
+  try {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    
+    // Check if we're using live keys
+    const isLive = secretKey && secretKey.startsWith('sk_live_');
+    
+    console.log('🔍 Verifying payment:', {
+      reference,
+      isLive: isLive ? 'LIVE' : 'Test'
+    });
+
+    if (!secretKey) {
+      console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
+      return reference === 'test_ref_123' || reference.startsWith('test_');
+    }
+
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json',
+      }
+    });
+
+    if (!response.ok) {
+      console.error('❌ Paystack verification failed:', response.status);
+      return false;
+    }
+
+    const data = await response.json();
+    console.log('📦 Paystack verification:', data.status, data.data?.status);
+    
+    const isSuccessful = data.status && data.data?.status === 'success';
+    
+    if (isSuccessful) {
+      console.log('✅ Payment verified successfully for reference:', reference);
+    } else {
+      console.log('❌ Payment verification failed for reference:', reference);
+    }
+    
+    return isSuccessful;
+  } catch (error) {
+    console.error('❌ Payment verification error:', error.message);
+    return false;
+  }
+}
 
 // ============================================
 // MIDDLEWARE
@@ -143,11 +197,147 @@ app.post('/api/calculate-price', (req, res) => {
 });
 
 // ============================================
+// PAYMENT ENDPOINTS
+// ============================================
+
+// Verify payment with Paystack
+app.post('/api/verify-payment', async (req, res) => {
+  try {
+    const { reference, email, amount } = req.body;
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+
+    // Check if we're using live keys
+    const isLive = secretKey && secretKey.startsWith('sk_live_');
+
+    console.log('🔑 Payment verification:', {
+      reference,
+      email,
+      amount,
+      isLive: isLive ? 'LIVE' : 'Test'
+    });
+
+    if (!secretKey) {
+      console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
+      res.json({
+        success: true,
+        message: 'Test mode: Payment verified',
+        data: { reference }
+      });
+      return;
+    }
+
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json',
+      }
+    });
+
+    const data = await response.json();
+    console.log('📦 Paystack verification response:', data);
+
+    if (data.status && data.data.status === 'success') {
+      console.log(`✅ Payment successful for ${email}: KES ${amount}`);
+
+      res.json({
+        success: true,
+        data: data.data,
+        message: 'Payment verified successfully'
+      });
+    } else {
+      res.json({
+        success: false,
+        error: data.message || 'Payment verification failed'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Payment verification error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Paystack Webhook endpoint
+app.post('/api/webhook/paystack', (req, res) => {
+  try {
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const payload = req.body;
+
+    console.log('📦 Webhook received');
+
+    if (!secret) {
+      console.log('⚠️ Webhook received but PAYSTACK_SECRET_KEY not set. Accepting in test mode.');
+      res.sendStatus(200);
+      return;
+    }
+
+    // Verify signature for security
+    const hash = crypto
+      .createHmac('sha512', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+
+    if (hash !== req.headers['x-paystack-signature']) {
+      console.error('❌ Invalid webhook signature');
+      return res.status(401).send('Invalid signature');
+    }
+
+    const event = payload;
+
+    if (event.event === 'charge.success') {
+      const transaction = event.data;
+      console.log(`✅ Payment successful!`);
+      console.log(`   Reference: ${transaction.reference}`);
+      console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
+      console.log(`   Customer: ${transaction.customer.email}`);
+      
+      res.sendStatus(200);
+    } else if (event.event === 'charge.failed') {
+      console.log(`❌ Payment failed for reference: ${event.data.reference}`);
+      res.sendStatus(200);
+    } else {
+      console.log(`⚡ Event received: ${event.event}`);
+      res.sendStatus(200);
+    }
+  } catch (error) {
+    console.error('❌ Webhook error:', error.message);
+    res.status(500).send('Webhook processing failed');
+  }
+});
+
+// ============================================
 // GENERATE VIDEO WITH REPLICATE - HAPPYHORSE
 // ============================================
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference } = req.body;
+
+    // Check for payment in production mode
+    if (!TEST_MODE && !paymentReference) {
+      console.log('❌ Payment required - No payment reference provided');
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required. Please complete payment first.',
+        requiresPayment: true
+      });
+    }
+
+    // Verify payment reference is valid (skip in test mode)
+    if (!TEST_MODE && paymentReference) {
+      const isValid = await verifyPayment(paymentReference);
+      if (!isValid) {
+        console.log('❌ Invalid or expired payment:', paymentReference);
+        return res.status(402).json({
+          success: false,
+          error: 'Invalid or expired payment. Please make a new payment.',
+          requiresPayment: true
+        });
+      }
+      console.log('✅ Payment verified:', paymentReference);
+    }
 
     console.log('🎬 Generating video with Replicate HappyHorse...');
     console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
@@ -376,12 +566,15 @@ app.get('/api/test', (req, res) => {
     status: 'Server is running!',
     environment: isProduction ? 'production' : 'development',
     testMode: TEST_MODE ? '✅ Enabled' : '❌ Disabled',
+    paymentEnforced: !TEST_MODE ? '✅ Yes' : '❌ No',
     endpoints: [
       '/api/test',
       '/api/health',
       '/api/generate-video (Replicate - HappyHorse)',
       '/api/calculate-price',
-      '/api/free-languages'
+      '/api/free-languages',
+      '/api/verify-payment',
+      '/api/webhook/paystack'
     ]
   });
 });
@@ -392,18 +585,47 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: isProduction ? 'production' : 'development',
     uptime: process.uptime(),
-    replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'
+    testMode: TEST_MODE ? '✅ Enabled' : '❌ Disabled',
+    replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
+    paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'
   });
 });
 
 // ============================================
-// SERVE FRONTEND IN PRODUCTION
+// ROOT ENDPOINT - API INFO
 // ============================================
-if (isProduction) {
-  app.use(express.static(path.join(__dirname, 'build')));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(__dirname, 'build', 'index.html'));
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Video Creator API',
+    version: '1.0.0',
+    status: 'running',
+    environment: isProduction ? 'production' : 'development',
+    testMode: TEST_MODE ? 'enabled' : 'disabled',
+    endpoints: [
+      { path: '/api/test', method: 'GET', description: 'Test endpoint' },
+      { path: '/api/health', method: 'GET', description: 'Health check' },
+      { path: '/api/generate-video', method: 'POST', description: 'Generate video with Replicate' },
+      { path: '/api/calculate-price', method: 'POST', description: 'Calculate video price' },
+      { path: '/api/free-languages', method: 'GET', description: 'Get supported languages' },
+      { path: '/api/verify-payment', method: 'POST', description: 'Verify payment' },
+      { path: '/api/webhook/paystack', method: 'POST', description: 'Paystack webhook' }
+    ],
+    docs: 'https://github.com/katunguTECH/video-creator-api'
   });
+});
+
+// ============================================
+// SERVE FRONTEND IN PRODUCTION (Conditional)
+// ============================================
+const buildPath = path.join(__dirname, 'build');
+if (isProduction && fs.existsSync(buildPath)) {
+  console.log('📁 Serving frontend from build folder');
+  app.use(express.static(buildPath));
+  app.get('*', (req, res) => {
+    res.sendFile(path.join(buildPath, 'index.html'));
+  });
+} else {
+  console.log('ℹ️ Build folder not found - API only mode');
 }
 
 // ============================================
@@ -411,7 +633,8 @@ if (isProduction) {
 // ============================================
 app.use((req, res) => {
   res.status(404).json({
-    error: 'Endpoint not found'
+    error: 'Endpoint not found',
+    message: 'Check /api/test for available endpoints'
   });
 });
 
@@ -436,5 +659,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`🧪 Test Mode: ${TEST_MODE ? '✅ Enabled' : '❌ Disabled'}`);
   console.log(`🔑 Replicate Token: ${process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'}`);
+  console.log(`🔑 Paystack Secret: ${process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
+  console.log(`📁 Build folder exists: ${fs.existsSync(path.join(__dirname, 'build')) ? '✅ Yes' : '❌ No'}`);
 });
