@@ -18,7 +18,6 @@ function CreateVideo() {
   const [email, setEmail] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
-  const [paymentReference, setPaymentReference] = useState(null);
 
   // Price states
   const [priceData, setPriceData] = useState(null);
@@ -34,6 +33,20 @@ function CreateVideo() {
       );
       setPhotos(prev => [...prev, ...previews]);
     }
+  });
+
+  // Paystack configuration
+  const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+  
+  // Check if we're using live keys
+  const isLive = publicKey && publicKey.startsWith('pk_live_');
+  const hasValidKey = publicKey && publicKey !== 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' && publicKey.startsWith('pk_');
+
+  console.log('🔑 Paystack Key Status:', {
+    exists: !!publicKey,
+    isLive: isLive,
+    isValid: hasValidKey,
+    keyPreview: publicKey ? publicKey.substring(0, 15) + '...' : 'None'
   });
 
   // Calculate price with 10x markup
@@ -104,7 +117,6 @@ function CreateVideo() {
 
   const handlePaymentSuccess = (reference) => {
     console.log('✅ Payment successful!', reference);
-    setPaymentReference(reference);
     setIsProcessing(true);
 
     // Navigate to preview with payment reference
@@ -149,27 +161,16 @@ function CreateVideo() {
     console.log('💳 Opening payment modal for:', {
       email,
       amount,
-      publicKey: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY ? '✅ Set' : '❌ Missing'
+      publicKey: publicKey ? '✅ Set' : '❌ Missing',
+      isLive: isLive
     });
     
     setShowPayment(true);
   };
 
-  // Paystack configuration
-  const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-  
-  // Check if we're using live keys
-  const isLive = publicKey && publicKey.startsWith('pk_live_');
-
-  console.log('🔑 Paystack Key Status:', {
-    exists: !!publicKey,
-    isLive: isLive,
-    keyPreview: publicKey ? publicKey.substring(0, 15) + '...' : 'None'
-  });
-
   const paystackProps = {
     email: email,
-    amount: Math.round(amount * 100), // Convert to kobo/cents
+    amount: Math.round(amount * 100),
     publicKey: publicKey,
     text: `Pay KES ${amount?.toFixed(2) || '0.00'}`,
     onSuccess: handlePaymentSuccess,
@@ -391,7 +392,7 @@ function CreateVideo() {
             <p className="text-center text-xs text-gray-400 mb-4">
               💳 You'll be redirected to Paystack to complete payment
             </p>
-            {publicKey && publicKey !== 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' && publicKey.startsWith('pk_') ? (
+            {hasValidKey ? (
               <PaystackButton 
                 className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105"
                 {...paystackProps} 
@@ -399,7 +400,9 @@ function CreateVideo() {
             ) : (
               <div className="bg-yellow-500/20 border border-yellow-500 rounded-2xl p-4 text-center">
                 <p className="text-yellow-400">⚠️ Payment keys not configured</p>
-                <p className="text-gray-400 text-sm mt-1">Please set REACT_APP_PAYSTACK_PUBLIC_KEY in environment</p>
+                <p className="text-gray-400 text-sm mt-1">
+                  {!publicKey ? 'Please set REACT_APP_PAYSTACK_PUBLIC_KEY in environment' : 'Invalid key format. Please use a valid Paystack key.'}
+                </p>
                 <button
                   onClick={() => {
                     setShowPayment(false);
@@ -440,11 +443,6 @@ function CreateVideo() {
           <p className="text-xs text-gray-500 mt-1">
             {isLive ? '🔒 Live Mode - Real Payments' : '🧪 Test Mode - Sandbox Environment'}
           </p>
-          {isLive && (
-            <p className="text-xs text-green-400 mt-1">
-              ✅ Live payments are enabled
-            </p>
-          )}
           {!isLive && publicKey && (
             <p className="text-xs text-yellow-400 mt-1">
               ⚠️ Using test mode. Set LIVE key for real payments.
