@@ -5,7 +5,7 @@ import { useDropzone } from 'react-dropzone';
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
 // Set to true to skip payment for testing
-const TEST_MODE = true;
+const TEST_MODE = false;
 
 function CreateVideo() {
   const navigate = useNavigate();
