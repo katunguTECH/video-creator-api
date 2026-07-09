@@ -5,9 +5,6 @@ import { PaystackButton } from 'react-paystack';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-// Set to false to enable real payments
-const TEST_MODE = false;
-
 function CreateVideo() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
@@ -148,25 +145,6 @@ function CreateVideo() {
       return;
     }
 
-    // Check if we're in test mode
-    if (TEST_MODE) {
-      console.log('🧪 Test mode: Skipping payment');
-      navigate('/preview', {
-        state: {
-          prompt,
-          photos: photos.map(p => p.preview),
-          music,
-          caption,
-          activeTab,
-          paymentReference: 'test_ref_' + Date.now(),
-          amount: amount || 100,
-          duration: duration,
-          email: email
-        }
-      });
-      return;
-    }
-
     // Show payment modal
     console.log('💳 Opening payment modal for:', {
       email,
@@ -182,6 +160,12 @@ function CreateVideo() {
   
   // Check if we're using live keys
   const isLive = publicKey && publicKey.startsWith('pk_live_');
+
+  console.log('🔑 Paystack Key Status:', {
+    exists: !!publicKey,
+    isLive: isLive,
+    keyPreview: publicKey ? publicKey.substring(0, 15) + '...' : 'None'
+  });
 
   const paystackProps = {
     email: email,
@@ -217,7 +201,7 @@ function CreateVideo() {
 
         <h2 className="text-3xl font-bold mb-2 text-center">🎬 Create Your Video</h2>
         <p className="text-gray-400 text-center mb-8">
-          {TEST_MODE ? '🧪 Test Mode - No Payment Required' : isLive ? '💳 Live Payments Enabled' : '💳 Test Mode (Paystack Sandbox)'}
+          {isLive ? '💳 Live Payments Enabled' : '🧪 Test Mode (Paystack Sandbox)'}
         </p>
 
         {/* Email Input */}
@@ -390,7 +374,7 @@ function CreateVideo() {
           )}
         </div>
 
-        {/* Payment Button - This now shows the payment modal */}
+        {/* Payment Button */}
         {!showPayment ? (
           <button
             onClick={initiatePayment}
@@ -407,7 +391,7 @@ function CreateVideo() {
             <p className="text-center text-xs text-gray-400 mb-4">
               💳 You'll be redirected to Paystack to complete payment
             </p>
-            {publicKey && publicKey !== 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' ? (
+            {publicKey && publicKey !== 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' && publicKey.startsWith('pk_') ? (
               <PaystackButton 
                 className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105"
                 {...paystackProps} 
@@ -456,6 +440,16 @@ function CreateVideo() {
           <p className="text-xs text-gray-500 mt-1">
             {isLive ? '🔒 Live Mode - Real Payments' : '🧪 Test Mode - Sandbox Environment'}
           </p>
+          {isLive && (
+            <p className="text-xs text-green-400 mt-1">
+              ✅ Live payments are enabled
+            </p>
+          )}
+          {!isLive && publicKey && (
+            <p className="text-xs text-yellow-400 mt-1">
+              ⚠️ Using test mode. Set LIVE key for real payments.
+            </p>
+          )}
         </div>
 
       </div>
