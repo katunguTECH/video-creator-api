@@ -7,6 +7,7 @@ const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 function PhotosToVideo() {
   const navigate = useNavigate();
   const canvasRef = useRef(null);
+  const videoRef = useRef(null);
   
   const [photos, setPhotos] = useState([]);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -15,11 +16,12 @@ function PhotosToVideo() {
   const [videoUrl, setVideoUrl] = useState(null);
   const [error, setError] = useState(null);
   
+  // Video settings
   const [settings, setSettings] = useState({
     duration: 3,
     transition: 'fade',
     music: 'none',
-    caption: '',
+    caption: 'living my best life',
     resolution: '720p',
     aspectRatio: '16:9'
   });
@@ -42,8 +44,13 @@ function PhotosToVideo() {
     }
   });
 
+  // Generate frames from photos
   const generateFrames = () => {
-    const totalFrames = photos.length;
+    if (photos.length === 0) {
+      setError('Please upload at least one photo');
+      return;
+    }
+
     const newFrames = [];
     let loadedCount = 0;
     
@@ -51,20 +58,24 @@ function PhotosToVideo() {
       const canvas = document.createElement('canvas');
       const ctx = canvas.getContext('2d');
       
+      // Set canvas size based on aspect ratio
       const width = settings.aspectRatio === '16:9' ? 640 : 480;
       const height = settings.aspectRatio === '16:9' ? 360 : 640;
       canvas.width = width;
       canvas.height = height;
       
+      // Draw background
       const gradient = ctx.createLinearGradient(0, 0, width, height);
       gradient.addColorStop(0, '#1a1a2e');
       gradient.addColorStop(1, '#16213e');
       ctx.fillStyle = gradient;
       ctx.fillRect(0, 0, width, height);
       
+      // Draw image
       const img = new Image();
       img.src = photo.preview;
       img.onload = () => {
+        // Calculate image placement (cover)
         const imgRatio = img.width / img.height;
         const canvasRatio = width / height;
         let drawWidth, drawHeight, offsetX, offsetY;
@@ -83,17 +94,20 @@ function PhotosToVideo() {
         
         ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
         
+        // Add overlay gradient for text readability
         const overlay = ctx.createLinearGradient(0, height - 80, 0, height);
         overlay.addColorStop(0, 'rgba(0,0,0,0)');
         overlay.addColorStop(1, 'rgba(0,0,0,0.7)');
         ctx.fillStyle = overlay;
         ctx.fillRect(0, height - 80, width, 80);
         
+        // Add photo number
         ctx.fillStyle = 'rgba(255,255,255,0.3)';
         ctx.font = '12px Arial';
         ctx.textAlign = 'right';
         ctx.fillText(`Photo ${index + 1}/${photos.length}`, width - 20, height - 10);
         
+        // Add caption if exists
         if (settings.caption) {
           ctx.fillStyle = 'white';
           ctx.font = 'bold 20px Arial';
@@ -108,12 +122,30 @@ function PhotosToVideo() {
         newFrames[index] = dataUrl;
         loadedCount++;
         
+        // If all frames are generated, update state
         if (loadedCount === photos.length) {
           setFrames(newFrames);
           setVideoUrl(newFrames[0]);
           setProgress(100);
           setIsGenerating(false);
           setStatusMessage('✅ Video generated successfully! 🎉');
+          setIsPlaying(true);
+        }
+      };
+      
+      img.onerror = () => {
+        console.error('Failed to load image:', photo.preview);
+        loadedCount++;
+        // Use a placeholder frame
+        const dataUrl = canvas.toDataURL('image/png');
+        newFrames[index] = dataUrl;
+        if (loadedCount === photos.length) {
+          setFrames(newFrames);
+          setVideoUrl(newFrames[0]);
+          setProgress(100);
+          setIsGenerating(false);
+          setStatusMessage('✅ Video generated successfully! 🎉');
+          setIsPlaying(true);
         }
       };
     });
@@ -130,17 +162,20 @@ function PhotosToVideo() {
     setStatusMessage('🎬 Generating video...');
     setFrames([]);
     setError(null);
+    setIsPlaying(false);
     
+    // Simulate progress
     const progressInterval = setInterval(() => {
       setProgress(prev => {
-        if (prev >= 80) {
+        if (prev >= 90) {
           clearInterval(progressInterval);
-          return 80;
+          return 90;
         }
         return prev + Math.floor(Math.random() * 10) + 5;
       });
     }, 200);
     
+    // Generate frames
     setTimeout(() => {
       generateFrames();
       clearInterval(progressInterval);
@@ -148,8 +183,9 @@ function PhotosToVideo() {
     }, 1000);
   };
 
+  // Auto-play frames
   useEffect(() => {
-    if (frames.length > 0 && isPlaying) {
+    if (frames.length > 1 && isPlaying) {
       const interval = setInterval(() => {
         setCurrentFrame(prev => (prev + 1) % frames.length);
       }, settings.duration * 1000);
@@ -161,15 +197,81 @@ function PhotosToVideo() {
     setIsPlaying(!isPlaying);
   };
 
-  const handleDownload = () => {
+  const handleDownloadFrame = () => {
     if (frames.length > 0) {
       const link = document.createElement('a');
-      link.download = 'photo-video-frame.png';
+      link.download = `frame-${currentFrame + 1}.png`;
       link.href = frames[currentFrame];
       document.body.appendChild(link);
       link.click();
       document.body.removeChild(link);
     }
+  };
+
+  const handleExportVideo = () => {
+    if (frames.length === 0) {
+      alert('Please generate the video first');
+      return;
+    }
+
+    // Create a video from frames using canvas
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    const width = settings.aspectRatio === '16:9' ? 640 : 480;
+    const height = settings.aspectRatio === '16:9' ? 360 : 640;
+    canvas.width = width;
+    canvas.height = height;
+    
+    // Create a video stream
+    const stream = canvas.captureStream(30);
+    const mediaRecorder = new MediaRecorder(stream, {
+      mimeType: 'video/webm;codecs=vp9'
+    });
+    
+    const chunks = [];
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) {
+        chunks.push(e.data);
+      }
+    };
+    
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunks, { type: 'video/webm' });
+      const url = URL.createObjectURL(blob);
+      setVideoBlob(blob);
+      
+      // Download the video
+      const link = document.createElement('a');
+      link.download = 'slideshow-video.webm';
+      link.href = url;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      
+      // Show success message
+      alert('✅ Video exported successfully! Check your downloads folder.');
+    };
+    
+    // Start recording
+    mediaRecorder.start();
+    
+    // Draw frames at intervals
+    let frameIndex = 0;
+    const frameInterval = setInterval(() => {
+      if (frameIndex >= frames.length) {
+        clearInterval(frameInterval);
+        mediaRecorder.stop();
+        return;
+      }
+      
+      const img = new Image();
+      img.src = frames[frameIndex];
+      img.onload = () => {
+        ctx.clearRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+        frameIndex++;
+      };
+    }, settings.duration * 1000);
   };
 
   const removePhoto = (index) => {
@@ -191,6 +293,7 @@ function PhotosToVideo() {
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
       <div className="max-w-4xl mx-auto">
         
+        {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-3xl font-bold">🖼️ Photos to Video</h2>
@@ -204,6 +307,7 @@ function PhotosToVideo() {
           </button>
         </div>
 
+        {/* Upload Area */}
         {photos.length === 0 && (
           <div
             {...getRootProps()}
@@ -220,6 +324,7 @@ function PhotosToVideo() {
           </div>
         )}
 
+        {/* Photo Grid */}
         {photos.length > 0 && (
           <div className="mb-6">
             <div className="flex justify-between items-center mb-3">
@@ -228,7 +333,11 @@ function PhotosToVideo() {
               </h3>
               <div className="flex gap-2">
                 <button
-                  onClick={() => setPhotos([])}
+                  onClick={() => {
+                    setPhotos([]);
+                    setFrames([]);
+                    setVideoUrl(null);
+                  }}
                   className="bg-red-500/20 hover:bg-red-500/30 px-3 py-1 rounded-lg text-sm text-red-300 transition-all"
                 >
                   Clear All
@@ -284,6 +393,7 @@ function PhotosToVideo() {
           </div>
         )}
 
+        {/* Video Settings */}
         {photos.length > 0 && (
           <div className="bg-white/5 rounded-2xl p-6 mb-6">
             <h3 className="font-bold text-lg mb-4">🎛️ Video Settings</h3>
@@ -352,6 +462,7 @@ function PhotosToVideo() {
           </div>
         )}
 
+        {/* Progress & Status */}
         {isGenerating && (
           <div className="bg-white/5 rounded-2xl p-6 mb-6">
             <p className="text-gray-300 mb-3">{statusMessage}</p>
@@ -365,6 +476,7 @@ function PhotosToVideo() {
           </div>
         )}
 
+        {/* Video Preview */}
         {frames.length > 0 && (
           <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-green-500/30">
             <h3 className="font-bold text-green-400 mb-2">🎬 Video Preview</h3>
@@ -381,20 +493,18 @@ function PhotosToVideo() {
                 onClick={togglePlay}
                 className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 bg-pink-500 hover:bg-pink-600 rounded-full w-16 h-16 flex items-center justify-center transition-all shadow-2xl"
               >
-                <span className="text-3xl">{isPlaying ? '⏸' : '▶'}</span>
+                <span className="text-3xl">{isPlaying && frames.length > 1 ? '⏸' : '▶'}</span>
               </button>
             </div>
-            <div className="mt-3 flex gap-3">
+            <div className="mt-3 flex gap-3 flex-wrap">
               <button
-                onClick={handleDownload}
+                onClick={handleDownloadFrame}
                 className="bg-pink-500 hover:bg-pink-600 px-6 py-2 rounded-full text-sm font-bold transition-all"
               >
                 📥 Download Frame
               </button>
               <button
-                onClick={() => {
-                  alert('Export full video - In production, this would export as MP4');
-                }}
+                onClick={handleExportVideo}
                 className="bg-green-500 hover:bg-green-600 px-6 py-2 rounded-full text-sm font-bold transition-all"
               >
                 📥 Export Video
@@ -403,12 +513,14 @@ function PhotosToVideo() {
           </div>
         )}
 
+        {/* Error */}
         {error && (
           <div className="bg-red-500/20 border border-red-500 rounded-2xl p-4 mb-6">
             <p className="text-red-300">❌ {error}</p>
           </div>
         )}
 
+        {/* Generate Button */}
         {photos.length > 0 && (
           <button
             onClick={handleGenerate}
@@ -421,6 +533,7 @@ function PhotosToVideo() {
           </button>
         )}
 
+        {/* Info */}
         <div className="mt-6 p-4 bg-white/5 rounded-2xl">
           <h4 className="font-semibold mb-2">ℹ️ Features</h4>
           <ul className="text-sm text-gray-400 space-y-1">
@@ -431,6 +544,7 @@ function PhotosToVideo() {
             <li>• Preview and download your video</li>
           </ul>
         </div>
+
       </div>
     </div>
   );
