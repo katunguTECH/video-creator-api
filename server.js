@@ -139,7 +139,17 @@ app.post('/api/calculate-price', (req, res) => {
     let breakdown = [];
     let serviceName = 'HappyHorse Video';
 
-    if (serviceType === 'photos_to_video') {
+    if (serviceType === 'image_to_video') {
+      // Image-to-video pricing (higher cost)
+      const baseFee = 50;
+      const perSecond = 5;
+      baseCost = baseFee + (duration * perSecond);
+      breakdown = [
+        { item: 'AI Image-to-Video Generation', amount: baseFee },
+        { item: `${duration}s video processing`, amount: duration * perSecond }
+      ];
+      serviceName = 'Image-to-Video (Stable Diffusion)';
+    } else if (serviceType === 'photos_to_video') {
       const baseFee = 10;
       const perPhoto = 2;
       baseCost = baseFee + (photoCount * perPhoto);
@@ -149,6 +159,7 @@ app.post('/api/calculate-price', (req, res) => {
       ];
       serviceName = 'Photos to Video';
     } else {
+      // Text to video pricing (HappyHorse)
       const baseFee = 10;
       const perSecond = 2;
       baseCost = baseFee + (duration * perSecond);
@@ -305,7 +316,7 @@ app.post('/api/webhook/paystack', (req, res) => {
 });
 
 // ============================================
-// GENERATE VIDEO WITH REPLICATE - HAPPYHORSE
+// TEXT-TO-VIDEO WITH REPLICATE
 // ============================================
 app.post('/api/generate-video', async (req, res) => {
   try {
@@ -333,7 +344,7 @@ app.post('/api/generate-video', async (req, res) => {
     }
     console.log('✅ Payment verified:', paymentReference);
 
-    console.log('🎬 Generating video with Replicate HappyHorse...');
+    console.log('🎬 Generating text-to-video with Replicate HappyHorse...');
     console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
     console.log('💳 Payment Reference:', paymentReference);
 
@@ -425,6 +436,135 @@ app.post('/api/generate-video', async (req, res) => {
 
   } catch (error) {
     console.error('❌ Error in /api/generate-video:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// IMAGE-TO-VIDEO WITH REPLICATE
+// ============================================
+
+app.post('/api/generate-image-to-video', async (req, res) => {
+  try {
+    const { prompt, imageUrl, paymentReference, duration } = req.body;
+
+    // ENFORCE PAYMENT - Check for payment reference
+    if (!paymentReference) {
+      console.log('❌ Payment required - No payment reference provided');
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required. Please complete payment first.',
+        requiresPayment: true
+      });
+    }
+
+    // Verify payment reference is valid
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      console.log('❌ Invalid or expired payment:', paymentReference);
+      return res.status(402).json({
+        success: false,
+        error: 'Invalid or expired payment. Please make a new payment.',
+        requiresPayment: true
+      });
+    }
+    console.log('✅ Payment verified:', paymentReference);
+
+    console.log('🎬 Generating image-to-video with Replicate...');
+    console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
+    console.log('🖼️ Image URL:', imageUrl);
+
+    const token = process.env.REPLICATE_API_TOKEN;
+
+    if (!token) {
+      throw new Error('REPLICATE_API_TOKEN not set in .env file');
+    }
+
+    console.log('🔑 Using Replicate token:', token.substring(0, 10) + '...');
+
+    // Use Stable Video Diffusion model for image-to-video
+    const response = await fetch('https://api.replicate.com/v1/predictions', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Token ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        version: "stability-ai/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
+        input: {
+          input_image: imageUrl,
+          video_length: "14_frames_with_svd",
+          motion_bucket_id: 127,
+          fps: 6,
+          cond_aug: 0.02,
+          decoding_t: 7,
+          seed: Math.floor(Math.random() * 1000000)
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      console.error('❌ Replicate API Error:', response.status);
+      console.error('❌ Error details:', errorData);
+
+      if (response.status === 402) {
+        throw new Error('Insufficient Replicate credits. Please add credits at https://replicate.com/account/billing');
+      }
+      throw new Error(`Replicate API returned ${response.status}: ${errorData}`);
+    }
+
+    const data = await response.json();
+    console.log('✅ Prediction created:', data.id);
+    console.log('📊 Status:', data.status);
+
+    // Poll for completion
+    let prediction = data;
+    let attempts = 0;
+    const maxAttempts = 60;
+
+    console.log('⏳ Polling for completion...');
+
+    while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < maxAttempts) {
+      await new Promise(resolve => setTimeout(resolve, 2000));
+
+      const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
+        headers: {
+          'Authorization': `Token ${token}`,
+        }
+      });
+
+      if (!pollResponse.ok) {
+        throw new Error(`Polling failed: ${pollResponse.status}`);
+      }
+
+      prediction = await pollResponse.json();
+      attempts++;
+      console.log(`⏳ Polling attempt ${attempts}: Status = ${prediction.status}`);
+    }
+
+    if (prediction.status === 'failed') {
+      throw new Error(prediction.error || 'Prediction failed');
+    }
+
+    if (prediction.status !== 'succeeded') {
+      throw new Error('Timeout waiting for video generation');
+    }
+
+    console.log('✅ Video generated successfully!');
+    console.log('📹 Video URL:', prediction.output);
+
+    res.json({
+      success: true,
+      videoUrl: prediction.output,
+      usedModel: 'Stable Video Diffusion (Image-to-Video)'
+    });
+
+  } catch (error) {
+    console.error('❌ Error in /api/generate-image-to-video:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
@@ -563,7 +703,8 @@ app.get('/api/test', (req, res) => {
     endpoints: [
       '/api/test',
       '/api/health',
-      '/api/generate-video (Replicate - HappyHorse)',
+      '/api/generate-video (Text-to-Video - HappyHorse)',
+      '/api/generate-image-to-video (Image-to-Video - Stable Diffusion)',
       '/api/calculate-price',
       '/api/free-languages',
       '/api/verify-payment',
@@ -597,7 +738,8 @@ app.get('/', (req, res) => {
     endpoints: [
       { path: '/api/test', method: 'GET', description: 'Test endpoint' },
       { path: '/api/health', method: 'GET', description: 'Health check' },
-      { path: '/api/generate-video', method: 'POST', description: 'Generate video with Replicate (Payment Required)' },
+      { path: '/api/generate-video', method: 'POST', description: 'Text-to-Video (Payment Required)' },
+      { path: '/api/generate-image-to-video', method: 'POST', description: 'Image-to-Video (Payment Required)' },
       { path: '/api/calculate-price', method: 'POST', description: 'Calculate video price' },
       { path: '/api/free-languages', method: 'GET', description: 'Get supported languages' },
       { path: '/api/verify-payment', method: 'POST', description: 'Verify payment' },
