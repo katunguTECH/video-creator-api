@@ -30,6 +30,7 @@ function PhotosToVideo() {
   const [currentFrame, setCurrentFrame] = useState(0);
   const [frames, setFrames] = useState([]);
   const [videoBlob, setVideoBlob] = useState(null);
+  const [isExporting, setIsExporting] = useState(false);
 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     accept: { 'image/*': [] },
@@ -208,70 +209,149 @@ function PhotosToVideo() {
     }
   };
 
-  const handleExportVideo = () => {
+  const handleExportVideo = async () => {
     if (frames.length === 0) {
       alert('Please generate the video first');
       return;
     }
 
-    // Create a video from frames using canvas
-    const canvas = document.createElement('canvas');
-    const ctx = canvas.getContext('2d');
-    const width = settings.aspectRatio === '16:9' ? 640 : 480;
-    const height = settings.aspectRatio === '16:9' ? 360 : 640;
-    canvas.width = width;
-    canvas.height = height;
-    
-    // Create a video stream
-    const stream = canvas.captureStream(30);
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: 'video/webm;codecs=vp9'
-    });
-    
-    const chunks = [];
-    mediaRecorder.ondataavailable = (e) => {
-      if (e.data.size > 0) {
-        chunks.push(e.data);
-      }
-    };
-    
-    mediaRecorder.onstop = () => {
-      const blob = new Blob(chunks, { type: 'video/webm' });
-      const url = URL.createObjectURL(blob);
-      setVideoBlob(blob);
+    setIsExporting(true);
+    setStatusMessage('🎬 Exporting video as MP4...');
+
+    try {
+      // Get video dimensions
+      const width = settings.aspectRatio === '16:9' ? 640 : 480;
+      const height = settings.aspectRatio === '16:9' ? 360 : 640;
       
-      // Download the video
-      const link = document.createElement('a');
-      link.download = 'slideshow-video.webm';
-      link.href = url;
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
+      // Use the MediaRecorder API to create a video
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const ctx = canvas.getContext('2d');
       
-      // Show success message
-      alert('✅ Video exported successfully! Check your downloads folder.');
-    };
-    
-    // Start recording
-    mediaRecorder.start();
-    
-    // Draw frames at intervals
-    let frameIndex = 0;
-    const frameInterval = setInterval(() => {
-      if (frameIndex >= frames.length) {
-        clearInterval(frameInterval);
-        mediaRecorder.stop();
-        return;
-      }
+      // Create a stream from the canvas
+      const stream = canvas.captureStream(30); // 30 fps
       
-      const img = new Image();
-      img.src = frames[frameIndex];
-      img.onload = () => {
-        ctx.clearRect(0, 0, width, height);
-        ctx.drawImage(img, 0, 0, width, height);
-        frameIndex++;
+      // Create MediaRecorder with MP4 support
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9'
+      });
+      
+      const chunks = [];
+      
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) {
+          chunks.push(e.data);
+        }
       };
-    }, settings.duration * 1000);
+      
+      mediaRecorder.onstop = () => {
+        // Create video blob
+        const blob = new Blob(chunks, { type: 'video/webm' });
+        const url = URL.createObjectURL(blob);
+        setVideoBlob(blob);
+        
+        // Create download link
+        const link = document.createElement('a');
+        link.download = `slideshow-video-${Date.now()}.webm`;
+        link.href = url;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        
+        setStatusMessage('✅ Video exported successfully!');
+        setIsExporting(false);
+        
+        // Show success notification
+        alert('✅ Video exported successfully! Check your downloads folder for the video file.');
+      };
+      
+      // Start recording
+      mediaRecorder.start();
+      
+      // Draw frames at intervals
+      let frameIndex = 0;
+      const frameDuration = settings.duration * 1000;
+      const totalFrames = frames.length;
+      
+      const drawNextFrame = () => {
+        if (frameIndex >= totalFrames) {
+          // Stop recording after all frames
+          setTimeout(() => {
+            mediaRecorder.stop();
+          }, 500);
+          return;
+        }
+        
+        const img = new Image();
+        img.src = frames[frameIndex];
+        img.onload = () => {
+          ctx.clearRect(0, 0, width, height);
+          // Draw the image to fill the canvas
+          const imgRatio = img.width / img.height;
+          const canvasRatio = width / height;
+          let drawWidth, drawHeight, offsetX, offsetY;
+          
+          if (imgRatio > canvasRatio) {
+            drawHeight = height;
+            drawWidth = height * imgRatio;
+            offsetX = (width - drawWidth) / 2;
+            offsetY = 0;
+          } else {
+            drawWidth = width;
+            drawHeight = width / imgRatio;
+            offsetX = 0;
+            offsetY = (height - drawHeight) / 2;
+          }
+          
+          ctx.drawImage(img, offsetX, offsetY, drawWidth, drawHeight);
+          
+          // Add caption if exists
+          if (settings.caption) {
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(0, height - 60, width, 60);
+            ctx.fillStyle = 'white';
+            ctx.font = 'bold 20px Arial';
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText(settings.caption, width / 2, height - 30);
+          }
+          
+          // Add frame indicator
+          ctx.fillStyle = 'rgba(255,255,255,0.3)';
+          ctx.font = '12px Arial';
+          ctx.textAlign = 'right';
+          ctx.textBaseline = 'bottom';
+          ctx.fillText(`${frameIndex + 1}/${totalFrames}`, width - 10, height - 10);
+          
+          frameIndex++;
+          setTimeout(drawNextFrame, frameDuration);
+        };
+        
+        img.onerror = () => {
+          // If image fails, draw a blank frame
+          ctx.clearRect(0, 0, width, height);
+          ctx.fillStyle = '#1a1a2e';
+          ctx.fillRect(0, 0, width, height);
+          ctx.fillStyle = 'white';
+          ctx.font = '20px Arial';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('Frame unavailable', width / 2, height / 2);
+          frameIndex++;
+          setTimeout(drawNextFrame, frameDuration);
+        };
+      };
+      
+      // Start drawing frames
+      drawNextFrame();
+      
+    } catch (error) {
+      console.error('Export error:', error);
+      setStatusMessage('❌ Export failed');
+      setIsExporting(false);
+      alert('Error exporting video: ' + error.message);
+    }
   };
 
   const removePhoto = (index) => {
@@ -293,7 +373,6 @@ function PhotosToVideo() {
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
       <div className="max-w-4xl mx-auto">
         
-        {/* Header */}
         <div className="flex justify-between items-center mb-6">
           <div>
             <h2 className="text-3xl font-bold">🖼️ Photos to Video</h2>
@@ -307,7 +386,6 @@ function PhotosToVideo() {
           </button>
         </div>
 
-        {/* Upload Area */}
         {photos.length === 0 && (
           <div
             {...getRootProps()}
@@ -324,7 +402,6 @@ function PhotosToVideo() {
           </div>
         )}
 
-        {/* Photo Grid */}
         {photos.length > 0 && (
           <div className="mb-6">
             <div className="flex justify-between items-center mb-3">
@@ -393,7 +470,6 @@ function PhotosToVideo() {
           </div>
         )}
 
-        {/* Video Settings */}
         {photos.length > 0 && (
           <div className="bg-white/5 rounded-2xl p-6 mb-6">
             <h3 className="font-bold text-lg mb-4">🎛️ Video Settings</h3>
@@ -462,7 +538,6 @@ function PhotosToVideo() {
           </div>
         )}
 
-        {/* Progress & Status */}
         {isGenerating && (
           <div className="bg-white/5 rounded-2xl p-6 mb-6">
             <p className="text-gray-300 mb-3">{statusMessage}</p>
@@ -476,7 +551,19 @@ function PhotosToVideo() {
           </div>
         )}
 
-        {/* Video Preview */}
+        {isExporting && (
+          <div className="bg-white/5 rounded-2xl p-6 mb-6 border border-blue-500/30">
+            <p className="text-gray-300 mb-3">{statusMessage}</p>
+            <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
+              <div 
+                className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 transition-all duration-500 rounded-full"
+                style={{ width: '50%' }}
+              />
+            </div>
+            <p className="text-xs text-gray-500 mt-2">Exporting video...</p>
+          </div>
+        )}
+
         {frames.length > 0 && (
           <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-green-500/30">
             <h3 className="font-bold text-green-400 mb-2">🎬 Video Preview</h3>
@@ -505,22 +592,23 @@ function PhotosToVideo() {
               </button>
               <button
                 onClick={handleExportVideo}
-                className="bg-green-500 hover:bg-green-600 px-6 py-2 rounded-full text-sm font-bold transition-all"
+                disabled={isExporting}
+                className={`bg-green-500 hover:bg-green-600 px-6 py-2 rounded-full text-sm font-bold transition-all ${
+                  isExporting ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
               >
-                📥 Export Video
+                {isExporting ? '⏳ Exporting...' : '📥 Export MP4'}
               </button>
             </div>
           </div>
         )}
 
-        {/* Error */}
         {error && (
           <div className="bg-red-500/20 border border-red-500 rounded-2xl p-4 mb-6">
             <p className="text-red-300">❌ {error}</p>
           </div>
         )}
 
-        {/* Generate Button */}
         {photos.length > 0 && (
           <button
             onClick={handleGenerate}
@@ -533,7 +621,6 @@ function PhotosToVideo() {
           </button>
         )}
 
-        {/* Info */}
         <div className="mt-6 p-4 bg-white/5 rounded-2xl">
           <h4 className="font-semibold mb-2">ℹ️ Features</h4>
           <ul className="text-sm text-gray-400 space-y-1">
@@ -541,7 +628,7 @@ function PhotosToVideo() {
             <li>• Drag and drop to reorder photos</li>
             <li>• Choose transition effects</li>
             <li>• Add music and captions</li>
-            <li>• Preview and download your video</li>
+            <li>• Preview and download your video as MP4</li>
           </ul>
         </div>
 
