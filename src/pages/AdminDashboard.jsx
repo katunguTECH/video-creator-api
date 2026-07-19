@@ -5,7 +5,8 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer 
 } from 'recharts';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Use the production API URL
+const API_URL = 'https://video-creator-api-kjzy.onrender.com';
 
 // Admin password
 const ADMIN_PASSWORD = 'Work@2026';
@@ -64,13 +65,16 @@ function AdminDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
+      console.log('📊 Fetching dashboard data from:', `${API_URL}/api/admin/dashboard`);
+      
       const response = await fetch(`${API_URL}/api/admin/dashboard`);
       
       if (!response.ok) {
-        throw new Error('Failed to fetch dashboard data');
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
       
       const data = await response.json();
+      console.log('📊 Dashboard data received:', data);
       setDashboardData(data);
       setLastUpdated(new Date().toLocaleString());
       setError(null);
