@@ -47,9 +47,9 @@ const store = {
 async function verifyPayment(reference) {
   try {
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    
+
     const isLive = secretKey && secretKey.startsWith('sk_live_');
-    
+
     console.log('🔍 Verifying payment:', {
       reference,
       isLive: isLive ? 'LIVE' : 'Test'
@@ -75,15 +75,15 @@ async function verifyPayment(reference) {
 
     const data = await response.json();
     console.log('📦 Paystack verification:', data.status, data.data?.status);
-    
+
     const isSuccessful = data.status && data.data?.status === 'success';
-    
+
     if (isSuccessful) {
       console.log('✅ Payment verified successfully for reference:', reference);
     } else {
       console.log('❌ Payment verification failed for reference:', reference);
     }
-    
+
     return isSuccessful;
   } catch (error) {
     console.error('❌ Payment verification error:', error.message);
@@ -266,7 +266,7 @@ app.post('/api/verify-payment', async (req, res) => {
 
     if (data.status && data.data.status === 'success') {
       console.log(`✅ Payment successful for ${email}: KES ${amount}`);
-      
+
       // Log revenue
       const serviceMap = {
         'text-to-video': 'textToVideo',
@@ -274,17 +274,17 @@ app.post('/api/verify-payment', async (req, res) => {
         'translation': 'translation'
       };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
-      
+
       store.revenue.total += amount;
       store.revenue[serviceKey] = (store.revenue[serviceKey] || 0) + amount;
-      
+
       // Log activity
       const actionMap = {
         'text-to-video': 'Created text-to-video',
         'photo-to-video': 'Created photo-to-video',
         'translation': 'Translated video'
       };
-      
+
       store.activityLog.unshift({
         id: Date.now(),
         user: email || 'anonymous',
@@ -293,7 +293,7 @@ app.post('/api/verify-payment', async (req, res) => {
         time: 'Just now',
         timestamp: new Date().toISOString()
       });
-      
+
       // Keep only last 100 activities
       if (store.activityLog.length > 100) {
         store.activityLog = store.activityLog.slice(0, 100);
@@ -351,7 +351,7 @@ app.post('/api/webhook/paystack', (req, res) => {
       console.log(`   Reference: ${transaction.reference}`);
       console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
       console.log(`   Customer: ${transaction.customer.email}`);
-      
+
       res.sendStatus(200);
     } else if (event.event === 'charge.failed') {
       console.log(`❌ Payment failed for reference: ${event.data.reference}`);
@@ -369,16 +369,20 @@ app.post('/api/webhook/paystack', (req, res) => {
 // ============================================
 // ADMIN DASHBOARD ENDPOINTS
 // ============================================
+// FIX: These used to be routes that /api/admin/dashboard called via
+// internal HTTP self-fetch (fetch(`${baseUrl}/api/admin/...`)). On Render's
+// free tier that self-fetch pattern is fragile during cold starts and was
+// the main cause of "Failed to fetch" in the admin panel. Now they're plain
+// functions, and the routes below are thin wrappers around them so nothing
+// else that depended on those individual endpoints breaks.
 
-// Get real API credits from Replicate
-app.get('/api/admin/credits/replicate', async (req, res) => {
+async function getReplicateCredits() {
   try {
     const token = process.env.REPLICATE_API_TOKEN;
     if (!token) {
-      return res.json({ balance: 0, error: 'No token configured' });
+      return { balance: 0, error: 'No token configured' };
     }
 
-    // Call Replicate API to get account info
     const response = await fetch('https://api.replicate.com/v1/account', {
       headers: {
         'Authorization': `Token ${token}`,
@@ -390,25 +394,23 @@ app.get('/api/admin/credits/replicate', async (req, res) => {
     }
 
     const data = await response.json();
-    res.json({
+    return {
       balance: data.balance || 45.80,
       currency: 'USD'
-    });
+    };
   } catch (error) {
     console.error('Error fetching Replicate credits:', error);
-    res.json({ balance: 0, error: error.message });
+    return { balance: 0, error: error.message };
   }
-});
+}
 
-// Get real API credits from BytePlus
-app.get('/api/admin/credits/byteplus', async (req, res) => {
+async function getByteplusCredits() {
   try {
     const token = process.env.MODELARK_API_KEY;
     if (!token) {
-      return res.json({ balance: 0, error: 'No token configured' });
+      return { balance: 0, error: 'No token configured' };
     }
 
-    // BytePlus API call to get balance
     const response = await fetch('https://ark.ap-southeast.bytepluses.com/api/v3/account/balance', {
       headers: {
         'Authorization': `Bearer ${token}`,
@@ -420,89 +422,102 @@ app.get('/api/admin/credits/byteplus', async (req, res) => {
     }
 
     const data = await response.json();
-    res.json({
+    return {
       balance: data.balance || 120.50,
       currency: 'USD'
-    });
+    };
   } catch (error) {
     console.error('Error fetching BytePlus credits:', error);
-    res.json({ balance: 0, error: error.message });
+    return { balance: 0, error: error.message };
   }
+}
+
+function getRevenue() {
+  return {
+    total: store.revenue.total || 0,
+    textToVideo: store.revenue.textToVideo || 0,
+    photoToVideo: store.revenue.photoToVideo || 0,
+    translation: store.revenue.translation || 0,
+    currency: 'KES'
+  };
+}
+
+function getUsage() {
+  return {
+    totalVideos: store.videoCounts.textToVideo + store.videoCounts.photoToVideo + store.videoCounts.translation || 0,
+    textToVideo: store.videoCounts.textToVideo || 0,
+    photoToVideo: store.videoCounts.photoToVideo || 0,
+    translation: store.videoCounts.translation || 0
+  };
+}
+
+function getVisits() {
+  // Increment visit count
+  store.visitCount++;
+
+  return {
+    total: store.visitCount || 0,
+    today: 47,
+    week: 342,
+    month: store.visitCount || 0
+  };
+}
+
+function getActivity() {
+  return store.activityLog || [];
+}
+
+// Individual routes (kept for direct debugging / backward compatibility)
+app.get('/api/admin/credits/replicate', async (req, res) => {
+  res.json(await getReplicateCredits());
 });
 
-// Get revenue data
+app.get('/api/admin/credits/byteplus', async (req, res) => {
+  res.json(await getByteplusCredits());
+});
+
 app.get('/api/admin/revenue', (req, res) => {
   try {
-    res.json({
-      total: store.revenue.total || 0,
-      textToVideo: store.revenue.textToVideo || 0,
-      photoToVideo: store.revenue.photoToVideo || 0,
-      translation: store.revenue.translation || 0,
-      currency: 'KES'
-    });
+    res.json(getRevenue());
   } catch (error) {
     console.error('Error fetching revenue:', error);
     res.json({ error: error.message });
   }
 });
 
-// Get usage statistics
 app.get('/api/admin/usage', (req, res) => {
   try {
-    res.json({
-      totalVideos: store.videoCounts.textToVideo + store.videoCounts.photoToVideo + store.videoCounts.translation || 0,
-      textToVideo: store.videoCounts.textToVideo || 0,
-      photoToVideo: store.videoCounts.photoToVideo || 0,
-      translation: store.videoCounts.translation || 0
-    });
+    res.json(getUsage());
   } catch (error) {
     console.error('Error fetching usage:', error);
     res.json({ error: error.message });
   }
 });
 
-// Get site visits
 app.get('/api/admin/visits', (req, res) => {
   try {
-    // Increment visit count
-    store.visitCount++;
-    
-    res.json({
-      total: store.visitCount || 0,
-      today: 47,
-      week: 342,
-      month: store.visitCount || 0
-    });
+    res.json(getVisits());
   } catch (error) {
     console.error('Error fetching visits:', error);
     res.json({ error: error.message });
   }
 });
 
-// Get recent activity
 app.get('/api/admin/activity', (req, res) => {
   try {
-    res.json(store.activityLog || []);
+    res.json(getActivity());
   } catch (error) {
     console.error('Error fetching activity:', error);
     res.json({ error: error.message });
   }
 });
 
-// Combined dashboard data endpoint
+// Combined dashboard data endpoint — no more internal self-fetch
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
-    // Get base URL for internal calls
-    const baseUrl = `${req.protocol}://${req.get('host')}`;
-    
-    // Fetch all data in parallel
-    const [creditsReplicate, creditsByteplus, revenue, usage, visits, activity] = await Promise.all([
-      fetch(`${baseUrl}/api/admin/credits/replicate`).then(r => r.json()).catch(() => ({ balance: 0 })),
-      fetch(`${baseUrl}/api/admin/credits/byteplus`).then(r => r.json()).catch(() => ({ balance: 0 })),
-      fetch(`${baseUrl}/api/admin/revenue`).then(r => r.json()).catch(() => ({ total: 0 })),
-      fetch(`${baseUrl}/api/admin/usage`).then(r => r.json()).catch(() => ({ totalVideos: 0 })),
-      fetch(`${baseUrl}/api/admin/visits`).then(r => r.json()).catch(() => ({ total: 0 })),
-      fetch(`${baseUrl}/api/admin/activity`).then(r => r.json()).catch(() => ([]))
+    const [creditsReplicate, creditsByteplus] = await Promise.all([
+      getReplicateCredits(),
+      getByteplusCredits()
     ]);
 
     res.json({
@@ -511,10 +526,10 @@ app.get('/api/admin/dashboard', async (req, res) => {
         byteplus: creditsByteplus.balance || 0,
         total: (creditsReplicate.balance || 0) + (creditsByteplus.balance || 0)
       },
-      revenue: revenue,
-      usage: usage,
-      visits: visits,
-      recentActivity: activity
+      revenue: getRevenue(),
+      usage: getUsage(),
+      visits: getVisits(),
+      recentActivity: getActivity()
     });
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
@@ -969,12 +984,12 @@ app.get('/', (req, res) => {
 const buildPath = path.join(__dirname, 'build');
 if (isProduction && fs.existsSync(buildPath)) {
   console.log('📁 Serving frontend from build folder');
-  
+
   // Serve static files (CSS, JS, images) from the build folder
   app.use(express.static(buildPath));
-  
+
   // All other routes should serve index.html for React Router
-  app.get('*', (req, res) => {
+  app.get('*', (req, res, next) => {
     // Skip API routes (they're already handled above)
     if (req.path.startsWith('/api')) {
       return next();
