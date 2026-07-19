@@ -92,35 +92,11 @@ async function verifyPayment(reference) {
 }
 
 // ============================================
-// MIDDLEWARE - UPDATED CORS CONFIGURATION
+// MIDDLEWARE - SIMPLIFIED CORS
 // ============================================
+// Allow all origins (for testing)
 app.use(cors({
-  origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) {
-      callback(null, true);
-      return;
-    }
-    
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:3001',
-      'https://video-creator-frontend.onrender.com',
-      'https://video-creator-api-kjzy.onrender.com',
-      'https://katareel.com',
-      'https://www.katareel.com'
-    ];
-    
-    // Check if the origin is in the allowed list
-    if (allowedOrigins.indexOf(origin) !== -1) {
-      callback(null, true);
-    } else {
-      console.log('❌ Blocked by CORS:', origin);
-      // For testing, you can still allow it but log it
-      callback(null, true);
-    }
-  },
-  credentials: true,
+  origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
@@ -139,7 +115,6 @@ app.use((req, res, next) => {
   console.log(`${req.method} ${req.url}`);
   next();
 });
-
 // ============================================
 // FILE UPLOAD CONFIGURATION
 // ============================================
