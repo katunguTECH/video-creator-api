@@ -16,6 +16,7 @@
     "react-paystack": "^4.0.0",
     "react-router-dom": "^6.20.0",
     "react-scripts": "5.0.1",
+    "recharts": "^3.9.2",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
