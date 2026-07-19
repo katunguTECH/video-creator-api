@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
-  PieChart, Pie, Cell, ResponsiveContainer 
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip,
+  PieChart, Pie, Cell, ResponsiveContainer
 } from 'recharts';
 
 // Use the production API URL
@@ -11,12 +11,15 @@ const API_URL = 'https://video-creator-api-kjzy.onrender.com';
 // Admin password
 const ADMIN_PASSWORD = 'Work@2026';
 
+// Small helper: wait N ms
+const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
 function AdminDashboard() {
   const navigate = useNavigate();
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [password, setPassword] = useState('');
   const [loginError, setLoginError] = useState('');
-  
+
   // Dashboard data states
   const [dashboardData, setDashboardData] = useState({
     credits: {
@@ -44,10 +47,11 @@ function AdminDashboard() {
     },
     recentActivity: []
   });
-  
+
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdated, setLastUpdated] = useState(null);
+  const [waking, setWaking] = useState(false);
 
   // Handle login
   const handleLogin = (e) => {
@@ -61,37 +65,66 @@ function AdminDashboard() {
     }
   };
 
-  // Fetch dashboard data
-  const fetchDashboardData = async () => {
+  // Fetch dashboard data, with retries to survive Render free-tier cold starts.
+  // A sleeping Render service can take 30-60s to wake up, and while it's
+  // waking the proxy sometimes returns a response with no CORS headers,
+  // which the browser surfaces as a generic "Failed to fetch". Retrying
+  // with a short delay lets the service finish waking up before we give up.
+  const fetchDashboardData = async (retries = 4) => {
     setLoading(true);
-    try {
-      console.log('📊 Fetching dashboard data from:', `${API_URL}/api/admin/dashboard`);
-      
-      const response = await fetch(`${API_URL}/api/admin/dashboard`);
-      
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
+    setError(null);
+
+    for (let attempt = 0; attempt < retries; attempt++) {
+      try {
+        if (attempt > 0) setWaking(true);
+
+        console.log(
+          `📊 Fetching dashboard data (attempt ${attempt + 1}/${retries}):`,
+          `${API_URL}/api/admin/dashboard`
+        );
+
+        const response = await fetch(`${API_URL}/api/admin/dashboard`);
+
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        const data = await response.json();
+        console.log('📊 Dashboard data received:', data);
+        setDashboardData(data);
+        setLastUpdated(new Date().toLocaleString());
+        setError(null);
+        setWaking(false);
+        setLoading(false);
+        return;
+      } catch (err) {
+        console.error(`Dashboard error (attempt ${attempt + 1}):`, err);
+
+        if (attempt === retries - 1) {
+          setError(
+            'Failed to fetch dashboard data: ' +
+              err.message +
+              '. The API server may be slow to wake up on the free tier — click Retry in a few seconds.'
+          );
+          setWaking(false);
+        } else {
+          // Wait before retrying: 3s, then 8s, then 15s
+          const delays = [3000, 8000, 15000];
+          await wait(delays[attempt] || 8000);
+        }
       }
-      
-      const data = await response.json();
-      console.log('📊 Dashboard data received:', data);
-      setDashboardData(data);
-      setLastUpdated(new Date().toLocaleString());
-      setError(null);
-    } catch (err) {
-      setError('Failed to fetch dashboard data: ' + err.message);
-      console.error('Dashboard error:', err);
-    } finally {
-      setLoading(false);
     }
+
+    setLoading(false);
   };
 
   // Auto-refresh every 30 seconds
   useEffect(() => {
     if (isAuthenticated) {
-      const interval = setInterval(fetchDashboardData, 30000);
+      const interval = setInterval(() => fetchDashboardData(2), 30000);
       return () => clearInterval(interval);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAuthenticated]);
 
   // Format currency
@@ -126,7 +159,7 @@ function AdminDashboard() {
             <h1 className="text-3xl font-bold text-white">🔐 Admin Dashboard</h1>
             <p className="text-gray-400 mt-2">Enter your password to continue</p>
           </div>
-          
+
           <form onSubmit={handleLogin}>
             <div className="mb-6">
               <input
@@ -138,11 +171,11 @@ function AdminDashboard() {
                 autoFocus
               />
             </div>
-            
+
             {loginError && (
               <p className="text-red-400 text-sm mb-4">{loginError}</p>
             )}
-            
+
             <button
               type="submit"
               className="w-full bg-pink-500 hover:bg-pink-600 text-white font-bold py-3 rounded-xl transition-all transform hover:scale-105"
@@ -159,7 +192,7 @@ function AdminDashboard() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
       <div className="max-w-7xl mx-auto">
-        
+
         {/* Header */}
         <div className="flex justify-between items-center mb-8">
           <div>
@@ -171,7 +204,7 @@ function AdminDashboard() {
           </div>
           <div className="flex gap-3">
             <button
-              onClick={fetchDashboardData}
+              onClick={() => fetchDashboardData()}
               className="bg-blue-500/20 hover:bg-blue-500/30 px-4 py-2 rounded-lg text-sm transition-all"
             >
               🔄 Refresh
@@ -198,14 +231,18 @@ function AdminDashboard() {
           <div className="flex items-center justify-center h-64">
             <div className="text-center">
               <div className="text-6xl mb-4">⏳</div>
-              <p className="text-gray-400">Loading dashboard data...</p>
+              <p className="text-gray-400">
+                {waking
+                  ? 'Server is waking up (free tier can take up to a minute)...'
+                  : 'Loading dashboard data...'}
+              </p>
             </div>
           </div>
         ) : error ? (
           <div className="bg-red-500/20 border border-red-500 rounded-2xl p-6 text-center">
             <p className="text-red-400">{error}</p>
             <button
-              onClick={fetchDashboardData}
+              onClick={() => fetchDashboardData()}
               className="mt-4 bg-pink-500 hover:bg-pink-600 px-6 py-2 rounded-lg text-sm font-bold transition-all"
             >
               Retry
@@ -284,7 +321,7 @@ function AdminDashboard() {
                     <CartesianGrid strokeDasharray="3 3" stroke="#ffffff20" />
                     <XAxis dataKey="name" stroke="#ffffff60" fontSize={12} />
                     <YAxis stroke="#ffffff60" fontSize={12} />
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value) => formatCurrency(value)}
                       contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #ffffff20' }}
                     />
@@ -316,7 +353,7 @@ function AdminDashboard() {
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip 
+                    <Tooltip
                       formatter={(value) => `${value} videos`}
                       contentStyle={{ backgroundColor: '#1a1a2e', border: '1px solid #ffffff20' }}
                     />
