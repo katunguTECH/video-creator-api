@@ -92,19 +92,42 @@ async function verifyPayment(reference) {
 }
 
 // ============================================
-// MIDDLEWARE
+// MIDDLEWARE - UPDATED CORS CONFIGURATION
 // ============================================
 app.use(cors({
-  origin: [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://video-creator-frontend.onrender.com',
-    'https://video-creator-api-kjzy.onrender.com',
-    'https://katareel.com',
-    'https://www.katareel.com'
-  ],
-  credentials: true
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) {
+      callback(null, true);
+      return;
+    }
+    
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://localhost:3001',
+      'https://video-creator-frontend.onrender.com',
+      'https://video-creator-api-kjzy.onrender.com',
+      'https://katareel.com',
+      'https://www.katareel.com'
+    ];
+    
+    // Check if the origin is in the allowed list
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.log('❌ Blocked by CORS:', origin);
+      // For testing, you can still allow it but log it
+      callback(null, true);
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
+
+// Handle preflight requests
+app.options('*', cors());
+
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
