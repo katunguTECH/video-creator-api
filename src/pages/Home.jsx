@@ -15,7 +15,7 @@ function Home() {
         Turn your photos and ideas into stunning videos with AI. Share instantly to TikTok, WhatsApp and more.
       </p>
 
-      {/* Feature Cards - Now includes Admin Dashboard */}
+      {/* Feature Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 mb-12 w-full max-w-5xl">
         <div className="bg-white/10 rounded-2xl p-6 text-center hover:bg-white/20 transition-all cursor-pointer" onClick={() => navigate('/create')}>
           <div className="text-4xl mb-3">✍️</div>
@@ -41,7 +41,7 @@ function Home() {
           <p className="text-gray-400 text-sm">Translate videos to other languages</p>
         </div>
 
-        {/* NEW: Admin Dashboard Tab */}
+        {/* Admin Dashboard Tab */}
         <div className="bg-gradient-to-r from-purple-500/30 to-pink-500/30 rounded-2xl p-6 text-center hover:from-purple-500/50 hover:to-pink-500/50 transition-all cursor-pointer border border-white/20" onClick={() => navigate('/admin')}>
           <div className="text-4xl mb-3">📊</div>
           <h3 className="font-bold text-lg mb-1">Admin Dashboard</h3>

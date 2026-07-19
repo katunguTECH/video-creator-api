@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, 
-  PieChart, Pie, Cell, LineChart, Line, ResponsiveContainer 
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, 
+  PieChart, Pie, Cell, ResponsiveContainer 
 } from 'recharts';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
@@ -46,6 +46,7 @@ function AdminDashboard() {
   
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [lastUpdated, setLastUpdated] = useState(null);
 
   // Handle login
   const handleLogin = (e) => {
@@ -63,61 +64,54 @@ function AdminDashboard() {
   const fetchDashboardData = async () => {
     setLoading(true);
     try {
-      // In production, these would be API calls to your backend
-      // For now, we'll use mock data
-      const mockData = {
-        credits: {
-          replicate: 45.80,
-          byteplus: 120.50,
-          total: 166.30
-        },
-        revenue: {
-          total: 2850.00,
-          textToVideo: 1200.00,
-          photoToVideo: 850.00,
-          translation: 800.00
-        },
-        usage: {
-          totalVideos: 142,
-          textToVideo: 65,
-          photoToVideo: 42,
-          translation: 35
-        },
-        visits: {
-          total: 1247,
-          today: 47,
-          week: 342,
-          month: 1247
-        },
-        recentActivity: [
-          { id: 1, user: 'john@example.com', action: 'Created text-to-video', time: '2 min ago', amount: 200 },
-          { id: 2, user: 'jane@example.com', action: 'Translated video to Swahili', time: '15 min ago', amount: 150 },
-          { id: 3, user: 'mike@example.com', action: 'Created photo-to-video', time: '1 hour ago', amount: 250 },
-          { id: 4, user: 'sarah@example.com', action: 'Generated text-to-video', time: '3 hours ago', amount: 200 },
-          { id: 5, user: 'david@example.com', action: 'Translated video to French', time: '5 hours ago', amount: 150 }
-        ]
-      };
+      const response = await fetch(`${API_URL}/api/admin/dashboard`);
       
-      setDashboardData(mockData);
+      if (!response.ok) {
+        throw new Error('Failed to fetch dashboard data');
+      }
+      
+      const data = await response.json();
+      setDashboardData(data);
+      setLastUpdated(new Date().toLocaleString());
       setError(null);
     } catch (err) {
-      setError('Failed to fetch dashboard data');
+      setError('Failed to fetch dashboard data: ' + err.message);
       console.error('Dashboard error:', err);
     } finally {
       setLoading(false);
     }
   };
 
+  // Auto-refresh every 30 seconds
+  useEffect(() => {
+    if (isAuthenticated) {
+      const interval = setInterval(fetchDashboardData, 30000);
+      return () => clearInterval(interval);
+    }
+  }, [isAuthenticated]);
+
   // Format currency
   const formatCurrency = (amount) => {
     return new Intl.NumberFormat('en-KE', {
       style: 'currency',
-      currency: 'KES'
+      currency: 'KES',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
+    }).format(amount);
+  };
+
+  // Format USD
+  const formatUSD = (amount) => {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2
     }).format(amount);
   };
 
   // Colors for charts
-  const COLORS = ['#EC4899', '#8B5CF6', '#F59E0B', '#10B981'];
+  const COLORS = ['#EC4899', '#8B5CF6', '#F59E0B'];
 
   // If not authenticated, show login screen
   if (!isAuthenticated) {
@@ -167,8 +161,17 @@ function AdminDashboard() {
           <div>
             <h1 className="text-3xl font-bold">📊 Admin Dashboard</h1>
             <p className="text-gray-400 text-sm mt-1">Monitor your AI Video Creator business</p>
+            {lastUpdated && (
+              <p className="text-xs text-gray-500 mt-1">Last updated: {lastUpdated}</p>
+            )}
           </div>
           <div className="flex gap-3">
+            <button
+              onClick={fetchDashboardData}
+              className="bg-blue-500/20 hover:bg-blue-500/30 px-4 py-2 rounded-lg text-sm transition-all"
+            >
+              🔄 Refresh
+            </button>
             <button
               onClick={() => navigate('/')}
               className="bg-white/10 hover:bg-white/20 px-4 py-2 rounded-lg text-sm transition-all"
@@ -237,13 +240,13 @@ function AdminDashboard() {
                 <div className="flex items-center justify-between">
                   <div>
                     <p className="text-gray-400 text-sm">API Credits</p>
-                    <p className="text-3xl font-bold text-yellow-400">${dashboardData.credits.total.toFixed(2)}</p>
+                    <p className="text-3xl font-bold text-yellow-400">{formatUSD(dashboardData.credits.total)}</p>
                   </div>
                   <div className="text-4xl">🔑</div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 mt-2">
-                  <span>Replicate: ${dashboardData.credits.replicate.toFixed(2)}</span>
-                  <span>BytePlus: ${dashboardData.credits.byteplus.toFixed(2)}</span>
+                  <span>Replicate: {formatUSD(dashboardData.credits.replicate)}</span>
+                  <span>BytePlus: {formatUSD(dashboardData.credits.byteplus)}</span>
                 </div>
               </div>
 
@@ -305,7 +308,7 @@ function AdminDashboard() {
                       fill="#8884d8"
                       dataKey="value"
                     >
-                      {dashboardData.usage.textToVideo && COLORS.map((color, index) => (
+                      {COLORS.map((color, index) => (
                         <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
                       ))}
                     </Pie>
@@ -319,7 +322,7 @@ function AdminDashboard() {
             </div>
 
             {/* Recent Activity */}
-            <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
+            <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/10 mb-6">
               <h3 className="text-lg font-semibold mb-4">🕐 Recent Activity</h3>
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -332,35 +335,41 @@ function AdminDashboard() {
                     </tr>
                   </thead>
                   <tbody>
-                    {dashboardData.recentActivity.map((activity) => (
-                      <tr key={activity.id} className="border-b border-white/5 hover:bg-white/5 transition-all">
-                        <td className="py-3 px-4">{activity.user}</td>
-                        <td className="py-3 px-4">{activity.action}</td>
-                        <td className="py-3 px-4 text-green-400">{formatCurrency(activity.amount)}</td>
-                        <td className="py-3 px-4 text-gray-400">{activity.time}</td>
+                    {dashboardData.recentActivity.length === 0 ? (
+                      <tr>
+                        <td colSpan="4" className="text-center py-4 text-gray-400">No recent activity</td>
                       </tr>
-                    ))}
+                    ) : (
+                      dashboardData.recentActivity.map((activity) => (
+                        <tr key={activity.id} className="border-b border-white/5 hover:bg-white/5 transition-all">
+                          <td className="py-3 px-4">{activity.user}</td>
+                          <td className="py-3 px-4">{activity.action}</td>
+                          <td className="py-3 px-4 text-green-400">{formatCurrency(activity.amount)}</td>
+                          <td className="py-3 px-4 text-gray-400">{activity.time}</td>
+                        </tr>
+                      ))
+                    )}
                   </tbody>
                 </table>
               </div>
             </div>
 
             {/* API Credits Breakdown */}
-            <div className="mt-6 grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="bg-white/10 backdrop-blur-sm rounded-2xl p-6 border border-white/10">
                 <h3 className="text-lg font-semibold mb-4">🔑 API Credits</h3>
                 <div className="space-y-3">
                   <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
                     <span className="text-gray-300">Replicate AI</span>
-                    <span className="font-bold text-yellow-400">${dashboardData.credits.replicate.toFixed(2)}</span>
+                    <span className="font-bold text-yellow-400">{formatUSD(dashboardData.credits.replicate)}</span>
                   </div>
                   <div className="flex justify-between items-center p-3 bg-white/5 rounded-lg">
                     <span className="text-gray-300">BytePlus</span>
-                    <span className="font-bold text-yellow-400">${dashboardData.credits.byteplus.toFixed(2)}</span>
+                    <span className="font-bold text-yellow-400">{formatUSD(dashboardData.credits.byteplus)}</span>
                   </div>
                   <div className="flex justify-between items-center p-3 bg-white/10 rounded-lg border border-white/10">
                     <span className="text-gray-300 font-semibold">Total Credits</span>
-                    <span className="font-bold text-green-400">${dashboardData.credits.total.toFixed(2)}</span>
+                    <span className="font-bold text-green-400">{formatUSD(dashboardData.credits.total)}</span>
                   </div>
                 </div>
               </div>
