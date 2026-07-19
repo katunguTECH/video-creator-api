@@ -5,7 +5,9 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-const fetch = require('node-fetch');
+// Using Node's built-in global fetch (Node 18+) — no node-fetch package needed.
+// node-fetch v3 is ESM-only and crashes when loaded with require(), which is
+// the likely cause of the server crash-looping on Render.
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
@@ -386,7 +388,8 @@ async function getReplicateCredits() {
     const response = await fetch('https://api.replicate.com/v1/account', {
       headers: {
         'Authorization': `Token ${token}`,
-      }
+      },
+      signal: AbortSignal.timeout(5000) // give up after 5s instead of hanging
     });
 
     if (!response.ok) {
@@ -414,7 +417,8 @@ async function getByteplusCredits() {
     const response = await fetch('https://ark.ap-southeast.bytepluses.com/api/v3/account/balance', {
       headers: {
         'Authorization': `Bearer ${token}`,
-      }
+      },
+      signal: AbortSignal.timeout(5000) // give up after 5s instead of hanging
     });
 
     if (!response.ok) {
