@@ -5,6 +5,7 @@ import CreateVideo from './pages/CreateVideo';
 import Preview from './pages/Preview';
 import TranslateVideo from './pages/TranslateVideo';
 import PhotosToVideo from './pages/PhotosToVideo';
+import AdminDashboard from './pages/AdminDashboard';
 
 function App() {
   return (
@@ -15,6 +16,7 @@ function App() {
         <Route path="/preview" element={<Preview />} />
         <Route path="/translate" element={<TranslateVideo />} />
         <Route path="/photos-to-video" element={<PhotosToVideo />} />
+        <Route path="/admin" element={<AdminDashboard />} />
       </Routes>
     </Router>
   );
