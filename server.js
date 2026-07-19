@@ -115,6 +115,7 @@ app.use((req, res, next) => {
   console.log(`${req.method} ${req.url}`);
   next();
 });
+
 // ============================================
 // FILE UPLOAD CONFIGURATION
 // ============================================
@@ -963,13 +964,21 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
-// SERVE FRONTEND IN PRODUCTION (Conditional)
+// SERVE FRONTEND IN PRODUCTION
 // ============================================
 const buildPath = path.join(__dirname, 'build');
 if (isProduction && fs.existsSync(buildPath)) {
   console.log('📁 Serving frontend from build folder');
+  
+  // Serve static files (CSS, JS, images) from the build folder
   app.use(express.static(buildPath));
+  
+  // All other routes should serve index.html for React Router
   app.get('*', (req, res) => {
+    // Skip API routes (they're already handled above)
+    if (req.path.startsWith('/api')) {
+      return next();
+    }
     res.sendFile(path.join(buildPath, 'index.html'));
   });
 } else {
@@ -1009,5 +1018,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🔑 Replicate Token: ${process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'}`);
   console.log(`🔑 Paystack Secret: ${process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
-  console.log(`📁 Build folder exists: ${fs.existsSync(path.join(__dirname, 'build')) ? '✅ Yes' : '❌ No'}`);
+  console.log(`📁 Build folder exists: ${fs.existsSync(buildPath) ? '✅ Yes' : '❌ No'}`);
 });
