@@ -95,7 +95,14 @@ async function verifyPayment(reference) {
 // MIDDLEWARE
 // ============================================
 app.use(cors({
-  origin: ['http://localhost:3000', 'http://localhost:3001', 'https://video-creator-frontend.onrender.com', 'https://katareel.com', 'https://www.katareel.com'],
+  origin: [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://video-creator-frontend.onrender.com',
+    'https://video-creator-api-kjzy.onrender.com',
+    'https://katareel.com',
+    'https://www.katareel.com'
+  ],
   credentials: true
 }));
 app.use(express.json({ limit: '50mb' }));
