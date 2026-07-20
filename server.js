@@ -18,6 +18,8 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 Replicate Token:', process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
+console.log('💰 Replicate Balance:', process.env.REPLICATE_BALANCE ? `$${process.env.REPLICATE_BALANCE}` : '❌ Not set');
+console.log('💰 BytePlus Balance:', process.env.BYTEPLUS_BALANCE ? `$${process.env.BYTEPLUS_BALANCE}` : '❌ Not set');
 console.log('💳 Payment Enforcement: Enabled (No Test Mode)');
 
 // ============================================
@@ -370,45 +372,16 @@ app.post('/api/webhook/paystack', (req, res) => {
 // ADMIN DASHBOARD ENDPOINTS
 // ============================================
 
-// Get real API credits from Replicate
+// Get Replicate credits from environment variable
 async function getReplicateCredits() {
   try {
-    const token = process.env.REPLICATE_API_TOKEN;
-    if (!token) {
-      return { balance: 0, error: 'No token configured' };
-    }
-
-    // Try to fetch from Replicate API with proper authentication
-    try {
-      const response = await fetch('https://api.replicate.com/v1/billing/balance', {
-        headers: {
-          'Authorization': `Token ${token}`,
-          'Content-Type': 'application/json',
-        },
-        signal: AbortSignal.timeout(5000)
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        const balance = data.balance || data.amount || 0;
-        return {
-          balance: parseFloat(balance),
-          currency: 'USD',
-          note: 'Fetched from Replicate API'
-        };
-      }
-    } catch (apiError) {
-      console.warn('Replicate API error, using manual fallback:', apiError.message);
-    }
-
-    // Fallback: Manual tracking
-    // Update this value when you add credits
-    const manualBalance = 10.00;
+    // Use environment variable for balance
+    const balance = parseFloat(process.env.REPLICATE_BALANCE) || 0;
     
     return {
-      balance: manualBalance,
+      balance: balance,
       currency: 'USD',
-      note: 'Manual tracking - update when credits change'
+      note: 'Set via environment variable (REPLICATE_BALANCE)'
     };
   } catch (error) {
     console.error('Error fetching Replicate credits:', error);
@@ -416,29 +389,16 @@ async function getReplicateCredits() {
   }
 }
 
-// Get real API credits from BytePlus
+// Get BytePlus credits from environment variable
 async function getByteplusCredits() {
   try {
-    const token = process.env.MODELARK_API_KEY;
-    if (!token) {
-      return { balance: 0, error: 'No token configured' };
-    }
-
-    const response = await fetch('https://ark.ap-southeast.bytepluses.com/api/v3/account/balance', {
-      headers: {
-        'Authorization': `Bearer ${token}`,
-      },
-      signal: AbortSignal.timeout(5000)
-    });
-
-    if (!response.ok) {
-      throw new Error('Failed to fetch BytePlus balance');
-    }
-
-    const data = await response.json();
+    // Use environment variable for balance
+    const balance = parseFloat(process.env.BYTEPLUS_BALANCE) || 0;
+    
     return {
-      balance: data.balance || 120.50,
-      currency: 'USD'
+      balance: balance,
+      currency: 'USD',
+      note: 'Set via environment variable (BYTEPLUS_BALANCE)'
     };
   } catch (error) {
     console.error('Error fetching BytePlus credits:', error);
@@ -1046,6 +1006,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`💳 Payment Enforcement: Enabled (No Test Mode)`);
   console.log(`🔑 Replicate Token: ${process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'}`);
   console.log(`🔑 Paystack Secret: ${process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'}`);
+  console.log(`💰 Replicate Balance: ${process.env.REPLICATE_BALANCE ? `$${process.env.REPLICATE_BALANCE}` : '❌ Not set'}`);
+  console.log(`💰 BytePlus Balance: ${process.env.BYTEPLUS_BALANCE ? `$${process.env.BYTEPLUS_BALANCE}` : '❌ Not set'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`📁 Build folder exists: ${fs.existsSync(buildPath) ? '✅ Yes' : '❌ No'}`);
 });
