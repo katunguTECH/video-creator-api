@@ -39,7 +39,7 @@ function CreateVideo() {
       setIsLoadingPrice(true);
       setPriceError(null);
 
-      let serviceType = 'replicate';
+      let serviceType = 'byteplus';
       let options = { duration: duration };
 
       if (activeTab === 'photos') {
@@ -72,7 +72,7 @@ function CreateVideo() {
         markupMultiplier: 10,
         markupAmount: 180,
         breakdown: [
-          { item: 'AI Video Generation', amount: 10 },
+          { item: 'AI Video Generation (BytePlus)', amount: 10 },
           { item: 'Processing fee', amount: 10 }
         ],
         currency: 'KES'
@@ -117,12 +117,12 @@ function CreateVideo() {
       return;
     }
 
-    if (!prompt.trim()) {
+    if (activeTab === 'text' && !prompt.trim()) {
       alert('Please enter a text prompt!');
       return;
     }
 
-    if (photos.length === 0) {
+    if (activeTab === 'photos' && photos.length === 0) {
       alert('Please upload at least one photo!');
       return;
     }
@@ -290,7 +290,7 @@ function CreateVideo() {
             <div className="text-right">
               <span className="text-xs text-gray-500">Includes:</span>
               <ul className="text-xs text-gray-400">
-                <li>✅ AI video generation</li>
+                <li>✅ AI video generation (BytePlus)</li>
                 <li>✅ Music & effects</li>
                 <li>✅ HD quality</li>
                 <li>✅ Email delivery</li>
@@ -360,7 +360,7 @@ function CreateVideo() {
             💳 Secure payment via Paystack • Card or M-Pesa accepted
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            Your video will be available for download and sent to your email
+            Powered by BytePlus Seedance AI • Your video will be sent to your email
           </p>
         </div>
 

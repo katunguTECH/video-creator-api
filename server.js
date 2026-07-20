@@ -16,7 +16,7 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
-console.log('🔑 Replicate Token:', process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set');
+console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
 console.log('📧 Email configured:', process.env.EMAIL_USER ? '✅ Set' : '❌ Not set');
 
@@ -24,7 +24,6 @@ console.log('📧 Email configured:', process.env.EMAIL_USER ? '✅ Set' : '❌ 
 // EMAIL CONFIGURATION
 // ============================================
 
-// Create email transporter
 const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST || 'smtp.gmail.com',
   port: parseInt(process.env.EMAIL_PORT) || 587,
@@ -218,36 +217,37 @@ app.post('/api/calculate-price', (req, res) => {
 
     let baseCost = 0;
     let breakdown = [];
-    let serviceName = 'HappyHorse Video';
+    let serviceName = 'BytePlus Seedance';
 
     if (serviceType === 'image_to_video') {
-      const baseFee = 50;
-      const perSecond = 5;
+      const baseFee = 30;
+      const perSecond = 3;
       baseCost = baseFee + (duration * perSecond);
       breakdown = [
-        { item: 'AI Image-to-Video Generation', amount: baseFee },
+        { item: 'AI Image-to-Video Generation (BytePlus)', amount: baseFee },
         { item: `${duration}s video processing`, amount: duration * perSecond }
       ];
-      serviceName = 'Image-to-Video (Stable Diffusion)';
+      serviceName = 'BytePlus Seedance (Image-to-Video)';
     } else if (serviceType === 'photos_to_video') {
-      const baseFee = 10;
+      const baseFee = 20;
       const perPhoto = 2;
       baseCost = baseFee + (photoCount * perPhoto);
       breakdown = [
         { item: 'Base slideshow fee', amount: baseFee },
         { item: `${photoCount} photo(s)`, amount: photoCount * perPhoto }
       ];
-      serviceName = 'Photos to Video';
+      serviceName = 'BytePlus Seedance (Photos to Video)';
     } else {
-      const baseFee = 10;
+      // Text to video with BytePlus
+      const baseFee = 20;
       const perSecond = 2;
       baseCost = baseFee + (duration * perSecond);
       breakdown = [
-        { item: 'AI Video Generation', amount: baseFee },
+        { item: 'AI Video Generation (BytePlus)', amount: baseFee },
         { item: `${duration}s video processing`, amount: duration * perSecond },
         { item: 'HD Quality', amount: 0 }
       ];
-      serviceName = 'HappyHorse Video';
+      serviceName = 'BytePlus Seedance (Text-to-Video)';
     }
 
     const markupMultiplier = 10;
@@ -255,7 +255,7 @@ app.post('/api/calculate-price', (req, res) => {
     const markupAmount = baseCost * (markupMultiplier - 1);
 
     const priceData = {
-      serviceType: serviceType || 'replicate',
+      serviceType: serviceType || 'byteplus',
       serviceName: serviceName,
       baseCost: baseCost,
       markupMultiplier: markupMultiplier,
@@ -384,6 +384,285 @@ app.post('/api/send-video-email', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Email error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// BYTEPLUS (MODELARK) VIDEO GENERATION
+// ============================================
+
+// Helper function to poll BytePlus task status
+async function pollBytePlusTask(taskId, token, endpoint) {
+  let attempts = 0;
+  const maxAttempts = 60; // 60 * 3s = 180 seconds max
+
+  while (attempts < maxAttempts) {
+    await new Promise(resolve => setTimeout(resolve, 3000));
+    
+    try {
+      const pollResponse = await fetch(`${endpoint}/contents/generations/tasks/${taskId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        }
+      });
+
+      if (!pollResponse.ok) {
+        console.warn(`Polling attempt ${attempts + 1} failed: ${pollResponse.status}`);
+        attempts++;
+        continue;
+      }
+
+      const result = await pollResponse.json();
+      console.log(`⏳ Polling attempt ${attempts + 1}: Status = ${result.status}`);
+
+      if (result.status === 'succeeded') {
+        return result;
+      }
+
+      if (result.status === 'failed') {
+        throw new Error(result.error || 'BytePlus generation failed');
+      }
+
+      attempts++;
+    } catch (error) {
+      console.warn(`Polling error: ${error.message}`);
+      attempts++;
+    }
+  }
+
+  throw new Error('Timeout waiting for BytePlus video generation');
+}
+
+// Text-to-Video with BytePlus
+app.post('/api/generate-video', async (req, res) => {
+  try {
+    const { prompt, paymentReference, email, serviceType } = req.body;
+
+    if (!paymentReference) {
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required.',
+        requiresPayment: true
+      });
+    }
+
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      return res.status(402).json({
+        success: false,
+        error: 'Invalid or expired payment.',
+        requiresPayment: true
+      });
+    }
+
+    console.log('✅ Payment verified:', paymentReference);
+    console.log('🎬 Generating video with BytePlus Seedance...');
+
+    const token = process.env.MODELARK_API_KEY;
+    if (!token) {
+      throw new Error('MODELARK_API_KEY not set');
+    }
+
+    const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
+    
+    // Use Dreamina-Seedance-2.0-mini for cost-effective generation
+    const modelId = 'dreamina-seedance-2-0-mini';
+
+    store.videoCounts.textToVideo = (store.videoCounts.textToVideo || 0) + 1;
+
+    // Create BytePlus task
+    const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        model: modelId,
+        content: [
+          {
+            type: "text",
+            text: prompt
+          }
+        ],
+        parameters: {
+          duration: 5,
+          resolution: "720p",
+          ratio: "16:9",
+          fps: 24
+        }
+      })
+    });
+
+    if (!createResponse.ok) {
+      const errorData = await createResponse.text();
+      console.error('❌ BytePlus API Error:', createResponse.status, errorData);
+      
+      if (createResponse.status === 401) {
+        throw new Error('Invalid BytePlus API key. Please check your MODELARK_API_KEY.');
+      }
+      if (createResponse.status === 404) {
+        throw new Error('Model not activated. Please activate Dreamina-Seedance in BytePlus Console.');
+      }
+      throw new Error(`BytePlus API returned ${createResponse.status}: ${errorData}`);
+    }
+
+    const taskData = await createResponse.json();
+    const taskId = taskData.id;
+    console.log('✅ BytePlus task created:', taskId);
+
+    // Poll for completion
+    const result = await pollBytePlusTask(taskId, token, endpoint);
+
+    // Extract video URL from result
+    const videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+    
+    if (!videoUrl) {
+      throw new Error('No video URL found in BytePlus response');
+    }
+
+    console.log('✅ Video generated successfully!');
+    console.log('📹 Video URL:', videoUrl);
+
+    store.activityLog.unshift({
+      id: Date.now(),
+      user: email || 'anonymous',
+      action: 'Created text-to-video (BytePlus)',
+      amount: 200,
+      time: 'Just now',
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({
+      success: true,
+      videoUrl: videoUrl,
+      usedModel: 'BytePlus Seedance (Dreamina)'
+    });
+
+  } catch (error) {
+    console.error('❌ Error in /api/generate-video:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Image-to-Video with BytePlus
+app.post('/api/generate-image-to-video', async (req, res) => {
+  try {
+    const { prompt, imageUrl, paymentReference, duration, email, serviceType } = req.body;
+
+    if (!paymentReference) {
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required.',
+        requiresPayment: true
+      });
+    }
+
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      return res.status(402).json({
+        success: false,
+        error: 'Invalid or expired payment.',
+        requiresPayment: true
+      });
+    }
+
+    console.log('✅ Payment verified:', paymentReference);
+    console.log('🎬 Generating image-to-video with BytePlus Seedance...');
+
+    const token = process.env.MODELARK_API_KEY;
+    if (!token) {
+      throw new Error('MODELARK_API_KEY not set');
+    }
+
+    const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
+    const modelId = 'dreamina-seedance-2-0-mini';
+
+    store.videoCounts.photoToVideo = (store.videoCounts.photoToVideo || 0) + 1;
+
+    // Create BytePlus task with image reference
+    const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        model: modelId,
+        content: [
+          {
+            type: "image_url",
+            image_url: {
+              url: imageUrl
+            }
+          },
+          {
+            type: "text",
+            text: prompt
+          }
+        ],
+        parameters: {
+          duration: duration || 5,
+          resolution: "720p",
+          ratio: "16:9"
+        }
+      })
+    });
+
+    if (!createResponse.ok) {
+      const errorData = await createResponse.text();
+      console.error('❌ BytePlus API Error:', createResponse.status, errorData);
+      
+      if (createResponse.status === 401) {
+        throw new Error('Invalid BytePlus API key.');
+      }
+      if (createResponse.status === 404) {
+        throw new Error('Model not activated.');
+      }
+      throw new Error(`BytePlus API returned ${createResponse.status}: ${errorData}`);
+    }
+
+    const taskData = await createResponse.json();
+    const taskId = taskData.id;
+    console.log('✅ BytePlus task created:', taskId);
+
+    // Poll for completion
+    const result = await pollBytePlusTask(taskId, token, endpoint);
+
+    const videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+    
+    if (!videoUrl) {
+      throw new Error('No video URL found in BytePlus response');
+    }
+
+    console.log('✅ Video generated successfully!');
+    console.log('📹 Video URL:', videoUrl);
+
+    store.activityLog.unshift({
+      id: Date.now(),
+      user: email || 'anonymous',
+      action: 'Created photo-to-video (BytePlus)',
+      amount: 250,
+      time: 'Just now',
+      timestamp: new Date().toISOString()
+    });
+
+    res.json({
+      success: true,
+      videoUrl: videoUrl,
+      usedModel: 'BytePlus Seedance (Image-to-Video)'
+    });
+
+  } catch (error) {
+    console.error('❌ Error in /api/generate-image-to-video:', error.message);
     res.status(500).json({
       success: false,
       error: error.message
@@ -525,234 +804,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
 });
 
 // ============================================
-// VIDEO GENERATION WITH REPLICATE
-// ============================================
-app.post('/api/generate-video', async (req, res) => {
-  try {
-    const { prompt, paymentReference, email, serviceType } = req.body;
-
-    if (!paymentReference) {
-      return res.status(402).json({
-        success: false,
-        error: 'Payment required.',
-        requiresPayment: true
-      });
-    }
-
-    const isValid = await verifyPayment(paymentReference);
-    if (!isValid) {
-      return res.status(402).json({
-        success: false,
-        error: 'Invalid or expired payment.',
-        requiresPayment: true
-      });
-    }
-
-    console.log('✅ Payment verified:', paymentReference);
-    console.log('🎬 Generating video...');
-
-    const token = process.env.REPLICATE_API_TOKEN;
-    if (!token) {
-      throw new Error('REPLICATE_API_TOKEN not set');
-    }
-
-    store.videoCounts.textToVideo = (store.videoCounts.textToVideo || 0) + 1;
-
-    const response = await fetch('https://api.replicate.com/v1/predictions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Token ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        version: "alibaba/happy-horse:latest",
-        input: {
-          prompt: prompt,
-          num_frames: 16,
-          fps: 8,
-          guidance_scale: 7.0,
-          num_inference_steps: 30,
-          width: 1024,
-          height: 576
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('❌ Replicate API Error:', response.status, errorData);
-      throw new Error(`Replicate API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log('✅ Prediction created:', data.id);
-
-    let prediction = data;
-    let attempts = 0;
-    const maxAttempts = 60;
-
-    while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
-        headers: { 'Authorization': `Token ${token}` }
-      });
-      if (!pollResponse.ok) throw new Error(`Polling failed: ${pollResponse.status}`);
-      prediction = await pollResponse.json();
-      attempts++;
-      console.log(`⏳ Polling attempt ${attempts}: ${prediction.status}`);
-    }
-
-    if (prediction.status === 'failed') {
-      throw new Error(prediction.error || 'Prediction failed');
-    }
-
-    if (prediction.status !== 'succeeded') {
-      throw new Error('Timeout waiting for video generation');
-    }
-
-    console.log('✅ Video generated successfully!');
-
-    const videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
-
-    store.activityLog.unshift({
-      id: Date.now(),
-      user: email || 'anonymous',
-      action: 'Created text-to-video',
-      amount: 200,
-      time: 'Just now',
-      timestamp: new Date().toISOString()
-    });
-
-    res.json({
-      success: true,
-      videoUrl: videoUrl,
-      usedModel: 'HappyHorse (Replicate)'
-    });
-
-  } catch (error) {
-    console.error('❌ Error in /api/generate-video:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// ============================================
-// IMAGE-TO-VIDEO WITH REPLICATE
-// ============================================
-app.post('/api/generate-image-to-video', async (req, res) => {
-  try {
-    const { prompt, imageUrl, paymentReference, duration, email, serviceType } = req.body;
-
-    if (!paymentReference) {
-      return res.status(402).json({
-        success: false,
-        error: 'Payment required.',
-        requiresPayment: true
-      });
-    }
-
-    const isValid = await verifyPayment(paymentReference);
-    if (!isValid) {
-      return res.status(402).json({
-        success: false,
-        error: 'Invalid or expired payment.',
-        requiresPayment: true
-      });
-    }
-
-    console.log('✅ Payment verified:', paymentReference);
-    console.log('🎬 Generating image-to-video...');
-
-    const token = process.env.REPLICATE_API_TOKEN;
-    if (!token) {
-      throw new Error('REPLICATE_API_TOKEN not set');
-    }
-
-    store.videoCounts.photoToVideo = (store.videoCounts.photoToVideo || 0) + 1;
-
-    const response = await fetch('https://api.replicate.com/v1/predictions', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Token ${token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        version: "stability-ai/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
-        input: {
-          input_image: imageUrl,
-          video_length: "14_frames_with_svd",
-          motion_bucket_id: 127,
-          fps: 6,
-          cond_aug: 0.02,
-          decoding_t: 7,
-          seed: Math.floor(Math.random() * 1000000)
-        }
-      })
-    });
-
-    if (!response.ok) {
-      const errorData = await response.text();
-      console.error('❌ Replicate API Error:', response.status, errorData);
-      throw new Error(`Replicate API returned ${response.status}`);
-    }
-
-    const data = await response.json();
-    console.log('✅ Prediction created:', data.id);
-
-    let prediction = data;
-    let attempts = 0;
-    const maxAttempts = 60;
-
-    while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < maxAttempts) {
-      await new Promise(resolve => setTimeout(resolve, 2000));
-      const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
-        headers: { 'Authorization': `Token ${token}` }
-      });
-      if (!pollResponse.ok) throw new Error(`Polling failed: ${pollResponse.status}`);
-      prediction = await pollResponse.json();
-      attempts++;
-      console.log(`⏳ Polling attempt ${attempts}: ${prediction.status}`);
-    }
-
-    if (prediction.status === 'failed') {
-      throw new Error(prediction.error || 'Prediction failed');
-    }
-
-    if (prediction.status !== 'succeeded') {
-      throw new Error('Timeout waiting for video generation');
-    }
-
-    console.log('✅ Video generated successfully!');
-
-    const videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
-
-    store.activityLog.unshift({
-      id: Date.now(),
-      user: email || 'anonymous',
-      action: 'Created photo-to-video',
-      amount: 250,
-      time: 'Just now',
-      timestamp: new Date().toISOString()
-    });
-
-    res.json({
-      success: true,
-      videoUrl: videoUrl,
-      usedModel: 'Stable Video Diffusion (Image-to-Video)'
-    });
-
-  } catch (error) {
-    console.error('❌ Error in /api/generate-image-to-video:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// ============================================
 // VIDEO TRANSLATION ENDPOINTS
 // ============================================
 const FREE_TRANSLATION_LANGUAGES = {
@@ -880,8 +931,8 @@ app.get('/api/test', (req, res) => {
     paymentEnforced: '✅ Yes',
     endpoints: [
       '/api/test', '/api/health',
-      '/api/generate-video',
-      '/api/generate-image-to-video',
+      '/api/generate-video (BytePlus)',
+      '/api/generate-image-to-video (BytePlus)',
       '/api/calculate-price',
       '/api/verify-payment',
       '/api/send-video-email',
@@ -896,7 +947,7 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: isProduction ? 'production' : 'development',
     uptime: process.uptime(),
-    replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
+    byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
     paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
     email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No'
   });
@@ -963,4 +1014,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
+  console.log(`🎬 Using BytePlus (ModelArk) for video generation`);
 });
