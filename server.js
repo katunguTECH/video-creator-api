@@ -10,7 +10,6 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
-const { createCanvas } = require('canvas');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -486,76 +485,14 @@ async function pollDreaminaTask(taskId, token, endpoint) {
   throw new Error('Timeout waiting for Dreamina video generation');
 }
 
-// Helper function to create fallback video
+// Helper function to create fallback video WITHOUT canvas
 function createFallbackVideo(prompt, paymentReference) {
-  try {
-    const canvas = createCanvas(640, 360);
-    const ctx = canvas.getContext('2d');
-
-    // Background gradient
-    const gradient = ctx.createLinearGradient(0, 0, 640, 360);
-    gradient.addColorStop(0, '#1a1a2e');
-    gradient.addColorStop(0.5, '#16213e');
-    gradient.addColorStop(1, '#0f3460');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 640, 360);
-
-    // Decorative circles
-    for (let i = 0; i < 5; i++) {
-      ctx.beginPath();
-      ctx.arc(50 + i * 140, 180, 40 + i * 5, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${0.03 + i * 0.02})`;
-      ctx.fill();
-    }
-
-    // Title
-    ctx.fillStyle = 'white';
-    ctx.font = 'bold 28px Arial';
-    ctx.textAlign = 'center';
-    ctx.textBaseline = 'middle';
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 10;
-
-    // Split long prompt
-    const words = prompt ? prompt.split(' ') : ['No prompt provided'];
-    let lines = [];
-    let currentLine = '';
-    for (let word of words) {
-      if ((currentLine + word).length > 40) {
-        lines.push(currentLine.trim());
-        currentLine = word + ' ';
-      } else {
-        currentLine += word + ' ';
-      }
-    }
-    if (currentLine) lines.push(currentLine.trim());
-
-    // Display lines
-    const lineHeight = 35;
-    const startY = 180 - ((lines.length - 1) * lineHeight) / 2;
-    lines.forEach((line, index) => {
-      ctx.fillText(line, 320, startY + index * lineHeight);
-    });
-
-    // Add "AI Generated" badge
-    ctx.shadowBlur = 0;
-    ctx.fillStyle = 'rgba(255,255,255,0.2)';
-    ctx.font = '12px Arial';
-    ctx.fillText('AI Generated Preview', 320, 330);
-
-    // Add payment reference if exists
-    if (paymentReference) {
-      ctx.fillStyle = 'rgba(255,255,255,0.1)';
-      ctx.font = '10px Arial';
-      ctx.fillText(`Payment: ${paymentReference.substring(0, 10)}...`, 320, 345);
-    }
-
-    return canvas.toDataURL('image/png');
-  } catch (error) {
-    console.error('Fallback video creation error:', error);
-    // Return a simple data URL if canvas fails
-    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-  }
+  // Return a simple placeholder image as a data URL
+  // This is a 1x1 pixel transparent PNG
+  const placeholder = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  
+  console.log('🔄 Using fallback placeholder image');
+  return placeholder;
 }
 
 // Text-to-Video with Dreamina Seedance
