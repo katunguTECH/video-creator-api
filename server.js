@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const { createCanvas } = require('canvas');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -217,17 +218,17 @@ app.post('/api/calculate-price', (req, res) => {
 
     let baseCost = 0;
     let breakdown = [];
-    let serviceName = 'BytePlus Seedance';
+    let serviceName = 'Dreamina Seedance';
 
     if (serviceType === 'image_to_video') {
       const baseFee = 30;
       const perSecond = 3;
       baseCost = baseFee + (duration * perSecond);
       breakdown = [
-        { item: 'AI Image-to-Video Generation (BytePlus)', amount: baseFee },
+        { item: 'AI Image-to-Video Generation', amount: baseFee },
         { item: `${duration}s video processing`, amount: duration * perSecond }
       ];
-      serviceName = 'BytePlus Seedance (Image-to-Video)';
+      serviceName = 'Dreamina Seedance (Image-to-Video)';
     } else if (serviceType === 'photos_to_video') {
       const baseFee = 20;
       const perPhoto = 2;
@@ -236,18 +237,18 @@ app.post('/api/calculate-price', (req, res) => {
         { item: 'Base slideshow fee', amount: baseFee },
         { item: `${photoCount} photo(s)`, amount: photoCount * perPhoto }
       ];
-      serviceName = 'BytePlus Seedance (Photos to Video)';
+      serviceName = 'Dreamina Seedance (Photos to Video)';
     } else {
-      // Text to video with BytePlus
+      // Text to video
       const baseFee = 20;
       const perSecond = 2;
       baseCost = baseFee + (duration * perSecond);
       breakdown = [
-        { item: 'AI Video Generation (BytePlus)', amount: baseFee },
+        { item: 'AI Video Generation', amount: baseFee },
         { item: `${duration}s video processing`, amount: duration * perSecond },
         { item: 'HD Quality', amount: 0 }
       ];
-      serviceName = 'BytePlus Seedance (Text-to-Video)';
+      serviceName = 'Dreamina Seedance (Text-to-Video)';
     }
 
     const markupMultiplier = 10;
@@ -255,7 +256,7 @@ app.post('/api/calculate-price', (req, res) => {
     const markupAmount = baseCost * (markupMultiplier - 1);
 
     const priceData = {
-      serviceType: serviceType || 'byteplus',
+      serviceType: serviceType || 'dreamina',
       serviceName: serviceName,
       baseCost: baseCost,
       markupMultiplier: markupMultiplier,
@@ -358,6 +359,53 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
+// Paystack Webhook endpoint
+app.post('/api/webhook/paystack', (req, res) => {
+  try {
+    const secret = process.env.PAYSTACK_SECRET_KEY;
+    const payload = req.body;
+
+    console.log('📦 Webhook received');
+
+    if (!secret) {
+      console.log('⚠️ Webhook received but PAYSTACK_SECRET_KEY not set.');
+      res.sendStatus(200);
+      return;
+    }
+
+    const hash = crypto
+      .createHmac('sha512', secret)
+      .update(JSON.stringify(payload))
+      .digest('hex');
+
+    if (hash !== req.headers['x-paystack-signature']) {
+      console.error('❌ Invalid webhook signature');
+      return res.status(401).send('Invalid signature');
+    }
+
+    const event = payload;
+
+    if (event.event === 'charge.success') {
+      const transaction = event.data;
+      console.log(`✅ Payment successful!`);
+      console.log(`   Reference: ${transaction.reference}`);
+      console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
+      console.log(`   Customer: ${transaction.customer.email}`);
+
+      res.sendStatus(200);
+    } else if (event.event === 'charge.failed') {
+      console.log(`❌ Payment failed for reference: ${event.data.reference}`);
+      res.sendStatus(200);
+    } else {
+      console.log(`⚡ Event received: ${event.event}`);
+      res.sendStatus(200);
+    }
+  } catch (error) {
+    console.error('❌ Webhook error:', error.message);
+    res.status(500).send('Webhook processing failed');
+  }
+});
+
 // ============================================
 // SEND VIDEO EMAIL ENDPOINT
 // ============================================
@@ -392,11 +440,11 @@ app.post('/api/send-video-email', async (req, res) => {
 });
 
 // ============================================
-// BYTEPLUS (MODELARK) VIDEO GENERATION
+// DREAMINA SEEDANCE VIDEO GENERATION
 // ============================================
 
-// Helper function to poll BytePlus task status
-async function pollBytePlusTask(taskId, token, endpoint) {
+// Helper function to poll Dreamina task status
+async function pollDreaminaTask(taskId, token, endpoint) {
   let attempts = 0;
   const maxAttempts = 60; // 60 * 3s = 180 seconds max
 
@@ -425,7 +473,7 @@ async function pollBytePlusTask(taskId, token, endpoint) {
       }
 
       if (result.status === 'failed') {
-        throw new Error(result.error || 'BytePlus generation failed');
+        throw new Error(result.error || 'Dreamina generation failed');
       }
 
       attempts++;
@@ -435,15 +483,92 @@ async function pollBytePlusTask(taskId, token, endpoint) {
     }
   }
 
-  throw new Error('Timeout waiting for BytePlus video generation');
+  throw new Error('Timeout waiting for Dreamina video generation');
 }
 
-// Text-to-Video with BytePlus
+// Helper function to create fallback video
+function createFallbackVideo(prompt, paymentReference) {
+  try {
+    const canvas = createCanvas(640, 360);
+    const ctx = canvas.getContext('2d');
+
+    // Background gradient
+    const gradient = ctx.createLinearGradient(0, 0, 640, 360);
+    gradient.addColorStop(0, '#1a1a2e');
+    gradient.addColorStop(0.5, '#16213e');
+    gradient.addColorStop(1, '#0f3460');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, 640, 360);
+
+    // Decorative circles
+    for (let i = 0; i < 5; i++) {
+      ctx.beginPath();
+      ctx.arc(50 + i * 140, 180, 40 + i * 5, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${0.03 + i * 0.02})`;
+      ctx.fill();
+    }
+
+    // Title
+    ctx.fillStyle = 'white';
+    ctx.font = 'bold 28px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(0,0,0,0.5)';
+    ctx.shadowBlur = 10;
+
+    // Split long prompt
+    const words = prompt ? prompt.split(' ') : ['No prompt provided'];
+    let lines = [];
+    let currentLine = '';
+    for (let word of words) {
+      if ((currentLine + word).length > 40) {
+        lines.push(currentLine.trim());
+        currentLine = word + ' ';
+      } else {
+        currentLine += word + ' ';
+      }
+    }
+    if (currentLine) lines.push(currentLine.trim());
+
+    // Display lines
+    const lineHeight = 35;
+    const startY = 180 - ((lines.length - 1) * lineHeight) / 2;
+    lines.forEach((line, index) => {
+      ctx.fillText(line, 320, startY + index * lineHeight);
+    });
+
+    // Add "AI Generated" badge
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = 'rgba(255,255,255,0.2)';
+    ctx.font = '12px Arial';
+    ctx.fillText('AI Generated Preview', 320, 330);
+
+    // Add payment reference if exists
+    if (paymentReference) {
+      ctx.fillStyle = 'rgba(255,255,255,0.1)';
+      ctx.font = '10px Arial';
+      ctx.fillText(`Payment: ${paymentReference.substring(0, 10)}...`, 320, 345);
+    }
+
+    return canvas.toDataURL('image/png');
+  } catch (error) {
+    console.error('Fallback video creation error:', error);
+    // Return a simple data URL if canvas fails
+    return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  }
+}
+
+// Text-to-Video with Dreamina Seedance
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, serviceType } = req.body;
 
+    console.log('🎬 Generating video with Dreamina Seedance...');
+    console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
+
+    // ALWAYS ENFORCE PAYMENT
     if (!paymentReference) {
+      console.log('❌ Payment required');
       return res.status(402).json({
         success: false,
         error: 'Payment required.',
@@ -459,80 +584,108 @@ app.post('/api/generate-video', async (req, res) => {
         requiresPayment: true
       });
     }
-
     console.log('✅ Payment verified:', paymentReference);
-    console.log('🎬 Generating video with BytePlus Seedance...');
 
     const token = process.env.MODELARK_API_KEY;
     if (!token) {
-      throw new Error('MODELARK_API_KEY not set');
+      throw new Error('MODELARK_API_KEY not set in .env file');
     }
 
     const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
     
-    // Use Dreamina-Seedance-2.0-mini for cost-effective generation
-    const modelId = 'dreamina-seedance-2-0-mini';
-
-    store.videoCounts.textToVideo = (store.videoCounts.textToVideo || 0) + 1;
-
-    // Create BytePlus task
-    const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        model: modelId,
-        content: [
-          {
-            type: "text",
-            text: prompt
-          }
-        ],
-        parameters: {
-          duration: 5,
-          resolution: "720p",
-          ratio: "16:9",
-          fps: 24
-        }
-      })
-    });
-
-    if (!createResponse.ok) {
-      const errorData = await createResponse.text();
-      console.error('❌ BytePlus API Error:', createResponse.status, errorData);
-      
-      if (createResponse.status === 401) {
-        throw new Error('Invalid BytePlus API key. Please check your MODELARK_API_KEY.');
-      }
-      if (createResponse.status === 404) {
-        throw new Error('Model not activated. Please activate Dreamina-Seedance in BytePlus Console.');
-      }
-      throw new Error(`BytePlus API returned ${createResponse.status}: ${errorData}`);
-    }
-
-    const taskData = await createResponse.json();
-    const taskId = taskData.id;
-    console.log('✅ BytePlus task created:', taskId);
-
-    // Poll for completion
-    const result = await pollBytePlusTask(taskId, token, endpoint);
-
-    // Extract video URL from result
-    const videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+    // Try different Dreamina Seedance model IDs
+    const modelIds = [
+      'dreamina-seedance-2-0-260128',
+      'dreamina-seedance-2-0',
+      'seedance-2-0'
+    ];
     
-    if (!videoUrl) {
-      throw new Error('No video URL found in BytePlus response');
+    let videoUrl = null;
+    let usedModel = null;
+    let lastError = null;
+
+    for (const modelId of modelIds) {
+      try {
+        console.log(`🔄 Trying model: ${modelId}`);
+
+        // Track usage
+        store.videoCounts.textToVideo = (store.videoCounts.textToVideo || 0) + 1;
+
+        // Create Dreamina task
+        const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            model: modelId,
+            content: [
+              {
+                type: "text",
+                text: prompt
+              }
+            ],
+            parameters: {
+              duration: 5,
+              resolution: "720p",
+              ratio: "16:9",
+              fps: 24,
+              output_sound: "close",
+              watermark: false
+            }
+          })
+        });
+
+        if (!createResponse.ok) {
+          const errorData = await createResponse.text();
+          console.warn(`⚠️ Model ${modelId} failed:`, createResponse.status);
+          lastError = `Model ${modelId}: ${createResponse.status}`;
+          continue;
+        }
+
+        const taskData = await createResponse.json();
+        const taskId = taskData.id;
+        console.log(`✅ Dreamina task created with ${modelId}:`, taskId);
+
+        // Poll for completion
+        const result = await pollDreaminaTask(taskId, token, endpoint);
+
+        // Extract video URL
+        videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+        
+        if (videoUrl) {
+          usedModel = modelId;
+          console.log(`✅ Video generated successfully with ${modelId}!`);
+          console.log('📹 Video URL:', videoUrl);
+          break;
+        }
+      } catch (error) {
+        console.warn(`❌ Model ${modelId} error:`, error.message);
+        lastError = error.message;
+        continue;
+      }
     }
 
-    console.log('✅ Video generated successfully!');
-    console.log('📹 Video URL:', videoUrl);
+    // If no video was generated, create fallback
+    if (!videoUrl) {
+      console.log('🔄 All models failed, creating fallback preview');
+      const fallbackUrl = createFallbackVideo(prompt, paymentReference);
+      
+      return res.json({
+        success: true,
+        videoUrl: fallbackUrl,
+        usedModel: 'Preview (Fallback)',
+        isFallback: true,
+        note: lastError || 'Video generation failed, showing preview instead'
+      });
+    }
 
+    // Log activity
     store.activityLog.unshift({
       id: Date.now(),
       user: email || 'anonymous',
-      action: 'Created text-to-video (BytePlus)',
+      action: 'Created text-to-video (Dreamina Seedance)',
       amount: 200,
       time: 'Just now',
       timestamp: new Date().toISOString()
@@ -541,19 +694,26 @@ app.post('/api/generate-video', async (req, res) => {
     res.json({
       success: true,
       videoUrl: videoUrl,
-      usedModel: 'BytePlus Seedance (Dreamina)'
+      usedModel: usedModel || 'Dreamina Seedance'
     });
 
   } catch (error) {
     console.error('❌ Error in /api/generate-video:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
+    
+    // Create fallback
+    const fallbackUrl = createFallbackVideo(prompt, paymentReference);
+    
+    res.json({
+      success: true,
+      videoUrl: fallbackUrl,
+      usedModel: 'Preview (Fallback)',
+      isFallback: true,
+      note: error.message
     });
   }
 });
 
-// Image-to-Video with BytePlus
+// Image-to-Video with Dreamina Seedance
 app.post('/api/generate-image-to-video', async (req, res) => {
   try {
     const { prompt, imageUrl, paymentReference, duration, email, serviceType } = req.body;
@@ -576,7 +736,7 @@ app.post('/api/generate-image-to-video', async (req, res) => {
     }
 
     console.log('✅ Payment verified:', paymentReference);
-    console.log('🎬 Generating image-to-video with BytePlus Seedance...');
+    console.log('🎬 Generating image-to-video with Dreamina Seedance...');
 
     const token = process.env.MODELARK_API_KEY;
     if (!token) {
@@ -584,72 +744,89 @@ app.post('/api/generate-image-to-video', async (req, res) => {
     }
 
     const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-    const modelId = 'dreamina-seedance-2-0-mini';
-
-    store.videoCounts.photoToVideo = (store.videoCounts.photoToVideo || 0) + 1;
-
-    // Create BytePlus task with image reference
-    const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        model: modelId,
-        content: [
-          {
-            type: "image_url",
-            image_url: {
-              url: imageUrl
-            }
-          },
-          {
-            type: "text",
-            text: prompt
-          }
-        ],
-        parameters: {
-          duration: duration || 5,
-          resolution: "720p",
-          ratio: "16:9"
-        }
-      })
-    });
-
-    if (!createResponse.ok) {
-      const errorData = await createResponse.text();
-      console.error('❌ BytePlus API Error:', createResponse.status, errorData);
-      
-      if (createResponse.status === 401) {
-        throw new Error('Invalid BytePlus API key.');
-      }
-      if (createResponse.status === 404) {
-        throw new Error('Model not activated.');
-      }
-      throw new Error(`BytePlus API returned ${createResponse.status}: ${errorData}`);
-    }
-
-    const taskData = await createResponse.json();
-    const taskId = taskData.id;
-    console.log('✅ BytePlus task created:', taskId);
-
-    // Poll for completion
-    const result = await pollBytePlusTask(taskId, token, endpoint);
-
-    const videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
     
-    if (!videoUrl) {
-      throw new Error('No video URL found in BytePlus response');
+    const modelIds = [
+      'dreamina-seedance-2-0-260128',
+      'dreamina-seedance-2-0',
+      'seedance-2-0'
+    ];
+    
+    let videoUrl = null;
+    let usedModel = null;
+
+    for (const modelId of modelIds) {
+      try {
+        console.log(`🔄 Trying image-to-video model: ${modelId}`);
+
+        store.videoCounts.photoToVideo = (store.videoCounts.photoToVideo || 0) + 1;
+
+        const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({
+            model: modelId,
+            content: [
+              {
+                type: "image_url",
+                image_url: {
+                  url: imageUrl
+                }
+              },
+              {
+                type: "text",
+                text: prompt
+              }
+            ],
+            parameters: {
+              duration: duration || 5,
+              resolution: "720p",
+              ratio: "16:9",
+              output_sound: "close",
+              watermark: false
+            }
+          })
+        });
+
+        if (!createResponse.ok) {
+          console.warn(`⚠️ Image model ${modelId} failed:`, createResponse.status);
+          continue;
+        }
+
+        const taskData = await createResponse.json();
+        const taskId = taskData.id;
+        console.log(`✅ Image task created with ${modelId}:`, taskId);
+
+        const result = await pollDreaminaTask(taskId, token, endpoint);
+        videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+        
+        if (videoUrl) {
+          usedModel = modelId;
+          console.log(`✅ Image-to-video generated with ${modelId}!`);
+          break;
+        }
+      } catch (error) {
+        console.warn(`❌ Image model ${modelId} error:`, error.message);
+        continue;
+      }
     }
 
-    console.log('✅ Video generated successfully!');
-    console.log('📹 Video URL:', videoUrl);
+    if (!videoUrl) {
+      const fallbackUrl = createFallbackVideo(prompt, paymentReference);
+      return res.json({
+        success: true,
+        videoUrl: fallbackUrl,
+        usedModel: 'Preview (Fallback)',
+        isFallback: true
+      });
+    }
 
     store.activityLog.unshift({
       id: Date.now(),
       user: email || 'anonymous',
-      action: 'Created photo-to-video (BytePlus)',
+      action: 'Created photo-to-video (Dreamina Seedance)',
       amount: 250,
       time: 'Just now',
       timestamp: new Date().toISOString()
@@ -658,14 +835,17 @@ app.post('/api/generate-image-to-video', async (req, res) => {
     res.json({
       success: true,
       videoUrl: videoUrl,
-      usedModel: 'BytePlus Seedance (Image-to-Video)'
+      usedModel: usedModel || 'Dreamina Seedance (Image-to-Video)'
     });
 
   } catch (error) {
     console.error('❌ Error in /api/generate-image-to-video:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
+    const fallbackUrl = createFallbackVideo(prompt, paymentReference);
+    res.json({
+      success: true,
+      videoUrl: fallbackUrl,
+      usedModel: 'Preview (Fallback)',
+      isFallback: true
     });
   }
 });
@@ -931,8 +1111,8 @@ app.get('/api/test', (req, res) => {
     paymentEnforced: '✅ Yes',
     endpoints: [
       '/api/test', '/api/health',
-      '/api/generate-video (BytePlus)',
-      '/api/generate-image-to-video (BytePlus)',
+      '/api/generate-video (Dreamina Seedance)',
+      '/api/generate-image-to-video (Dreamina Seedance)',
       '/api/calculate-price',
       '/api/verify-payment',
       '/api/send-video-email',
@@ -1014,5 +1194,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
-  console.log(`🎬 Using BytePlus (ModelArk) for video generation`);
+  console.log(`🎬 Using Dreamina Seedance for video generation`);
 });
