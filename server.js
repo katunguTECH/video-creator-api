@@ -5,11 +5,11 @@ require('dotenv').config();
 
 const express = require('express');
 const cors = require('cors');
-// Using Node's built-in global fetch (Node 18+) — no node-fetch package needed.
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const nodemailer = require('nodemailer');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -18,14 +18,89 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 Replicate Token:', process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
-console.log('💰 Replicate Balance:', process.env.REPLICATE_BALANCE ? `$${process.env.REPLICATE_BALANCE}` : '❌ Not set');
-console.log('💰 BytePlus Balance:', process.env.BYTEPLUS_BALANCE ? `$${process.env.BYTEPLUS_BALANCE}` : '❌ Not set');
-console.log('💳 Payment Enforcement: Enabled (No Test Mode)');
+console.log('📧 Email configured:', process.env.EMAIL_USER ? '✅ Set' : '❌ Not set');
 
 // ============================================
-// IN-MEMORY DATA STORE FOR DEMO
+// EMAIL CONFIGURATION
 // ============================================
-// In production, use a database
+
+// Create email transporter
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.EMAIL_PORT) || 587,
+  secure: process.env.EMAIL_SECURE === 'true',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
+  }
+});
+
+// Email template for video delivery
+function generateVideoEmail(email, videoUrl, prompt, amount) {
+  return {
+    from: process.env.EMAIL_FROM || `"VidAI Creator" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: '🎬 Your AI Video is Ready!',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
+          .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .header h1 { color: white; margin: 0; font-size: 28px; }
+          .content { padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px; }
+          .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
+          .video-container video { width: 100%; max-height: 400px; }
+          .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
+          .details { background: white; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e0e0e0; }
+          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>🎬 Your AI Video is Ready!</h1>
+        </div>
+        <div class="content">
+          <p>Hi there,</p>
+          <p>Your AI-generated video has been created successfully! 🎉</p>
+          
+          <div class="details">
+            <p><strong>📝 Prompt:</strong> ${prompt}</p>
+            <p><strong>💰 Amount Paid:</strong> KES ${amount}</p>
+          </div>
+          
+          <div class="video-container">
+            <video controls>
+              <source src="${videoUrl}" type="video/mp4">
+              Your browser does not support the video tag.
+            </video>
+          </div>
+          
+          <p style="text-align: center;">
+            <a href="${videoUrl}" class="button" download>📥 Download Video</a>
+          </p>
+          
+          <p style="text-align: center; font-size: 14px; color: #666;">
+            Or copy this link to share: <br>
+            <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
+          </p>
+          
+          <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
+          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+        </div>
+        <div class="footer">
+          <p>This email was sent to ${email}. If you have any questions, reply to this email.</p>
+        </div>
+      </body>
+      </html>
+    `
+  };
+}
+
+// ============================================
+// IN-MEMORY DATA STORE
+// ============================================
 const store = {
   activityLog: [],
   visitCount: 0,
@@ -50,13 +125,6 @@ async function verifyPayment(reference) {
   try {
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
-    const isLive = secretKey && secretKey.startsWith('sk_live_');
-
-    console.log('🔍 Verifying payment:', {
-      reference,
-      isLive: isLive ? 'LIVE' : 'Test'
-    });
-
     if (!secretKey) {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set.');
       return false;
@@ -78,15 +146,7 @@ async function verifyPayment(reference) {
     const data = await response.json();
     console.log('📦 Paystack verification:', data.status, data.data?.status);
 
-    const isSuccessful = data.status && data.data?.status === 'success';
-
-    if (isSuccessful) {
-      console.log('✅ Payment verified successfully for reference:', reference);
-    } else {
-      console.log('❌ Payment verification failed for reference:', reference);
-    }
-
-    return isSuccessful;
+    return data.status && data.data?.status === 'success';
   } catch (error) {
     console.error('❌ Payment verification error:', error.message);
     return false;
@@ -94,25 +154,21 @@ async function verifyPayment(reference) {
 }
 
 // ============================================
-// MIDDLEWARE - SIMPLIFIED CORS
+// MIDDLEWARE
 // ============================================
-// Allow all origins (for testing)
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 
-// Handle preflight requests
 app.options('*', cors());
 
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
-// Serve uploaded files statically
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Log all requests
 app.use((req, res, next) => {
   console.log(`${req.method} ${req.url}`);
   next();
@@ -143,7 +199,7 @@ const upload = multer({
     if (allowedTypes.includes(file.mimetype)) {
       cb(null, true);
     } else {
-      cb(new Error('Invalid file type. Please upload a video file.'), false);
+      cb(new Error('Invalid file type.'), false);
     }
   }
 });
@@ -157,7 +213,6 @@ app.post('/api/calculate-price', (req, res) => {
     console.log('📦 Request body:', req.body);
 
     const { serviceType, options } = req.body;
-
     const duration = options?.duration || 5;
     const photoCount = options?.photoCount || 0;
 
@@ -236,23 +291,14 @@ app.post('/api/verify-payment', async (req, res) => {
     const { reference, email, amount, serviceType } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
-    const isLive = secretKey && secretKey.startsWith('sk_live_');
-
-    console.log('🔑 Payment verification:', {
-      reference,
-      email,
-      amount,
-      serviceType,
-      isLive: isLive ? 'LIVE' : 'Test'
-    });
+    console.log('🔑 Payment verification:', { reference, email, amount, serviceType });
 
     if (!secretKey) {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set.');
-      res.json({
+      return res.json({
         success: false,
         error: 'Paystack secret key not configured'
       });
-      return;
     }
 
     const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
@@ -269,7 +315,6 @@ app.post('/api/verify-payment', async (req, res) => {
     if (data.status && data.data.status === 'success') {
       console.log(`✅ Payment successful for ${email}: KES ${amount}`);
 
-      // Log revenue
       const serviceMap = {
         'text-to-video': 'textToVideo',
         'photo-to-video': 'photoToVideo',
@@ -280,23 +325,15 @@ app.post('/api/verify-payment', async (req, res) => {
       store.revenue.total += amount;
       store.revenue[serviceKey] = (store.revenue[serviceKey] || 0) + amount;
 
-      // Log activity
-      const actionMap = {
-        'text-to-video': 'Created text-to-video',
-        'photo-to-video': 'Created photo-to-video',
-        'translation': 'Translated video'
-      };
-
       store.activityLog.unshift({
         id: Date.now(),
         user: email || 'anonymous',
-        action: actionMap[serviceType] || 'Generated video',
+        action: `${serviceType} generated`,
         amount: amount,
         time: 'Just now',
         timestamp: new Date().toISOString()
       });
 
-      // Keep only last 100 activities
       if (store.activityLog.length > 100) {
         store.activityLog = store.activityLog.slice(0, 100);
       }
@@ -321,50 +358,36 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
-// Paystack Webhook endpoint
-app.post('/api/webhook/paystack', (req, res) => {
+// ============================================
+// SEND VIDEO EMAIL ENDPOINT
+// ============================================
+
+app.post('/api/send-video-email', async (req, res) => {
   try {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-    const payload = req.body;
+    const { email, videoUrl, prompt, amount } = req.body;
 
-    console.log('📦 Webhook received');
-
-    if (!secret) {
-      console.log('⚠️ Webhook received but PAYSTACK_SECRET_KEY not set.');
-      res.sendStatus(200);
-      return;
+    if (!email || !videoUrl) {
+      throw new Error('Email and video URL are required');
     }
 
-    const hash = crypto
-      .createHmac('sha512', secret)
-      .update(JSON.stringify(payload))
-      .digest('hex');
+    console.log(`📧 Sending video to ${email}`);
+    console.log(`📹 Video URL: ${videoUrl}`);
 
-    if (hash !== req.headers['x-paystack-signature']) {
-      console.error('❌ Invalid webhook signature');
-      return res.status(401).send('Invalid signature');
-    }
+    const mailOptions = generateVideoEmail(email, videoUrl, prompt, amount);
 
-    const event = payload;
+    await transporter.sendMail(mailOptions);
+    console.log('✅ Email sent successfully');
 
-    if (event.event === 'charge.success') {
-      const transaction = event.data;
-      console.log(`✅ Payment successful!`);
-      console.log(`   Reference: ${transaction.reference}`);
-      console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
-      console.log(`   Customer: ${transaction.customer.email}`);
-
-      res.sendStatus(200);
-    } else if (event.event === 'charge.failed') {
-      console.log(`❌ Payment failed for reference: ${event.data.reference}`);
-      res.sendStatus(200);
-    } else {
-      console.log(`⚡ Event received: ${event.event}`);
-      res.sendStatus(200);
-    }
+    res.json({
+      success: true,
+      message: 'Video sent to your email'
+    });
   } catch (error) {
-    console.error('❌ Webhook error:', error.message);
-    res.status(500).send('Webhook processing failed');
+    console.error('❌ Email error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
@@ -372,16 +395,13 @@ app.post('/api/webhook/paystack', (req, res) => {
 // ADMIN DASHBOARD ENDPOINTS
 // ============================================
 
-// Get Replicate credits from environment variable
 async function getReplicateCredits() {
   try {
-    // Use environment variable for balance
     const balance = parseFloat(process.env.REPLICATE_BALANCE) || 0;
-    
     return {
       balance: balance,
       currency: 'USD',
-      note: 'Set via environment variable (REPLICATE_BALANCE)'
+      note: 'Set via environment variable'
     };
   } catch (error) {
     console.error('Error fetching Replicate credits:', error);
@@ -389,16 +409,13 @@ async function getReplicateCredits() {
   }
 }
 
-// Get BytePlus credits from environment variable
 async function getByteplusCredits() {
   try {
-    // Use environment variable for balance
     const balance = parseFloat(process.env.BYTEPLUS_BALANCE) || 0;
-    
     return {
       balance: balance,
       currency: 'USD',
-      note: 'Set via environment variable (BYTEPLUS_BALANCE)'
+      note: 'Set via environment variable'
     };
   } catch (error) {
     console.error('Error fetching BytePlus credits:', error);
@@ -426,9 +443,7 @@ function getUsage() {
 }
 
 function getVisits() {
-  // Increment visit count
   store.visitCount++;
-
   return {
     total: store.visitCount || 0,
     today: 47,
@@ -441,7 +456,6 @@ function getActivity() {
   return store.activityLog || [];
 }
 
-// Individual routes (kept for direct debugging / backward compatibility)
 app.get('/api/admin/credits/replicate', async (req, res) => {
   res.json(await getReplicateCredits());
 });
@@ -486,7 +500,6 @@ app.get('/api/admin/activity', (req, res) => {
   }
 });
 
-// Combined dashboard data endpoint — no more internal self-fetch
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
     const [creditsReplicate, creditsByteplus] = await Promise.all([
@@ -512,44 +525,37 @@ app.get('/api/admin/dashboard', async (req, res) => {
 });
 
 // ============================================
-// TEXT-TO-VIDEO WITH REPLICATE
+// VIDEO GENERATION WITH REPLICATE
 // ============================================
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, serviceType } = req.body;
 
-    // ALWAYS ENFORCE PAYMENT - No test mode
     if (!paymentReference) {
-      console.log('❌ Payment required - No payment reference provided');
       return res.status(402).json({
         success: false,
-        error: 'Payment required. Please complete payment first.',
+        error: 'Payment required.',
         requiresPayment: true
       });
     }
 
-    // Always verify payment reference
     const isValid = await verifyPayment(paymentReference);
     if (!isValid) {
-      console.log('❌ Invalid or expired payment:', paymentReference);
       return res.status(402).json({
         success: false,
-        error: 'Invalid or expired payment. Please make a new payment.',
+        error: 'Invalid or expired payment.',
         requiresPayment: true
       });
     }
-    console.log('✅ Payment verified:', paymentReference);
 
-    console.log('🎬 Generating text-to-video with Replicate HappyHorse...');
-    console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
+    console.log('✅ Payment verified:', paymentReference);
+    console.log('🎬 Generating video...');
 
     const token = process.env.REPLICATE_API_TOKEN;
-
     if (!token) {
-      throw new Error('REPLICATE_API_TOKEN not set in .env file');
+      throw new Error('REPLICATE_API_TOKEN not set');
     }
 
-    // Track usage
     store.videoCounts.textToVideo = (store.videoCounts.textToVideo || 0) + 1;
 
     const response = await fetch('https://api.replicate.com/v1/predictions', {
@@ -574,39 +580,26 @@ app.post('/api/generate-video', async (req, res) => {
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('❌ Replicate API Error:', response.status);
-      console.error('❌ Error details:', errorData);
-
-      if (response.status === 402) {
-        throw new Error('Insufficient Replicate credits. Please add credits at https://replicate.com/account/billing');
-      }
-      throw new Error(`Replicate API returned ${response.status}: ${errorData}`);
+      console.error('❌ Replicate API Error:', response.status, errorData);
+      throw new Error(`Replicate API returned ${response.status}`);
     }
 
     const data = await response.json();
     console.log('✅ Prediction created:', data.id);
 
-    // Poll for completion
     let prediction = data;
     let attempts = 0;
     const maxAttempts = 60;
 
     while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < maxAttempts) {
       await new Promise(resolve => setTimeout(resolve, 2000));
-
       const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
-        headers: {
-          'Authorization': `Token ${token}`,
-        }
+        headers: { 'Authorization': `Token ${token}` }
       });
-
-      if (!pollResponse.ok) {
-        throw new Error(`Polling failed: ${pollResponse.status}`);
-      }
-
+      if (!pollResponse.ok) throw new Error(`Polling failed: ${pollResponse.status}`);
       prediction = await pollResponse.json();
       attempts++;
-      console.log(`⏳ Polling attempt ${attempts}: Status = ${prediction.status}`);
+      console.log(`⏳ Polling attempt ${attempts}: ${prediction.status}`);
     }
 
     if (prediction.status === 'failed') {
@@ -619,7 +612,8 @@ app.post('/api/generate-video', async (req, res) => {
 
     console.log('✅ Video generated successfully!');
 
-    // Log activity
+    const videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
+
     store.activityLog.unshift({
       id: Date.now(),
       user: email || 'anonymous',
@@ -631,7 +625,7 @@ app.post('/api/generate-video', async (req, res) => {
 
     res.json({
       success: true,
-      videoUrl: prediction.output,
+      videoUrl: videoUrl,
       usedModel: 'HappyHorse (Replicate)'
     });
 
@@ -647,40 +641,35 @@ app.post('/api/generate-video', async (req, res) => {
 // ============================================
 // IMAGE-TO-VIDEO WITH REPLICATE
 // ============================================
-
 app.post('/api/generate-image-to-video', async (req, res) => {
   try {
     const { prompt, imageUrl, paymentReference, duration, email, serviceType } = req.body;
 
     if (!paymentReference) {
-      console.log('❌ Payment required - No payment reference provided');
       return res.status(402).json({
         success: false,
-        error: 'Payment required. Please complete payment first.',
+        error: 'Payment required.',
         requiresPayment: true
       });
     }
 
     const isValid = await verifyPayment(paymentReference);
     if (!isValid) {
-      console.log('❌ Invalid or expired payment:', paymentReference);
       return res.status(402).json({
         success: false,
-        error: 'Invalid or expired payment. Please make a new payment.',
+        error: 'Invalid or expired payment.',
         requiresPayment: true
       });
     }
-    console.log('✅ Payment verified:', paymentReference);
 
-    console.log('🎬 Generating image-to-video with Replicate...');
+    console.log('✅ Payment verified:', paymentReference);
+    console.log('🎬 Generating image-to-video...');
 
     const token = process.env.REPLICATE_API_TOKEN;
-
     if (!token) {
-      throw new Error('REPLICATE_API_TOKEN not set in .env file');
+      throw new Error('REPLICATE_API_TOKEN not set');
     }
 
-    // Track usage
     store.videoCounts.photoToVideo = (store.videoCounts.photoToVideo || 0) + 1;
 
     const response = await fetch('https://api.replicate.com/v1/predictions', {
@@ -705,13 +694,8 @@ app.post('/api/generate-image-to-video', async (req, res) => {
 
     if (!response.ok) {
       const errorData = await response.text();
-      console.error('❌ Replicate API Error:', response.status);
-      console.error('❌ Error details:', errorData);
-
-      if (response.status === 402) {
-        throw new Error('Insufficient Replicate credits. Please add credits at https://replicate.com/account/billing');
-      }
-      throw new Error(`Replicate API returned ${response.status}: ${errorData}`);
+      console.error('❌ Replicate API Error:', response.status, errorData);
+      throw new Error(`Replicate API returned ${response.status}`);
     }
 
     const data = await response.json();
@@ -723,20 +707,13 @@ app.post('/api/generate-image-to-video', async (req, res) => {
 
     while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < maxAttempts) {
       await new Promise(resolve => setTimeout(resolve, 2000));
-
       const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
-        headers: {
-          'Authorization': `Token ${token}`,
-        }
+        headers: { 'Authorization': `Token ${token}` }
       });
-
-      if (!pollResponse.ok) {
-        throw new Error(`Polling failed: ${pollResponse.status}`);
-      }
-
+      if (!pollResponse.ok) throw new Error(`Polling failed: ${pollResponse.status}`);
       prediction = await pollResponse.json();
       attempts++;
-      console.log(`⏳ Polling attempt ${attempts}: Status = ${prediction.status}`);
+      console.log(`⏳ Polling attempt ${attempts}: ${prediction.status}`);
     }
 
     if (prediction.status === 'failed') {
@@ -749,7 +726,8 @@ app.post('/api/generate-image-to-video', async (req, res) => {
 
     console.log('✅ Video generated successfully!');
 
-    // Log activity
+    const videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
+
     store.activityLog.unshift({
       id: Date.now(),
       user: email || 'anonymous',
@@ -761,7 +739,7 @@ app.post('/api/generate-image-to-video', async (req, res) => {
 
     res.json({
       success: true,
-      videoUrl: prediction.output,
+      videoUrl: videoUrl,
       usedModel: 'Stable Video Diffusion (Image-to-Video)'
     });
 
@@ -875,7 +853,6 @@ app.post('/api/translate-text', async (req, res) => {
       }
     }
 
-    // Fallback: Simulated translation
     res.json({
       success: true,
       originalText: text,
@@ -900,16 +877,14 @@ app.get('/api/test', (req, res) => {
   res.json({
     status: 'Server is running!',
     environment: isProduction ? 'production' : 'development',
-    paymentEnforced: '✅ Yes (No Test Mode)',
+    paymentEnforced: '✅ Yes',
     endpoints: [
-      '/api/test',
-      '/api/health',
-      '/api/generate-video (Text-to-Video - HappyHorse)',
-      '/api/generate-image-to-video (Image-to-Video - Stable Diffusion)',
+      '/api/test', '/api/health',
+      '/api/generate-video',
+      '/api/generate-image-to-video',
       '/api/calculate-price',
-      '/api/free-languages',
       '/api/verify-payment',
-      '/api/webhook/paystack',
+      '/api/send-video-email',
       '/api/admin/dashboard'
     ]
   });
@@ -921,32 +896,26 @@ app.get('/api/health', (req, res) => {
     timestamp: new Date().toISOString(),
     environment: isProduction ? 'production' : 'development',
     uptime: process.uptime(),
-    paymentEnforced: 'Yes (No Test Mode)',
     replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
-    paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'
+    paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
+    email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No'
   });
 });
 
-// ============================================
-// ROOT ENDPOINT - API INFO
-// ============================================
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
     version: '1.0.0',
     status: 'running',
-    environment: isProduction ? 'production' : 'development',
-    paymentEnforced: 'Yes - All requests require payment',
     endpoints: [
-      { path: '/api/test', method: 'GET', description: 'Test endpoint' },
-      { path: '/api/health', method: 'GET', description: 'Health check' },
-      { path: '/api/generate-video', method: 'POST', description: 'Text-to-Video (Payment Required)' },
-      { path: '/api/generate-image-to-video', method: 'POST', description: 'Image-to-Video (Payment Required)' },
-      { path: '/api/calculate-price', method: 'POST', description: 'Calculate video price' },
-      { path: '/api/free-languages', method: 'GET', description: 'Get supported languages' },
-      { path: '/api/verify-payment', method: 'POST', description: 'Verify payment' },
-      { path: '/api/webhook/paystack', method: 'POST', description: 'Paystack webhook' },
-      { path: '/api/admin/dashboard', method: 'GET', description: 'Admin dashboard data' }
+      { path: '/api/test', method: 'GET' },
+      { path: '/api/health', method: 'GET' },
+      { path: '/api/generate-video', method: 'POST' },
+      { path: '/api/generate-image-to-video', method: 'POST' },
+      { path: '/api/calculate-price', method: 'POST' },
+      { path: '/api/verify-payment', method: 'POST' },
+      { path: '/api/send-video-email', method: 'POST' },
+      { path: '/api/admin/dashboard', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
@@ -958,13 +927,8 @@ app.get('/', (req, res) => {
 const buildPath = path.join(__dirname, 'build');
 if (isProduction && fs.existsSync(buildPath)) {
   console.log('📁 Serving frontend from build folder');
-
-  // Serve static files (CSS, JS, images) from the build folder
   app.use(express.static(buildPath));
-
-  // All other routes should serve index.html for React Router
   app.get('*', (req, res, next) => {
-    // Skip API routes (they're already handled above)
     if (req.path.startsWith('/api')) {
       return next();
     }
@@ -974,14 +938,8 @@ if (isProduction && fs.existsSync(buildPath)) {
   console.log('ℹ️ Build folder not found - API only mode');
 }
 
-// ============================================
-// ERROR HANDLING
-// ============================================
 app.use((req, res) => {
-  res.status(404).json({
-    error: 'Endpoint not found',
-    message: 'Check /api/test for available endpoints'
-  });
+  res.status(404).json({ error: 'Endpoint not found' });
 });
 
 app.use((err, req, res, next) => {
@@ -1003,11 +961,6 @@ if (!fs.existsSync(uploadsDir)) {
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
-  console.log(`💳 Payment Enforcement: Enabled (No Test Mode)`);
-  console.log(`🔑 Replicate Token: ${process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set'}`);
-  console.log(`🔑 Paystack Secret: ${process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set'}`);
-  console.log(`💰 Replicate Balance: ${process.env.REPLICATE_BALANCE ? `$${process.env.REPLICATE_BALANCE}` : '❌ Not set'}`);
-  console.log(`💰 BytePlus Balance: ${process.env.BYTEPLUS_BALANCE ? `$${process.env.BYTEPLUS_BALANCE}` : '❌ Not set'}`);
+  console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
-  console.log(`📁 Build folder exists: ${fs.existsSync(buildPath) ? '✅ Yes' : '❌ No'}`);
 });

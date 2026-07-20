@@ -5,11 +5,6 @@ import { PaystackButton } from 'react-paystack';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 
-// Debug: Log environment variables
-console.log('🔑 Environment Variables Check:');
-console.log('REACT_APP_PAYSTACK_PUBLIC_KEY:', process.env.REACT_APP_PAYSTACK_PUBLIC_KEY ? '✅ Set' : '❌ Missing');
-console.log('REACT_APP_API_URL:', process.env.REACT_APP_API_URL ? '✅ Set' : '❌ Missing');
-
 function CreateVideo() {
   const navigate = useNavigate();
   const [prompt, setPrompt] = useState('');
@@ -19,12 +14,11 @@ function CreateVideo() {
   const [activeTab, setActiveTab] = useState('text');
   const [duration, setDuration] = useState(5);
 
-  // Payment states
   const [email, setEmail] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
+  const [paymentReference, setPaymentReference] = useState(null);
 
-  // Price states
   const [priceData, setPriceData] = useState(null);
   const [isLoadingPrice, setIsLoadingPrice] = useState(false);
   const [amount, setAmount] = useState(0);
@@ -40,21 +34,6 @@ function CreateVideo() {
     }
   });
 
-  // Paystack configuration
-  const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
-  
-  // Check if we're using live keys
-  const isLive = publicKey && publicKey.startsWith('pk_live_');
-  const hasValidKey = publicKey && publicKey !== 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' && publicKey.startsWith('pk_');
-
-  console.log('🔑 Paystack Key Status:', {
-    exists: !!publicKey,
-    isLive: isLive,
-    isValid: hasValidKey,
-    keyPreview: publicKey ? publicKey.substring(0, 15) + '...' : 'None'
-  });
-
-  // Calculate price with 10x markup
   const calculatePrice = async () => {
     try {
       setIsLoadingPrice(true);
@@ -68,25 +47,13 @@ function CreateVideo() {
         options = { photoCount: photos.length };
       }
 
-      console.log('💰 Calculating price with:', { serviceType, options });
-
       const response = await fetch(`${API_URL}/api/calculate-price`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          serviceType: serviceType,
-          options: options
-        })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ serviceType, options })
       });
 
-      if (!response.ok) {
-        throw new Error(`HTTP error! status: ${response.status}`);
-      }
-
       const data = await response.json();
-      console.log('📦 Price response:', data);
 
       if (data.success) {
         setPriceData(data.price);
@@ -97,7 +64,6 @@ function CreateVideo() {
     } catch (error) {
       console.error('❌ Price calculation error:', error);
       setPriceError(error.message);
-      // Fallback pricing
       const fallbackPrice = 200;
       setAmount(fallbackPrice);
       setPriceData({
@@ -122,9 +88,9 @@ function CreateVideo() {
 
   const handlePaymentSuccess = (reference) => {
     console.log('✅ Payment successful!', reference);
+    setPaymentReference(reference);
     setIsProcessing(true);
 
-    // Navigate to preview with payment reference
     navigate('/preview', {
       state: {
         prompt,
@@ -146,58 +112,40 @@ function CreateVideo() {
   };
 
   const initiatePayment = () => {
-    // Validate inputs
     if (!email) {
       alert('Please enter your email address');
       return;
     }
 
-    if (activeTab === 'text' && !prompt.trim()) {
+    if (!prompt.trim()) {
       alert('Please enter a text prompt!');
       return;
     }
 
-    if (activeTab === 'photos' && photos.length === 0) {
+    if (photos.length === 0) {
       alert('Please upload at least one photo!');
       return;
     }
 
-    // Show payment modal
-    console.log('💳 Opening payment modal for:', {
-      email,
-      amount,
-      publicKey: publicKey ? '✅ Set' : '❌ Missing',
-      isLive: isLive
-    });
-    
     setShowPayment(true);
   };
 
+  const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+  const isLive = publicKey && publicKey.startsWith('pk_live_');
+
   const paystackProps = {
     email: email,
-    amount: Math.round(amount * 100), // Convert to kobo
+    amount: Math.round(amount * 100),
     publicKey: publicKey,
-    currency: 'KES', // Explicitly set currency to KES
+    currency: 'KES',
     text: `Pay KES ${amount?.toFixed(2) || '0.00'}`,
     onSuccess: handlePaymentSuccess,
     onClose: handlePaymentClose,
     metadata: {
       custom_fields: [
-        {
-          display_name: "Video Type",
-          variable_name: "video_type",
-          value: activeTab === 'text' ? 'Text to Video' : 'Photos to Video'
-        },
-        {
-          display_name: "Duration",
-          variable_name: "duration",
-          value: `${duration}s`
-        },
-        {
-          display_name: "Email",
-          variable_name: "email",
-          value: email
-        }
+        { display_name: "Video Type", variable_name: "video_type", value: activeTab },
+        { display_name: "Duration", variable_name: "duration", value: `${duration}s` },
+        { display_name: "Email", variable_name: "email", value: email }
       ]
     }
   };
@@ -208,23 +156,22 @@ function CreateVideo() {
 
         <h2 className="text-3xl font-bold mb-2 text-center">🎬 Create Your Video</h2>
         <p className="text-gray-400 text-center mb-8">
-          {isLive ? '💳 Live Payments Enabled' : '🧪 Test Mode (Paystack Sandbox)'}
+          {isLive ? '💳 Live Payments Enabled' : '🧪 Test Mode'}
         </p>
 
-        {/* Email Input */}
         <div className="mb-4">
           <label className="block text-gray-300 mb-2 font-semibold">📧 Your Email</label>
           <input
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            placeholder="Enter your email for payment receipt"
+            placeholder="Enter your email for payment confirmation and video delivery"
             className="w-full bg-white/10 border border-white/20 rounded-2xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
             required
           />
+          <p className="text-xs text-gray-500 mt-1">Your video will be sent to this email after generation</p>
         </div>
 
-        {/* Duration Selector */}
         {activeTab === 'text' && (
           <div className="mb-4">
             <label className="block text-gray-300 mb-2 font-semibold">⏱️ Video Duration</label>
@@ -241,7 +188,6 @@ function CreateVideo() {
           </div>
         )}
 
-        {/* Tabs */}
         <div className="flex bg-white/10 rounded-full p-1 mb-8">
           <button
             onClick={() => setActiveTab('text')}
@@ -257,7 +203,6 @@ function CreateVideo() {
           </button>
         </div>
 
-        {/* Text Prompt Tab */}
         {activeTab === 'text' && (
           <div className="mb-6">
             <label className="block text-gray-300 mb-2 font-semibold">Describe your video</label>
@@ -270,7 +215,6 @@ function CreateVideo() {
           </div>
         )}
 
-        {/* Photos Tab */}
         {activeTab === 'photos' && (
           <div className="mb-6">
             <div
@@ -299,7 +243,6 @@ function CreateVideo() {
           </div>
         )}
 
-        {/* Music Selector */}
         <div className="mb-6">
           <label className="block text-gray-300 mb-2 font-semibold">🎵 Background Music</label>
           <div className="grid grid-cols-3 gap-3">
@@ -315,7 +258,6 @@ function CreateVideo() {
           </div>
         </div>
 
-        {/* Caption Input */}
         <div className="mb-8">
           <label className="block text-gray-300 mb-2 font-semibold">📝 Caption / Text Overlay</label>
           <input
@@ -326,7 +268,6 @@ function CreateVideo() {
           />
         </div>
 
-        {/* Price Display with Breakdown */}
         <div className="bg-white/10 rounded-2xl p-4 mb-6">
           <div className="flex justify-between items-center">
             <div>
@@ -352,36 +293,12 @@ function CreateVideo() {
                 <li>✅ AI video generation</li>
                 <li>✅ Music & effects</li>
                 <li>✅ HD quality</li>
+                <li>✅ Email delivery</li>
               </ul>
             </div>
           </div>
-
-          {priceData && priceData.breakdown && (
-            <div className="mt-3 pt-3 border-t border-white/10">
-              <p className="text-xs font-semibold text-gray-400">📊 Price Breakdown</p>
-              <div className="mt-1 space-y-1">
-                {priceData.breakdown.map((item, index) => (
-                  <div key={index} className="flex justify-between text-xs text-gray-400">
-                    <span>{item.item}</span>
-                    <span>KES {item.amount.toFixed(2)}</span>
-                  </div>
-                ))}
-                <div className="flex justify-between text-xs text-yellow-400 border-t border-white/10 pt-1 mt-1">
-                  <span>➕ {priceData.markupMultiplier}x Markup</span>
-                  <span>KES {priceData.markupAmount.toFixed(2)}</span>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {priceError && (
-            <div className="mt-2 text-xs text-red-400">
-              ⚠️ Price calculation error: {priceError}
-            </div>
-          )}
         </div>
 
-        {/* Payment Button */}
         {!showPayment ? (
           <button
             onClick={initiatePayment}
@@ -398,7 +315,7 @@ function CreateVideo() {
             <p className="text-center text-xs text-gray-400 mb-4">
               💳 You'll be redirected to Paystack to complete payment
             </p>
-            {hasValidKey ? (
+            {publicKey && publicKey.startsWith('pk_') ? (
               <PaystackButton 
                 className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105"
                 {...paystackProps} 
@@ -406,9 +323,6 @@ function CreateVideo() {
             ) : (
               <div className="bg-yellow-500/20 border border-yellow-500 rounded-2xl p-4 text-center">
                 <p className="text-yellow-400">⚠️ Payment keys not configured</p>
-                <p className="text-gray-400 text-sm mt-1">
-                  {!publicKey ? 'Please set REACT_APP_PAYSTACK_PUBLIC_KEY in environment' : 'Invalid key format. Please use a valid Paystack key.'}
-                </p>
                 <button
                   onClick={() => {
                     setShowPayment(false);
@@ -441,19 +355,13 @@ function CreateVideo() {
           </div>
         )}
 
-        {/* Payment Info */}
         <div className="mt-4 p-3 bg-white/5 rounded-xl text-center">
           <p className="text-xs text-gray-400">
             💳 Secure payment via Paystack • Card or M-Pesa accepted
           </p>
           <p className="text-xs text-gray-500 mt-1">
-            {isLive ? '🔒 Live Mode - Real Payments' : '🧪 Test Mode - Sandbox Environment'}
+            Your video will be available for download and sent to your email
           </p>
-          {!isLive && publicKey && (
-            <p className="text-xs text-yellow-400 mt-1">
-              ⚠️ Using test mode. Set LIVE key for real payments.
-            </p>
-          )}
         </div>
 
       </div>
