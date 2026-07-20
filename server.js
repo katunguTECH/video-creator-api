@@ -6,8 +6,6 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 // Using Node's built-in global fetch (Node 18+) — no node-fetch package needed.
-// node-fetch v3 is ESM-only and crashes when loaded with require(), which is
-// the likely cause of the server crash-looping on Render.
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
@@ -371,13 +369,8 @@ app.post('/api/webhook/paystack', (req, res) => {
 // ============================================
 // ADMIN DASHBOARD ENDPOINTS
 // ============================================
-// FIX: These used to be routes that /api/admin/dashboard called via
-// internal HTTP self-fetch (fetch(`${baseUrl}/api/admin/...`)). On Render's
-// free tier that self-fetch pattern is fragile during cold starts and was
-// the main cause of "Failed to fetch" in the admin panel. Now they're plain
-// functions, and the routes below are thin wrappers around them so nothing
-// else that depended on those individual endpoints breaks.
 
+// Get real API credits from Replicate
 async function getReplicateCredits() {
   try {
     const token = process.env.REPLICATE_API_TOKEN;
@@ -385,21 +378,37 @@ async function getReplicateCredits() {
       return { balance: 0, error: 'No token configured' };
     }
 
-    const response = await fetch('https://api.replicate.com/v1/account', {
-      headers: {
-        'Authorization': `Token ${token}`,
-      },
-      signal: AbortSignal.timeout(5000) // give up after 5s instead of hanging
-    });
+    // Try to fetch from Replicate API with proper authentication
+    try {
+      const response = await fetch('https://api.replicate.com/v1/billing/balance', {
+        headers: {
+          'Authorization': `Token ${token}`,
+          'Content-Type': 'application/json',
+        },
+        signal: AbortSignal.timeout(5000)
+      });
 
-    if (!response.ok) {
-      throw new Error('Failed to fetch Replicate account info');
+      if (response.ok) {
+        const data = await response.json();
+        const balance = data.balance || data.amount || 0;
+        return {
+          balance: parseFloat(balance),
+          currency: 'USD',
+          note: 'Fetched from Replicate API'
+        };
+      }
+    } catch (apiError) {
+      console.warn('Replicate API error, using manual fallback:', apiError.message);
     }
 
-    const data = await response.json();
+    // Fallback: Manual tracking
+    // Update this value when you add credits
+    const manualBalance = 10.00;
+    
     return {
-      balance: data.balance || 45.80,
-      currency: 'USD'
+      balance: manualBalance,
+      currency: 'USD',
+      note: 'Manual tracking - update when credits change'
     };
   } catch (error) {
     console.error('Error fetching Replicate credits:', error);
@@ -407,6 +416,7 @@ async function getReplicateCredits() {
   }
 }
 
+// Get real API credits from BytePlus
 async function getByteplusCredits() {
   try {
     const token = process.env.MODELARK_API_KEY;
@@ -418,7 +428,7 @@ async function getByteplusCredits() {
       headers: {
         'Authorization': `Bearer ${token}`,
       },
-      signal: AbortSignal.timeout(5000) // give up after 5s instead of hanging
+      signal: AbortSignal.timeout(5000)
     });
 
     if (!response.ok) {
