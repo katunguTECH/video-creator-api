@@ -18,6 +18,12 @@ function CreateVideo() {
   const [isProcessing, setIsProcessing] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [paymentReference, setPaymentReference] = useState(null);
+  
+  // Retry states
+  const [hasFailedPayment, setHasFailedPayment] = useState(false);
+  const [failedPaymentRef, setFailedPaymentRef] = useState(null);
+  const [error, setError] = useState(null);
+  const [statusMessage, setStatusMessage] = useState('');
 
   const [priceData, setPriceData] = useState(null);
   const [isLoadingPrice, setIsLoadingPrice] = useState(false);
@@ -33,6 +39,71 @@ function CreateVideo() {
       setPhotos(prev => [...prev, ...previews]);
     }
   });
+
+  // Check for failed payments when email changes
+  useEffect(() => {
+    if (email) {
+      checkFailedPayment();
+    }
+  }, [email]);
+
+  const checkFailedPayment = async () => {
+    if (!email) return;
+    
+    try {
+      console.log('🔍 Checking for failed payments for:', email);
+      const response = await fetch(`${API_URL}/api/check-failed-by-email`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ email })
+      });
+      
+      const data = await response.json();
+      console.log('📦 Failed payment check response:', data);
+      
+      if (data.success && data.hasFailed) {
+        setHasFailedPayment(true);
+        setFailedPaymentRef(data.paymentReference);
+        setStatusMessage('⚠️ You have a failed video generation. Click "Retry Failed Video" to try again for free.');
+        console.log('📝 Found failed payment:', data.paymentReference);
+      }
+    } catch (error) {
+      console.error('Error checking failed payment:', error);
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!failedPaymentRef) return;
+    
+    setIsProcessing(true);
+    setStatusMessage('🔄 Retrying failed video (free)...');
+    setError(null);
+    
+    try {
+      // Navigate to preview with retry flag
+      navigate('/preview', {
+        state: {
+          prompt,
+          photos: photos.map(p => p.preview),
+          music,
+          caption,
+          activeTab,
+          paymentReference: failedPaymentRef,
+          amount: amount,
+          duration: duration,
+          email: email,
+          isRetry: true
+        }
+      });
+    } catch (error) {
+      console.error('Retry error:', error);
+      setError(error.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
 
   const calculatePrice = async () => {
     try {
@@ -64,15 +135,15 @@ function CreateVideo() {
     } catch (error) {
       console.error('❌ Price calculation error:', error);
       setPriceError(error.message);
-      const fallbackPrice = 200;
+      const fallbackPrice = 300;
       setAmount(fallbackPrice);
       setPriceData({
         finalPrice: fallbackPrice,
-        baseCost: 20,
+        baseCost: 30,
         markupMultiplier: 10,
-        markupAmount: 180,
+        markupAmount: 270,
         breakdown: [
-          { item: 'AI Video Generation (BytePlus)', amount: 10 },
+          { item: 'AI Video Generation (BytePlus)', amount: 20 },
           { item: 'Processing fee', amount: 10 }
         ],
         currency: 'KES'
@@ -158,6 +229,38 @@ function CreateVideo() {
         <p className="text-gray-400 text-center mb-8">
           {isLive ? '💳 Live Payments Enabled' : '🧪 Test Mode'}
         </p>
+
+        {/* Status Message */}
+        {statusMessage && (
+          <div className="bg-yellow-500/20 border border-yellow-500 rounded-2xl p-4 mb-4">
+            <p className="text-yellow-300">{statusMessage}</p>
+          </div>
+        )}
+
+        {/* Error Message */}
+        {error && (
+          <div className="bg-red-500/20 border border-red-500 rounded-2xl p-4 mb-4">
+            <p className="text-red-300">❌ {error}</p>
+          </div>
+        )}
+
+        {/* Retry Button for Failed Payments */}
+        {hasFailedPayment && (
+          <div className="mb-4">
+            <button
+              onClick={handleRetry}
+              disabled={isProcessing}
+              className={`w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105 flex items-center justify-center gap-2 ${
+                isProcessing ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
+              }`}
+            >
+              {isProcessing ? '⏳ Processing...' : '🔄 Retry Failed Video (Free)'}
+            </button>
+            <p className="text-xs text-yellow-400 text-center mt-2">
+              You previously paid for a video that failed. This retry is free.
+            </p>
+          </div>
+        )}
 
         <div className="mb-4">
           <label className="block text-gray-300 mb-2 font-semibold">📧 Your Email</label>
