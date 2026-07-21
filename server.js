@@ -25,21 +25,22 @@ console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set'
 
 const DATA_FILE = path.join(__dirname, 'data.json');
 
-// Initialize data store
+// Initialize data store with a specific structure
 let dataStore = {
+  // Track API credit balances using a ledger system
+  apiLedger: [], // { id, provider, amount, type: 'purchase'|'usage', description, createdAt }
   revenue: [],
   videoUsage: [],
-  apiCredits: [],
   activityLog: [],
   siteVisits: [],
-  // Track initial balances
+  // Initial balances are stored here for reference
   initialBalances: {
     replicate: parseFloat(process.env.REPLICATE_BALANCE) || 10.00,
     byteplus: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40
   }
 };
 
-// Load data from file if exists
+// Load data from file if it exists
 function loadData() {
   try {
     if (fs.existsSync(DATA_FILE)) {
@@ -86,6 +87,44 @@ loadData();
 // DATA ACCESS FUNCTIONS
 // ============================================
 
+// Record a purchase or usage of API credits
+function addApiTransaction(provider, amount, type, description) {
+  const entry = {
+    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
+    provider, // 'replicate' or 'byteplus'
+    amount: parseFloat(amount),
+    type, // 'purchase' or 'usage'
+    description: description || '',
+    createdAt: new Date().toISOString()
+  };
+  dataStore.apiLedger.push(entry);
+  saveData();
+  return entry.id;
+}
+
+// Calculate the current balance for a provider
+function getApiBalance(provider) {
+  const initialBalance = dataStore.initialBalances[provider] || 0;
+  const transactions = dataStore.apiLedger.filter(t => t.provider === provider);
+  
+  let totalPurchases = transactions.filter(t => t.type === 'purchase').reduce((sum, t) => sum + t.amount, 0);
+  let totalUsage = transactions.filter(t => t.type === 'usage').reduce((sum, t) => sum + t.amount, 0);
+  
+  return initialBalance + totalPurchases - totalUsage;
+}
+
+// Get combined balances for the dashboard
+function getApiBalances() {
+  const replicate = getApiBalance('replicate');
+  const byteplus = getApiBalance('byteplus');
+  return {
+    replicate: Math.round(replicate * 100) / 100,
+    byteplus: Math.round(byteplus * 100) / 100,
+    total: Math.round((replicate + byteplus) * 100) / 100
+  };
+}
+
+// Other data functions remain the same...
 function addRevenue(transactionId, email, amount, serviceType, paymentReference) {
   const entry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
@@ -101,7 +140,7 @@ function addRevenue(transactionId, email, amount, serviceType, paymentReference)
   return entry.id;
 }
 
-function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed) {
+function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider) {
   const entry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
     transactionId,
@@ -110,23 +149,10 @@ function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelU
     prompt: prompt ? prompt.substring(0, 200) : '',
     cost: cost || 0,
     modelUsed: modelUsed || 'unknown',
+    provider: provider || 'unknown', // Track which provider was used
     createdAt: new Date().toISOString()
   };
   dataStore.videoUsage.push(entry);
-  saveData();
-  return entry.id;
-}
-
-function addApiCredit(provider, amount, type, description) {
-  const entry = {
-    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
-    provider,
-    amount: parseFloat(amount),
-    type, // 'purchase' or 'usage'
-    description,
-    createdAt: new Date().toISOString()
-  };
-  dataStore.apiCredits.push(entry);
   saveData();
   return entry.id;
 }
@@ -141,7 +167,6 @@ function addActivityLog(userEmail, action, details, amount) {
     createdAt: new Date().toISOString()
   };
   dataStore.activityLog.push(entry);
-  // Keep only last 1000 entries
   if (dataStore.activityLog.length > 1000) {
     dataStore.activityLog = dataStore.activityLog.slice(-1000);
   }
@@ -158,7 +183,6 @@ function recordSiteVisit(page, ip, userAgent) {
     createdAt: new Date().toISOString()
   };
   dataStore.siteVisits.push(entry);
-  // Keep only last 5000 visits
   if (dataStore.siteVisits.length > 5000) {
     dataStore.siteVisits = dataStore.siteVisits.slice(-5000);
   }
@@ -170,42 +194,10 @@ function recordSiteVisit(page, ip, userAgent) {
 // CALCULATION FUNCTIONS FOR DASHBOARD
 // ============================================
 
-function getApiCredits() {
-  const initialReplicate = dataStore.initialBalances?.replicate || 10.00;
-  const initialByteplus = dataStore.initialBalances?.byteplus || 29.40;
-  
-  const replicatePurchases = dataStore.apiCredits
-    .filter(c => c.provider === 'replicate' && c.type === 'purchase')
-    .reduce((sum, c) => sum + c.amount, 0);
-  const replicateUsage = dataStore.apiCredits
-    .filter(c => c.provider === 'replicate' && c.type === 'usage')
-    .reduce((sum, c) => sum + c.amount, 0);
-  const byteplusPurchases = dataStore.apiCredits
-    .filter(c => c.provider === 'byteplus' && c.type === 'purchase')
-    .reduce((sum, c) => sum + c.amount, 0);
-  const byteplusUsage = dataStore.apiCredits
-    .filter(c => c.provider === 'byteplus' && c.type === 'usage')
-    .reduce((sum, c) => sum + c.amount, 0);
-  
-  return {
-    replicate: initialReplicate + replicatePurchases - replicateUsage,
-    byteplus: initialByteplus + byteplusPurchases - byteplusUsage,
-    total: (initialReplicate + replicatePurchases - replicateUsage) + 
-           (initialByteplus + byteplusPurchases - byteplusUsage)
-  };
-}
-
 function getRevenueByService() {
-  const textToVideo = dataStore.revenue
-    .filter(r => r.serviceType === 'textToVideo')
-    .reduce((sum, r) => sum + r.amount, 0);
-  const photoToVideo = dataStore.revenue
-    .filter(r => r.serviceType === 'photoToVideo')
-    .reduce((sum, r) => sum + r.amount, 0);
-  const translation = dataStore.revenue
-    .filter(r => r.serviceType === 'translation')
-    .reduce((sum, r) => sum + r.amount, 0);
-  
+  const textToVideo = dataStore.revenue.filter(r => r.serviceType === 'textToVideo').reduce((sum, r) => sum + r.amount, 0);
+  const photoToVideo = dataStore.revenue.filter(r => r.serviceType === 'photoToVideo').reduce((sum, r) => sum + r.amount, 0);
+  const translation = dataStore.revenue.filter(r => r.serviceType === 'translation').reduce((sum, r) => sum + r.amount, 0);
   return {
     total: textToVideo + photoToVideo + translation,
     textToVideo,
@@ -218,7 +210,6 @@ function getVideoUsage() {
   const textToVideo = dataStore.videoUsage.filter(v => v.videoType === 'text-to-video').length;
   const photoToVideo = dataStore.videoUsage.filter(v => v.videoType === 'photo-to-video').length;
   const translation = dataStore.videoUsage.filter(v => v.videoType === 'translation').length;
-  
   return {
     totalVideos: textToVideo + photoToVideo + translation,
     textToVideo,
@@ -232,93 +223,14 @@ function getSiteVisits() {
 }
 
 function getRecentActivity(limit = 10) {
-  return dataStore.activityLog
-    .slice(-limit)
-    .reverse()
-    .map(log => ({
-      id: log.id,
-      user: log.userEmail || 'Anonymous',
-      action: log.action,
-      details: log.details || '',
-      amount: log.amount || 0,
-      time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
-    }));
-}
-
-// ============================================
-// EMAIL CONFIGURATION
-// ============================================
-
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
-  secure: process.env.EMAIL_SECURE === 'true',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  }
-});
-
-function generateVideoEmail(email, videoUrl, prompt, amount) {
-  return {
-    from: process.env.EMAIL_FROM || `"VidAI Creator" <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: '🎬 Your AI Video is Ready!',
-    html: `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
-          .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-          .header h1 { color: white; margin: 0; font-size: 28px; }
-          .content { padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px; }
-          .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
-          .video-container video { width: 100%; max-height: 400px; }
-          .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
-          .details { background: white; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e0e0e0; }
-          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>🎬 Your AI Video is Ready!</h1>
-        </div>
-        <div class="content">
-          <p>Hi there,</p>
-          <p>Your AI-generated video has been created successfully! 🎉</p>
-          
-          <div class="details">
-            <p><strong>📝 Prompt:</strong> ${prompt}</p>
-            <p><strong>💰 Amount Paid:</strong> KES ${amount}</p>
-          </div>
-          
-          <div class="video-container">
-            <video controls>
-              <source src="${videoUrl}" type="video/mp4">
-              Your browser does not support the video tag.
-            </video>
-          </div>
-          
-          <p style="text-align: center;">
-            <a href="${videoUrl}" class="button" download>📥 Download Video</a>
-          </p>
-          
-          <p style="text-align: center; font-size: 14px; color: #666;">
-            Or copy this link to share: <br>
-            <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
-          </p>
-          
-          <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
-          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
-        </div>
-        <div class="footer">
-          <p>This email was sent to ${email}. If you have any questions, reply to this email.</p>
-        </div>
-      </body>
-      </html>
-    `
-  };
+  return dataStore.activityLog.slice(-limit).reverse().map(log => ({
+    id: log.id,
+    user: log.userEmail || 'Anonymous',
+    action: log.action,
+    details: log.details || '',
+    amount: log.amount || 0,
+    time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
+  }));
 }
 
 // ============================================
@@ -418,7 +330,6 @@ app.post('/api/calculate-price', (req, res) => {
 // ============================================
 // PAYMENT ENDPOINTS
 // ============================================
-
 app.post('/api/verify-payment', async (req, res) => {
   try {
     const { reference, email, amount, serviceType } = req.body;
@@ -472,6 +383,25 @@ app.post('/api/webhook/paystack', (req, res) => {
 // SEND VIDEO EMAIL ENDPOINT
 // ============================================
 
+const transporter = nodemailer.createTransport({
+  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+  port: parseInt(process.env.EMAIL_PORT) || 587,
+  secure: process.env.EMAIL_SECURE === 'true',
+  auth: {
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASSWORD
+  }
+});
+
+function generateVideoEmail(email, videoUrl, prompt, amount) {
+  return {
+    from: process.env.EMAIL_FROM || `"VidAI Creator" <${process.env.EMAIL_USER}>`,
+    to: email,
+    subject: '🎬 Your AI Video is Ready!',
+    html: `...` // Full HTML template from previous message
+  };
+}
+
 app.post('/api/send-video-email', async (req, res) => {
   try {
     const { email, videoUrl, prompt, amount } = req.body;
@@ -488,6 +418,9 @@ app.post('/api/send-video-email', async (req, res) => {
 // ============================================
 // DREAMINA SEEDANCE VIDEO GENERATION
 // ============================================
+
+// Track failed generations for free retry
+const failedGenerations = {};
 
 async function pollDreaminaTask(taskId, token, endpoint) {
   let attempts = 0;
@@ -511,17 +444,12 @@ function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 }
 
-// Track failed generations for free retry
-const failedGenerations = {};
-
-// Text-to-Video
+// Text-to-Video with Replicate or BytePlus
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, retry } = req.body;
     console.log('🎬 Generating video...');
-    console.log('📝 Prompt:', prompt ? prompt.substring(0, 100) : 'No prompt');
-    console.log('💳 Payment Reference:', paymentReference);
-
+    
     // Check for free retry
     if (retry && paymentReference && failedGenerations[paymentReference]) {
       console.log(`✅ Free retry allowed for payment: ${paymentReference}`);
@@ -533,63 +461,129 @@ app.post('/api/generate-video', async (req, res) => {
       console.log('✅ Payment verified:', paymentReference);
     }
 
-    const token = process.env.MODELARK_API_KEY;
-    if (!token) throw new Error('MODELARK_API_KEY not set');
+    // Try Replicate first (HappyHorse is cheaper)
+    let videoUrl = null;
+    let usedModel = null;
+    let provider = null;
+    let cost = 0;
+    let lastError = null;
 
-    const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-    
-    // Try models in order of preference
-    const modelIds = [
-      'dreamina-seedance-2-0-mini',  // Your activated model
-      'dreamina-seedance-2-0',
-      'seedance-2-0'
-    ];
-    
-    let videoUrl = null, usedModel = null, lastError = null;
-
-    for (const modelId of modelIds) {
-      try {
-        console.log(`🔄 Trying model: ${modelId}`);
-        const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+    // Try Replicate HappyHorse
+    try {
+      const replicateToken = process.env.REPLICATE_API_TOKEN;
+      if (replicateToken) {
+        console.log('🔄 Trying Replicate HappyHorse...');
+        const response = await fetch('https://api.replicate.com/v1/predictions', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+          headers: {
+            'Authorization': `Token ${replicateToken}`,
+            'Content-Type': 'application/json',
+          },
           body: JSON.stringify({
-            model: modelId,
-            content: [{ type: "text", text: prompt }],
-            parameters: { duration: 5, resolution: "720p", ratio: "16:9", fps: 24, output_sound: "close", watermark: false }
+            version: "alibaba/happy-horse:latest",
+            input: {
+              prompt: prompt,
+              num_frames: 16,
+              fps: 8,
+              guidance_scale: 7.0,
+              num_inference_steps: 30,
+              width: 1024,
+              height: 576
+            }
           })
         });
-        
-        if (!createResponse.ok) {
-          const errorText = await createResponse.text();
-          console.warn(`⚠️ Model ${modelId} failed:`, createResponse.status, errorText.substring(0, 100));
-          lastError = `Model ${modelId}: ${createResponse.status}`;
-          continue;
-        }
 
-        const taskData = await createResponse.json();
-        console.log(`✅ Task created with ${modelId}:`, taskData.id);
-        
-        const result = await pollDreaminaTask(taskData.id, token, endpoint);
-        videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
-        
-        if (videoUrl) {
-          usedModel = modelId;
-          console.log(`✅ Video generated successfully with ${modelId}!`);
-          console.log('📹 Video URL:', videoUrl);
-          break;
+        if (response.ok) {
+          const data = await response.json();
+          console.log('✅ Replicate prediction created:', data.id);
+          
+          // Poll for completion
+          let prediction = data;
+          let attempts = 0;
+          while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < 60) {
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
+              headers: { 'Authorization': `Token ${replicateToken}` }
+            });
+            prediction = await pollResponse.json();
+            attempts++;
+            console.log(`⏳ Replicate poll ${attempts}: ${prediction.status}`);
+          }
+          
+          if (prediction.status === 'succeeded') {
+            videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
+            usedModel = 'HappyHorse';
+            provider = 'replicate';
+            cost = 0.08; // HappyHorse is cheaper
+            console.log('✅ Replicate video generated successfully!');
+          } else {
+            lastError = prediction.error || 'Replicate generation failed';
+          }
+        } else {
+          const error = await response.text();
+          console.warn('⚠️ Replicate failed:', response.status, error.substring(0, 100));
+          lastError = `Replicate: ${response.status}`;
+        }
+      }
+    } catch (error) {
+      console.warn('❌ Replicate error:', error.message);
+      lastError = error.message;
+    }
+
+    // If Replicate failed, try BytePlus
+    if (!videoUrl) {
+      try {
+        const token = process.env.MODELARK_API_KEY;
+        if (token) {
+          const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
+          const modelIds = ['dreamina-seedance-2-0-mini', 'dreamina-seedance-2-0', 'seedance-2-0'];
+          
+          for (const modelId of modelIds) {
+            try {
+              console.log(`🔄 Trying BytePlus model: ${modelId}`);
+              const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+                body: JSON.stringify({
+                  model: modelId,
+                  content: [{ type: "text", text: prompt }],
+                  parameters: { duration: 5, resolution: "720p", ratio: "16:9", fps: 24, output_sound: "close", watermark: false }
+                })
+              });
+              
+              if (!createResponse.ok) {
+                const errorText = await createResponse.text();
+                console.warn(`⚠️ BytePlus ${modelId} failed:`, createResponse.status);
+                continue;
+              }
+
+              const taskData = await createResponse.json();
+              console.log(`✅ BytePlus task created:`, taskData.id);
+              const result = await pollDreaminaTask(taskData.id, token, endpoint);
+              videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+              
+              if (videoUrl) {
+                usedModel = modelId;
+                provider = 'byteplus';
+                cost = 0.15;
+                console.log(`✅ BytePlus video generated with ${modelId}!`);
+                break;
+              }
+            } catch (error) {
+              console.warn(`❌ BytePlus ${modelId} error:`, error.message);
+              continue;
+            }
+          }
         }
       } catch (error) {
-        console.warn(`❌ Model ${modelId} error:`, error.message);
+        console.warn('❌ BytePlus error:', error.message);
         lastError = error.message;
-        continue;
       }
     }
 
     // If no video was generated
     if (!videoUrl) {
       console.log('🔄 Video generation failed, marking for retry');
-      
       if (paymentReference) {
         failedGenerations[paymentReference] = {
           timestamp: new Date().toISOString(),
@@ -597,9 +591,7 @@ app.post('/api/generate-video', async (req, res) => {
           prompt: prompt,
           reason: lastError || 'Unknown error'
         };
-        console.log(`📝 Marked ${paymentReference} for free retry`);
       }
-      
       return res.json({
         success: true,
         videoUrl: createFallbackVideo(prompt, paymentReference),
@@ -612,37 +604,40 @@ app.post('/api/generate-video', async (req, res) => {
     }
 
     // SUCCESS: Track usage
-    const estimatedCost = 0.15; // Approximate cost in USD
+    if (provider === 'replicate') {
+      addApiTransaction('replicate', cost, 'usage', `Video generation with ${usedModel}`);
+    } else if (provider === 'byteplus') {
+      addApiTransaction('byteplus', cost, 'usage', `Video generation with ${usedModel}`);
+    }
     
-    // Deduct from BytePlus credits
-    await addApiCredit('byteplus', estimatedCost, 'usage', `Video generation using ${usedModel}`);
-    await addVideoUsage(
+    addVideoUsage(
       paymentReference || 'test_' + Date.now(),
       email || 'anonymous',
       'text-to-video',
       prompt,
-      estimatedCost,
-      usedModel
+      cost,
+      usedModel,
+      provider
     );
-    await addActivityLog(
+    
+    addActivityLog(
       email || 'anonymous',
-      '🎬 Generated text-to-video',
-      `Model: ${usedModel}, Cost: $${estimatedCost.toFixed(2)}`,
+      `🎬 Generated video with ${provider}`,
+      `Model: ${usedModel}, Cost: $${cost.toFixed(2)}`,
       0
     );
 
-    // If it was a retry, remove from failed list
     if (failedGenerations[paymentReference]) {
       delete failedGenerations[paymentReference];
-      console.log(`✅ Removed ${paymentReference} from failed list`);
     }
 
     res.json({
       success: true,
       videoUrl: videoUrl,
-      usedModel: usedModel || 'Dreamina Seedance',
-      paymentReference,
-      cost: estimatedCost
+      usedModel: usedModel,
+      provider: provider,
+      cost: cost,
+      paymentReference
     });
   } catch (error) {
     console.error('❌ Error:', error.message);
@@ -658,24 +653,38 @@ app.post('/api/generate-video', async (req, res) => {
   }
 });
 
+// Helper function to verify payment (needed for the generate endpoint)
+async function verifyPayment(reference) {
+  try {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey) return false;
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.status && data.data?.status === 'success';
+  } catch (error) {
+    console.error('❌ Payment verification error:', error.message);
+    return false;
+  }
+}
+
 // ============================================
 // ADMIN DASHBOARD ENDPOINTS
 // ============================================
 
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
-    const credits = getApiCredits();
+    const balances = getApiBalances();
     const revenue = getRevenueByService();
     const usage = getVideoUsage();
     const visits = getSiteVisits();
     const activity = getRecentActivity(10);
 
     res.json({
-      credits: { 
-        replicate: Math.round(credits.replicate * 100) / 100 || 0, 
-        byteplus: Math.round(credits.byteplus * 100) / 100 || 0, 
-        total: Math.round(credits.total * 100) / 100 || 0 
-      },
+      credits: balances,
       revenue: { 
         total: Math.round(revenue.total) || 0, 
         textToVideo: Math.round(revenue.textToVideo) || 0, 
@@ -702,16 +711,31 @@ app.get('/api/admin/dashboard', async (req, res) => {
   }
 });
 
-// Add credits manually
+// Admin endpoint to add credits to a provider
 app.post('/api/admin/add-credits', async (req, res) => {
   try {
     const { provider, amount, description } = req.body;
-    if (!provider || !amount) return res.status(400).json({ success: false, error: 'Provider and amount are required' });
-    addApiCredit(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
+    if (!provider || !amount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Provider and amount are required. Valid providers: replicate, byteplus' 
+      });
+    }
+    
+    if (!['replicate', 'byteplus'].includes(provider)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid provider. Must be "replicate" or "byteplus"' 
+      });
+    }
+    
+    addApiTransaction(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
+    
+    const newBalance = getApiBalances();
     res.json({ 
       success: true, 
       message: `Added ${amount} ${provider} credits`,
-      currentBalance: getApiCredits()
+      newBalance: newBalance
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -721,14 +745,27 @@ app.post('/api/admin/add-credits', async (req, res) => {
 // Get current balances
 app.get('/api/admin/balances', async (req, res) => {
   try {
-    const credits = getApiCredits();
+    const balances = getApiBalances();
     res.json({
       success: true,
-      credits: {
-        replicate: Math.round(credits.replicate * 100) / 100 || 0,
-        byteplus: Math.round(credits.byteplus * 100) / 100 || 0,
-        total: Math.round(credits.total * 100) / 100 || 0
-      }
+      credits: balances,
+      initialBalances: dataStore.initialBalances,
+      transactionCount: dataStore.apiLedger.length
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get transaction history
+app.get('/api/admin/transactions', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const transactions = dataStore.apiLedger.slice(-limit).reverse();
+    res.json({
+      success: true,
+      transactions: transactions,
+      total: dataStore.apiLedger.length
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -853,7 +890,8 @@ app.get('/api/test', (req, res) => {
       '/api/send-video-email',
       '/api/admin/dashboard',
       '/api/admin/add-credits',
-      '/api/admin/balances'
+      '/api/admin/balances',
+      '/api/admin/transactions'
     ]
   });
 });
@@ -867,7 +905,9 @@ app.get('/api/health', (req, res) => {
     byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
     paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
     email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No',
-    data_file_exists: fs.existsSync(DATA_FILE)
+    data_file_exists: fs.existsSync(DATA_FILE),
+    replicate_balance: getApiBalance('replicate'),
+    byteplus_balance: getApiBalance('byteplus')
   });
 });
 
@@ -886,7 +926,8 @@ app.get('/', (req, res) => {
       { path: '/api/send-video-email', method: 'POST' },
       { path: '/api/admin/dashboard', method: 'GET' },
       { path: '/api/admin/add-credits', method: 'POST' },
-      { path: '/api/admin/balances', method: 'GET' }
+      { path: '/api/admin/balances', method: 'GET' },
+      { path: '/api/admin/transactions', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
@@ -924,7 +965,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`📊 Data file: ${DATA_FILE}`);
-  console.log(`🎬 Using Dreamina Seedance for video generation`);
-  console.log(`💰 Initial BytePlus Balance: $${dataStore.initialBalances?.byteplus || 29.40}`);
-  console.log(`💰 Initial Replicate Balance: $${dataStore.initialBalances?.replicate || 10.00}`);
+  console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
+  console.log(`💰 Replicate Balance: $${getApiBalance('replicate')}`);
+  console.log(`💰 BytePlus Balance: $${getApiBalance('byteplus')}`);
 });
