@@ -117,6 +117,14 @@ const store = {
 };
 
 // ============================================
+// TRACK PAID BUT FAILED GENERATIONS
+// ============================================
+
+// Store for tracking paid but failed generations
+// In production, use a database
+const failedGenerations = {};
+
+// ============================================
 // PAYMENT VERIFICATION FUNCTION
 // ============================================
 
@@ -488,40 +496,61 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 // Helper function to create fallback video WITHOUT canvas
 function createFallbackVideo(prompt, paymentReference) {
   // Return a simple placeholder image as a data URL
-  // This is a 1x1 pixel transparent PNG
   const placeholder = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
   
   console.log('🔄 Using fallback placeholder image');
   return placeholder;
 }
 
-// Text-to-Video with Dreamina Seedance
+// Text-to-Video with Dreamina Seedance (with free retry)
 app.post('/api/generate-video', async (req, res) => {
   try {
-    const { prompt, paymentReference, email, serviceType } = req.body;
+    const { prompt, paymentReference, email, serviceType, retry } = req.body;
 
     console.log('🎬 Generating video with Dreamina Seedance...');
     console.log('📝 Prompt:', prompt.substring(0, 100) + '...');
+    console.log('💳 Payment Reference:', paymentReference);
+    console.log('🔄 Retry:', retry ? 'Yes' : 'No');
 
-    // ALWAYS ENFORCE PAYMENT
-    if (!paymentReference) {
-      console.log('❌ Payment required');
-      return res.status(402).json({
-        success: false,
-        error: 'Payment required.',
-        requiresPayment: true
-      });
-    }
+    // Check if this is a retry for a failed payment
+    if (retry && paymentReference) {
+      // Check if this payment reference has already been used and failed
+      if (failedGenerations[paymentReference]) {
+        console.log(`✅ Free retry allowed for payment: ${paymentReference}`);
+        // Allow the retry without payment verification
+      } else {
+        // If it's marked as retry but we don't have record, verify payment
+        console.log('⚠️ Retry requested but no failed record found, verifying payment');
+        const isValid = await verifyPayment(paymentReference);
+        if (!isValid) {
+          return res.status(402).json({
+            success: false,
+            error: 'Invalid or expired payment.',
+            requiresPayment: true
+          });
+        }
+      }
+    } else {
+      // Normal flow - verify payment
+      if (!paymentReference) {
+        console.log('❌ Payment required');
+        return res.status(402).json({
+          success: false,
+          error: 'Payment required.',
+          requiresPayment: true
+        });
+      }
 
-    const isValid = await verifyPayment(paymentReference);
-    if (!isValid) {
-      return res.status(402).json({
-        success: false,
-        error: 'Invalid or expired payment.',
-        requiresPayment: true
-      });
+      const isValid = await verifyPayment(paymentReference);
+      if (!isValid) {
+        return res.status(402).json({
+          success: false,
+          error: 'Invalid or expired payment.',
+          requiresPayment: true
+        });
+      }
+      console.log('✅ Payment verified:', paymentReference);
     }
-    console.log('✅ Payment verified:', paymentReference);
 
     const token = process.env.MODELARK_API_KEY;
     if (!token) {
@@ -595,6 +624,12 @@ app.post('/api/generate-video', async (req, res) => {
           usedModel = modelId;
           console.log(`✅ Video generated successfully with ${modelId}!`);
           console.log('📹 Video URL:', videoUrl);
+          
+          // If generation succeeded and it was a failed retry, remove from failed list
+          if (failedGenerations[paymentReference]) {
+            delete failedGenerations[paymentReference];
+            console.log(`✅ Removed ${paymentReference} from failed list`);
+          }
           break;
         }
       } catch (error) {
@@ -604,9 +639,21 @@ app.post('/api/generate-video', async (req, res) => {
       }
     }
 
-    // If no video was generated, create fallback
+    // If no video was generated, mark as failed for future retry
     if (!videoUrl) {
-      console.log('🔄 All models failed, creating fallback preview');
+      console.log('🔄 Video generation failed, marking for retry');
+      
+      // Store the failed generation for free retry
+      if (paymentReference) {
+        failedGenerations[paymentReference] = {
+          timestamp: new Date().toISOString(),
+          email: email,
+          prompt: prompt,
+          reason: lastError || 'Unknown error'
+        };
+        console.log(`📝 Marked ${paymentReference} for free retry`);
+      }
+      
       const fallbackUrl = createFallbackVideo(prompt, paymentReference);
       
       return res.json({
@@ -614,7 +661,9 @@ app.post('/api/generate-video', async (req, res) => {
         videoUrl: fallbackUrl,
         usedModel: 'Preview (Fallback)',
         isFallback: true,
-        note: lastError || 'Video generation failed, showing preview instead'
+        canRetry: true,
+        note: 'Video generation failed. You can retry for free.',
+        paymentReference: paymentReference
       });
     }
 
@@ -631,13 +680,24 @@ app.post('/api/generate-video', async (req, res) => {
     res.json({
       success: true,
       videoUrl: videoUrl,
-      usedModel: usedModel || 'Dreamina Seedance'
+      usedModel: usedModel || 'Dreamina Seedance',
+      paymentReference: paymentReference
     });
 
   } catch (error) {
     console.error('❌ Error in /api/generate-video:', error.message);
     
-    // Create fallback
+    // Mark as failed for free retry
+    if (paymentReference) {
+      failedGenerations[paymentReference] = {
+        timestamp: new Date().toISOString(),
+        email: email,
+        prompt: prompt,
+        reason: error.message
+      };
+      console.log(`📝 Marked ${paymentReference} for free retry`);
+    }
+    
     const fallbackUrl = createFallbackVideo(prompt, paymentReference);
     
     res.json({
@@ -645,7 +705,9 @@ app.post('/api/generate-video', async (req, res) => {
       videoUrl: fallbackUrl,
       usedModel: 'Preview (Fallback)',
       isFallback: true,
-      note: error.message
+      canRetry: true,
+      note: 'Video generation failed. You can retry for free.',
+      paymentReference: paymentReference
     });
   }
 });
@@ -783,6 +845,72 @@ app.post('/api/generate-image-to-video', async (req, res) => {
       videoUrl: fallbackUrl,
       usedModel: 'Preview (Fallback)',
       isFallback: true
+    });
+  }
+});
+
+// ============================================
+// CHECK IF PAYMENT CAN BE RETRIED FOR FREE
+// ============================================
+
+app.post('/api/check-free-retry', (req, res) => {
+  try {
+    const { paymentReference } = req.body;
+    
+    if (!paymentReference) {
+      return res.json({
+        success: false,
+        error: 'Payment reference required'
+      });
+    }
+    
+    const canRetry = !!failedGenerations[paymentReference];
+    
+    res.json({
+      success: true,
+      canRetry: canRetry,
+      paymentReference: paymentReference,
+      message: canRetry 
+        ? 'You can retry this video for free' 
+        : 'No failed generation found for this payment'
+    });
+  } catch (error) {
+    console.error('Error checking free retry:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// GET FAILED GENERATION STATUS
+// ============================================
+
+app.get('/api/failed-generation/:paymentReference', (req, res) => {
+  try {
+    const { paymentReference } = req.params;
+    
+    const failed = failedGenerations[paymentReference];
+    
+    if (failed) {
+      res.json({
+        success: true,
+        exists: true,
+        details: failed
+      });
+    } else {
+      res.json({
+        success: true,
+        exists: false,
+        message: 'No failed generation found for this payment'
+      });
+    }
+  } catch (error) {
+    console.error('Error fetching failed generation:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -1053,6 +1181,8 @@ app.get('/api/test', (req, res) => {
       '/api/calculate-price',
       '/api/verify-payment',
       '/api/send-video-email',
+      '/api/check-free-retry',
+      '/api/failed-generation/:paymentReference',
       '/api/admin/dashboard'
     ]
   });
@@ -1083,6 +1213,8 @@ app.get('/', (req, res) => {
       { path: '/api/calculate-price', method: 'POST' },
       { path: '/api/verify-payment', method: 'POST' },
       { path: '/api/send-video-email', method: 'POST' },
+      { path: '/api/check-free-retry', method: 'POST' },
+      { path: '/api/failed-generation/:paymentReference', method: 'GET' },
       { path: '/api/admin/dashboard', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'

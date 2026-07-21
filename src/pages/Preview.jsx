@@ -15,6 +15,8 @@ function Preview() {
   const [usedModel, setUsedModel] = useState('');
   const [isSendingEmail, setIsSendingEmail] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
+  const [canRetry, setCanRetry] = useState(false);
+  const [isRetrying, setIsRetrying] = useState(false);
 
   const {
     prompt,
@@ -72,6 +74,74 @@ function Preview() {
       alert('Failed to send email. Please try downloading the video manually.');
     } finally {
       setIsSendingEmail(false);
+    }
+  };
+
+  const checkFreeRetry = async () => {
+    if (!paymentReference) return;
+    
+    try {
+      const response = await fetch(`${API_URL}/api/check-free-retry`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ paymentReference })
+      });
+      
+      const data = await response.json();
+      if (data.success && data.canRetry) {
+        setCanRetry(true);
+        setStatusMessage('⚠️ Previous generation failed. Click "Retry for Free" to try again.');
+      }
+    } catch (error) {
+      console.error('Error checking free retry:', error);
+    }
+  };
+
+  const handleRetry = async () => {
+    if (!canRetry || !paymentReference) return;
+    
+    setIsRetrying(true);
+    setStatusMessage('🔄 Retrying video generation (free)...');
+    setError(null);
+    
+    try {
+      const response = await fetch(`${API_URL}/api/generate-video`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          prompt: prompt,
+          paymentReference: paymentReference,
+          email: email,
+          serviceType: 'text-to-video',
+          retry: true
+        })
+      });
+      
+      const data = await response.json();
+      console.log('📦 Retry Response:', data);
+      
+      if (data.success && data.videoUrl && !data.isFallback) {
+        setVideoUrl(data.videoUrl);
+        setUsedModel(data.usedModel || 'Dreamina Seedance');
+        setCanRetry(false);
+        setStatusMessage('✅ Video generated successfully on retry! 🎉');
+        setEmailSent(false);
+      } else if (data.success && data.isFallback) {
+        setStatusMessage('⚠️ Retry failed again. Please try again later.');
+        setCanRetry(true);
+      } else {
+        throw new Error(data.error || 'Retry failed');
+      }
+    } catch (error) {
+      console.error('Retry error:', error);
+      setStatusMessage('❌ Retry failed. Please contact support.');
+      setError(error.message);
+    } finally {
+      setIsRetrying(false);
     }
   };
 
@@ -145,7 +215,7 @@ function Preview() {
         console.warn('⚠️ No payment reference found, using test mode');
       }
 
-      setStatusMessage('🤖 Generating with Replicate HappyHorse...');
+      setStatusMessage('🤖 Generating with Dreamina Seedance...');
 
       const response = await fetch(`${API_URL}/api/generate-video`, {
         method: 'POST',
@@ -164,8 +234,24 @@ function Preview() {
       console.log('📦 API Response:', data);
 
       if (data.success && data.videoUrl) {
+        // Check if it's a fallback (failed generation)
+        if (data.isFallback) {
+          setVideoUrl(data.videoUrl);
+          setUsedModel('Preview (Fallback)');
+          setProgress(100);
+          setIsGenerating(false);
+          setStatusMessage('⚠️ ' + (data.note || 'Video generation failed.'));
+          
+          // Check if we can retry for free
+          if (data.canRetry && paymentReference) {
+            setCanRetry(true);
+            setStatusMessage('⚠️ Video generation failed. Click "Retry for Free" to try again.');
+          }
+          return;
+        }
+
         setVideoUrl(data.videoUrl);
-        setUsedModel(data.usedModel || 'HappyHorse (Replicate)');
+        setUsedModel(data.usedModel || 'Dreamina Seedance');
         setProgress(100);
         setIsGenerating(false);
         setStatusMessage(`✅ Video generated successfully! 🎉`);
@@ -205,7 +291,7 @@ function Preview() {
       setUsedModel('Preview (Fallback)');
       setProgress(100);
       setIsGenerating(false);
-      setStatusMessage('✅ Preview generated! 🎉');
+      setStatusMessage('⚠️ Preview generated (API failed)');
 
     } catch (err) {
       console.error('❌ Error:', err);
@@ -296,6 +382,15 @@ function Preview() {
                 {error}
               </pre>
             </div>
+            {canRetry && (
+              <button
+                onClick={handleRetry}
+                disabled={isRetrying}
+                className="bg-yellow-500 hover:bg-yellow-600 text-white px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105 mb-3"
+              >
+                {isRetrying ? '⏳ Retrying...' : '🔄 Retry for Free'}
+              </button>
+            )}
             <button
               onClick={() => navigate('/create')}
               className="bg-pink-500 hover:bg-pink-600 px-8 py-3 rounded-full font-bold transition-all transform hover:scale-105"
@@ -437,6 +532,23 @@ function Preview() {
             {isSendingEmail ? '⏳ Sending...' : emailSent ? '✅ Sent!' : '📧 Send to Email'}
           </button>
         </div>
+
+        {canRetry && (
+          <div className="mb-6">
+            <button
+              onClick={handleRetry}
+              disabled={isRetrying}
+              className={`w-full bg-yellow-500 hover:bg-yellow-600 text-white font-bold py-4 px-6 rounded-full transition-all transform hover:scale-105 flex items-center justify-center gap-2 shadow-lg ${
+                isRetrying ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
+              }`}
+            >
+              {isRetrying ? '⏳ Retrying...' : '🔄 Retry for Free'}
+            </button>
+            <p className="text-xs text-yellow-400 text-center mt-2">
+              Your previous generation failed. This retry is free.
+            </p>
+          </div>
+        )}
 
         {emailSent && (
           <div className="bg-green-500/20 border border-green-500 rounded-2xl p-4 mb-6 text-center">
