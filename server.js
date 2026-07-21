@@ -962,6 +962,59 @@ app.get('/api/failed-generation/:paymentReference', (req, res) => {
 });
 
 // ============================================
+// MANUALLY ADD FAILED GENERATION (FOR TESTING)
+// ============================================
+
+app.post('/api/manual-add-failed', (req, res) => {
+  try {
+    const { paymentReference, email, prompt } = req.body;
+    
+    if (!paymentReference) {
+      return res.json({
+        success: false,
+        error: 'Payment reference required'
+      });
+    }
+    
+    failedGenerations[paymentReference] = {
+      timestamp: new Date().toISOString(),
+      email: email || 'katungu1@gmail.com',
+      prompt: prompt || 'DukaApp promotional video',
+      reason: 'Manually added for testing'
+    };
+    
+    console.log(`✅ Manually added failed generation for: ${paymentReference}`);
+    console.log('📝 Current failed generations:', Object.keys(failedGenerations));
+    
+    res.json({
+      success: true,
+      message: 'Failed generation added manually',
+      paymentReference: paymentReference,
+      totalFailed: Object.keys(failedGenerations).length
+    });
+  } catch (error) {
+    console.error('Error adding failed generation:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
+// DEBUG ENDPOINTS
+// ============================================
+
+// Debug endpoint to check failed generations
+app.get('/api/debug-failed', (req, res) => {
+  res.json({
+    failedGenerations: failedGenerations,
+    total: Object.keys(failedGenerations).length,
+    keys: Object.keys(failedGenerations)
+  });
+});
+
+// ============================================
 // ADMIN DASHBOARD ENDPOINTS
 // ============================================
 
@@ -1230,6 +1283,8 @@ app.get('/api/test', (req, res) => {
       '/api/check-free-retry',
       '/api/check-failed-by-email',
       '/api/failed-generation/:paymentReference',
+      '/api/manual-add-failed',
+      '/api/debug-failed',
       '/api/admin/dashboard'
     ]
   });
@@ -1263,6 +1318,8 @@ app.get('/', (req, res) => {
       { path: '/api/check-free-retry', method: 'POST' },
       { path: '/api/check-failed-by-email', method: 'POST' },
       { path: '/api/failed-generation/:paymentReference', method: 'GET' },
+      { path: '/api/manual-add-failed', method: 'POST' },
+      { path: '/api/debug-failed', method: 'GET' },
       { path: '/api/admin/dashboard', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
