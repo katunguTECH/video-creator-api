@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const db = require('./db'); // Import database
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -19,6 +20,181 @@ console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
 console.log('📧 Email configured:', process.env.EMAIL_USER ? '✅ Set' : '❌ Not set');
+
+// ============================================
+// DATABASE HELPER FUNCTIONS
+// ============================================
+
+// Get current API credits
+function getApiCredits() {
+  return new Promise((resolve, reject) => {
+    db.get(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN provider = 'replicate' AND type = 'purchase' THEN amount ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN provider = 'replicate' AND type = 'usage' THEN amount ELSE 0 END), 0) as replicate,
+        COALESCE(SUM(CASE WHEN provider = 'byteplus' AND type = 'purchase' THEN amount ELSE 0 END), 0) -
+        COALESCE(SUM(CASE WHEN provider = 'byteplus' AND type = 'usage' THEN amount ELSE 0 END), 0) as byteplus
+      FROM api_credits
+    `, (err, row) => {
+      if (err) reject(err);
+      resolve({
+        replicate: row?.replicate || 0,
+        byteplus: row?.byteplus || 0,
+        total: (row?.replicate || 0) + (row?.byteplus || 0)
+      });
+    });
+  });
+}
+
+// Add API credit transaction
+function addApiCredit(provider, amount, type, description) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO api_credits (provider, amount, type, description) VALUES (?, ?, ?, ?)`,
+      [provider, amount, type, description],
+      function(err) {
+        if (err) reject(err);
+        resolve(this.lastID);
+      }
+    );
+  });
+}
+
+// Add revenue transaction
+function addRevenue(transactionId, email, amount, serviceType, paymentReference) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO revenue (transaction_id, email, amount, service_type, payment_reference) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [transactionId, email, amount, serviceType, paymentReference],
+      function(err) {
+        if (err) reject(err);
+        resolve(this.lastID);
+      }
+    );
+  });
+}
+
+// Add video usage
+function addVideoUsage(transactionId, userEmail, videoType, prompt, cost) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO video_usage (transaction_id, user_email, video_type, prompt, cost) 
+       VALUES (?, ?, ?, ?, ?)`,
+      [transactionId, userEmail, videoType, prompt, cost],
+      function(err) {
+        if (err) reject(err);
+        resolve(this.lastID);
+      }
+    );
+  });
+}
+
+// Add activity log
+function addActivityLog(userEmail, action, details, amount) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO activity_log (user_email, action, details, amount) VALUES (?, ?, ?, ?)`,
+      [userEmail, action, details, amount],
+      function(err) {
+        if (err) reject(err);
+        resolve(this.lastID);
+      }
+    );
+  });
+}
+
+// Get total revenue
+function getTotalRevenue() {
+  return new Promise((resolve, reject) => {
+    db.get(`SELECT COALESCE(SUM(amount), 0) as total FROM revenue`, (err, row) => {
+      if (err) reject(err);
+      resolve(row?.total || 0);
+    });
+  });
+}
+
+// Get revenue by service
+function getRevenueByService() {
+  return new Promise((resolve, reject) => {
+    db.all(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN service_type = 'text-to-video' THEN amount ELSE 0 END), 0) as textToVideo,
+        COALESCE(SUM(CASE WHEN service_type = 'photo-to-video' THEN amount ELSE 0 END), 0) as photoToVideo,
+        COALESCE(SUM(CASE WHEN service_type = 'translation' THEN amount ELSE 0 END), 0) as translation
+      FROM revenue
+    `, (err, rows) => {
+      if (err) reject(err);
+      const row = rows[0] || { textToVideo: 0, photoToVideo: 0, translation: 0 };
+      resolve({
+        total: row.textToVideo + row.photoToVideo + row.translation,
+        textToVideo: row.textToVideo || 0,
+        photoToVideo: row.photoToVideo || 0,
+        translation: row.translation || 0
+      });
+    });
+  });
+}
+
+// Get video usage stats
+function getVideoUsage() {
+  return new Promise((resolve, reject) => {
+    db.all(`
+      SELECT 
+        COALESCE(SUM(CASE WHEN video_type = 'text-to-video' THEN 1 ELSE 0 END), 0) as textToVideo,
+        COALESCE(SUM(CASE WHEN video_type = 'photo-to-video' THEN 1 ELSE 0 END), 0) as photoToVideo,
+        COALESCE(SUM(CASE WHEN video_type = 'translation' THEN 1 ELSE 0 END), 0) as translation
+      FROM video_usage
+    `, (err, rows) => {
+      if (err) reject(err);
+      const row = rows[0] || { textToVideo: 0, photoToVideo: 0, translation: 0 };
+      resolve({
+        totalVideos: row.textToVideo + row.photoToVideo + row.translation,
+        textToVideo: row.textToVideo || 0,
+        photoToVideo: row.photoToVideo || 0,
+        translation: row.translation || 0
+      });
+    });
+  });
+}
+
+// Get recent activity
+function getRecentActivity(limit = 10) {
+  return new Promise((resolve, reject) => {
+    db.all(`
+      SELECT * FROM activity_log 
+      ORDER BY created_at DESC 
+      LIMIT ?
+    `, [limit], (err, rows) => {
+      if (err) reject(err);
+      resolve(rows || []);
+    });
+  });
+}
+
+// Get site visits count
+function getSiteVisits() {
+  return new Promise((resolve, reject) => {
+    db.get(`SELECT COUNT(*) as total FROM site_visits`, (err, row) => {
+      if (err) reject(err);
+      resolve(row?.total || 0);
+    });
+  });
+}
+
+// Record site visit
+function recordSiteVisit(page, ip, userAgent) {
+  return new Promise((resolve, reject) => {
+    db.run(
+      `INSERT INTO site_visits (page, ip, user_agent) VALUES (?, ?, ?)`,
+      [page, ip, userAgent],
+      function(err) {
+        if (err) reject(err);
+        resolve(this.lastID);
+      }
+    );
+  });
+}
 
 // ============================================
 // EMAIL CONFIGURATION
@@ -98,7 +274,7 @@ function generateVideoEmail(email, videoUrl, prompt, amount) {
 }
 
 // ============================================
-// IN-MEMORY DATA STORE
+// IN-MEMORY DATA STORE (Fallback)
 // ============================================
 const store = {
   activityLog: [],
@@ -120,8 +296,6 @@ const store = {
 // TRACK PAID BUT FAILED GENERATIONS
 // ============================================
 
-// Store for tracking paid but failed generations
-// In production, use a database
 const failedGenerations = {};
 
 // ============================================
@@ -176,8 +350,20 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
+// Track site visits
 app.use((req, res, next) => {
+  const startTime = Date.now();
+  
+  // Log request
   console.log(`${req.method} ${req.url}`);
+  
+  // Track visit for non-API routes
+  if (!req.path.startsWith('/api')) {
+    const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress;
+    const userAgent = req.headers['user-agent'] || 'unknown';
+    recordSiteVisit(req.path, ip, userAgent).catch(err => console.error('Visit tracking error:', err));
+  }
+  
   next();
 });
 
@@ -330,26 +516,17 @@ app.post('/api/verify-payment', async (req, res) => {
       };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
 
-      store.revenue.total += amount;
-      store.revenue[serviceKey] = (store.revenue[serviceKey] || 0) + amount;
-
-      store.activityLog.unshift({
-        id: Date.now(),
-        user: email || 'anonymous',
-        action: `${serviceType} generated`,
-        amount: amount,
-        time: 'Just now',
-        timestamp: new Date().toISOString()
-      });
-
-      if (store.activityLog.length > 100) {
-        store.activityLog = store.activityLog.slice(0, 100);
-      }
+      // Store in database
+      const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+      
+      await addRevenue(transactionId, email, amount, serviceKey, reference);
+      await addActivityLog(email, `Paid for ${serviceType}`, `Amount: KES ${amount}`, amount);
 
       res.json({
         success: true,
         data: data.data,
-        message: 'Payment verified successfully'
+        message: 'Payment verified successfully',
+        transactionId: transactionId
       });
     } else {
       res.json({
@@ -453,7 +630,7 @@ app.post('/api/send-video-email', async (req, res) => {
 // Helper function to poll Dreamina task status
 async function pollDreaminaTask(taskId, token, endpoint) {
   let attempts = 0;
-  const maxAttempts = 60; // 60 * 3s = 180 seconds max
+  const maxAttempts = 60;
 
   while (attempts < maxAttempts) {
     await new Promise(resolve => setTimeout(resolve, 3000));
@@ -493,16 +670,14 @@ async function pollDreaminaTask(taskId, token, endpoint) {
   throw new Error('Timeout waiting for Dreamina video generation');
 }
 
-// Helper function to create fallback video WITHOUT canvas
+// Helper function to create fallback video
 function createFallbackVideo(prompt, paymentReference) {
-  // Return a simple placeholder image as a data URL
   const placeholder = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-  
   console.log('🔄 Using fallback placeholder image');
   return placeholder;
 }
 
-// Text-to-Video with Dreamina Seedance (with free retry)
+// Text-to-Video with Dreamina Seedance
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, serviceType, retry } = req.body;
@@ -514,12 +689,9 @@ app.post('/api/generate-video', async (req, res) => {
 
     // Check if this is a retry for a failed payment
     if (retry && paymentReference) {
-      // Check if this payment reference has already been used and failed
       if (failedGenerations[paymentReference]) {
         console.log(`✅ Free retry allowed for payment: ${paymentReference}`);
-        // Allow the retry without payment verification
       } else {
-        // If it's marked as retry but we don't have record, verify payment
         console.log('⚠️ Retry requested but no failed record found, verifying payment');
         const isValid = await verifyPayment(paymentReference);
         if (!isValid) {
@@ -531,7 +703,6 @@ app.post('/api/generate-video', async (req, res) => {
         }
       }
     } else {
-      // Normal flow - verify payment
       if (!paymentReference) {
         console.log('❌ Payment required');
         return res.status(402).json({
@@ -559,7 +730,6 @@ app.post('/api/generate-video', async (req, res) => {
 
     const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
     
-    // Try different Dreamina Seedance model IDs
     const modelIds = [
       'dreamina-seedance-2-0-260128',
       'dreamina-seedance-2-0',
@@ -569,13 +739,11 @@ app.post('/api/generate-video', async (req, res) => {
     let videoUrl = null;
     let usedModel = null;
     let lastError = null;
+    let actualCost = 0;
 
     for (const modelId of modelIds) {
       try {
         console.log(`🔄 Trying model: ${modelId}`);
-
-        // Track usage
-        store.videoCounts.textToVideo = (store.videoCounts.textToVideo || 0) + 1;
 
         // Create Dreamina task
         const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
@@ -614,18 +782,36 @@ app.post('/api/generate-video', async (req, res) => {
         const taskId = taskData.id;
         console.log(`✅ Dreamina task created with ${modelId}:`, taskId);
 
-        // Poll for completion
         const result = await pollDreaminaTask(taskId, token, endpoint);
 
-        // Extract video URL
         videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
         
         if (videoUrl) {
           usedModel = modelId;
+          actualCost = 0.15; // Approximate cost in USD
           console.log(`✅ Video generated successfully with ${modelId}!`);
           console.log('📹 Video URL:', videoUrl);
           
-          // If generation succeeded and it was a failed retry, remove from failed list
+          // Deduct from BytePlus credits
+          await addApiCredit('byteplus', actualCost, 'usage', `Video generation using ${modelId}`);
+          
+          // Record video usage
+          await addVideoUsage(
+            paymentReference || 'test_' + Date.now(),
+            email || 'anonymous',
+            'text-to-video',
+            prompt.substring(0, 100),
+            actualCost
+          );
+          
+          // Add activity log
+          await addActivityLog(
+            email || 'anonymous',
+            'Generated text-to-video',
+            `Model: ${modelId}, Cost: $${actualCost.toFixed(2)}`,
+            0
+          );
+          
           if (failedGenerations[paymentReference]) {
             delete failedGenerations[paymentReference];
             console.log(`✅ Removed ${paymentReference} from failed list`);
@@ -639,11 +825,9 @@ app.post('/api/generate-video', async (req, res) => {
       }
     }
 
-    // If no video was generated, mark as failed for future retry
     if (!videoUrl) {
       console.log('🔄 Video generation failed, marking for retry');
       
-      // Store the failed generation for free retry
       if (paymentReference) {
         failedGenerations[paymentReference] = {
           timestamp: new Date().toISOString(),
@@ -667,27 +851,17 @@ app.post('/api/generate-video', async (req, res) => {
       });
     }
 
-    // Log activity
-    store.activityLog.unshift({
-      id: Date.now(),
-      user: email || 'anonymous',
-      action: 'Created text-to-video (Dreamina Seedance)',
-      amount: 200,
-      time: 'Just now',
-      timestamp: new Date().toISOString()
-    });
-
     res.json({
       success: true,
       videoUrl: videoUrl,
       usedModel: usedModel || 'Dreamina Seedance',
-      paymentReference: paymentReference
+      paymentReference: paymentReference,
+      cost: actualCost
     });
 
   } catch (error) {
     console.error('❌ Error in /api/generate-video:', error.message);
     
-    // Mark as failed for free retry
     if (paymentReference) {
       failedGenerations[paymentReference] = {
         timestamp: new Date().toISOString(),
@@ -752,12 +926,11 @@ app.post('/api/generate-image-to-video', async (req, res) => {
     
     let videoUrl = null;
     let usedModel = null;
+    let actualCost = 0;
 
     for (const modelId of modelIds) {
       try {
         console.log(`🔄 Trying image-to-video model: ${modelId}`);
-
-        store.videoCounts.photoToVideo = (store.videoCounts.photoToVideo || 0) + 1;
 
         const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
           method: 'POST',
@@ -803,7 +976,24 @@ app.post('/api/generate-image-to-video', async (req, res) => {
         
         if (videoUrl) {
           usedModel = modelId;
+          actualCost = 0.20;
           console.log(`✅ Image-to-video generated with ${modelId}!`);
+          
+          // Deduct from BytePlus credits
+          await addApiCredit('byteplus', actualCost, 'usage', `Image-to-video using ${modelId}`);
+          await addVideoUsage(
+            paymentReference || 'test_' + Date.now(),
+            email || 'anonymous',
+            'photo-to-video',
+            prompt.substring(0, 100),
+            actualCost
+          );
+          await addActivityLog(
+            email || 'anonymous',
+            'Generated photo-to-video',
+            `Model: ${modelId}, Cost: $${actualCost.toFixed(2)}`,
+            0
+          );
           break;
         }
       } catch (error) {
@@ -822,19 +1012,11 @@ app.post('/api/generate-image-to-video', async (req, res) => {
       });
     }
 
-    store.activityLog.unshift({
-      id: Date.now(),
-      user: email || 'anonymous',
-      action: 'Created photo-to-video (Dreamina Seedance)',
-      amount: 250,
-      time: 'Just now',
-      timestamp: new Date().toISOString()
-    });
-
     res.json({
       success: true,
       videoUrl: videoUrl,
-      usedModel: usedModel || 'Dreamina Seedance (Image-to-Video)'
+      usedModel: usedModel || 'Dreamina Seedance (Image-to-Video)',
+      cost: actualCost
     });
 
   } catch (error) {
@@ -845,6 +1027,89 @@ app.post('/api/generate-image-to-video', async (req, res) => {
       videoUrl: fallbackUrl,
       usedModel: 'Preview (Fallback)',
       isFallback: true
+    });
+  }
+});
+
+// ============================================
+// ADMIN DASHBOARD ENDPOINTS
+// ============================================
+
+// Combined dashboard data endpoint with real-time stats
+app.get('/api/admin/dashboard', async (req, res) => {
+  try {
+    const [credits, revenue, usage, visits, activity] = await Promise.all([
+      getApiCredits(),
+      getRevenueByService(),
+      getVideoUsage(),
+      getSiteVisits(),
+      getRecentActivity(10)
+    ]);
+
+    // Format activity for frontend
+    const formattedActivity = activity.map(log => ({
+      id: log.id,
+      user: log.user_email || 'Anonymous',
+      action: log.action,
+      amount: log.amount || 0,
+      time: log.created_at ? new Date(log.created_at).toLocaleString() : 'Just now'
+    }));
+
+    res.json({
+      credits: {
+        replicate: credits.replicate || 0,
+        byteplus: credits.byteplus || 0,
+        total: credits.total || 0
+      },
+      revenue: {
+        total: revenue.total || 0,
+        textToVideo: revenue.textToVideo || 0,
+        photoToVideo: revenue.photoToVideo || 0,
+        translation: revenue.translation || 0
+      },
+      usage: {
+        totalVideos: usage.totalVideos || 0,
+        textToVideo: usage.textToVideo || 0,
+        photoToVideo: usage.photoToVideo || 0,
+        translation: usage.translation || 0
+      },
+      visits: {
+        total: visits || 0,
+        today: 0,
+        week: 0,
+        month: 0
+      },
+      recentActivity: formattedActivity
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard data:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+});
+
+// Manual add credits endpoint
+app.post('/api/admin/add-credits', async (req, res) => {
+  try {
+    const { provider, amount, description } = req.body;
+    
+    if (!provider || !amount) {
+      return res.status(400).json({
+        success: false,
+        error: 'Provider and amount are required'
+      });
+    }
+
+    await addApiCredit(provider, amount, 'purchase', description || 'Manual credit addition');
+    
+    res.json({
+      success: true,
+      message: `Added ${amount} ${provider} credits`
+    });
+  } catch (error) {
+    console.error('Error adding credits:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });
@@ -962,7 +1227,7 @@ app.get('/api/failed-generation/:paymentReference', (req, res) => {
 });
 
 // ============================================
-// MANUALLY ADD FAILED GENERATION (FOR TESTING)
+// MANUALLY ADD FAILED GENERATION
 // ============================================
 
 app.post('/api/manual-add-failed', (req, res) => {
@@ -1005,146 +1270,12 @@ app.post('/api/manual-add-failed', (req, res) => {
 // DEBUG ENDPOINTS
 // ============================================
 
-// Debug endpoint to check failed generations
 app.get('/api/debug-failed', (req, res) => {
   res.json({
     failedGenerations: failedGenerations,
     total: Object.keys(failedGenerations).length,
     keys: Object.keys(failedGenerations)
   });
-});
-
-// ============================================
-// ADMIN DASHBOARD ENDPOINTS
-// ============================================
-
-async function getReplicateCredits() {
-  try {
-    const balance = parseFloat(process.env.REPLICATE_BALANCE) || 0;
-    return {
-      balance: balance,
-      currency: 'USD',
-      note: 'Set via environment variable'
-    };
-  } catch (error) {
-    console.error('Error fetching Replicate credits:', error);
-    return { balance: 0, error: error.message };
-  }
-}
-
-async function getByteplusCredits() {
-  try {
-    const balance = parseFloat(process.env.BYTEPLUS_BALANCE) || 0;
-    return {
-      balance: balance,
-      currency: 'USD',
-      note: 'Set via environment variable'
-    };
-  } catch (error) {
-    console.error('Error fetching BytePlus credits:', error);
-    return { balance: 0, error: error.message };
-  }
-}
-
-function getRevenue() {
-  return {
-    total: store.revenue.total || 0,
-    textToVideo: store.revenue.textToVideo || 0,
-    photoToVideo: store.revenue.photoToVideo || 0,
-    translation: store.revenue.translation || 0,
-    currency: 'KES'
-  };
-}
-
-function getUsage() {
-  return {
-    totalVideos: store.videoCounts.textToVideo + store.videoCounts.photoToVideo + store.videoCounts.translation || 0,
-    textToVideo: store.videoCounts.textToVideo || 0,
-    photoToVideo: store.videoCounts.photoToVideo || 0,
-    translation: store.videoCounts.translation || 0
-  };
-}
-
-function getVisits() {
-  store.visitCount++;
-  return {
-    total: store.visitCount || 0,
-    today: 47,
-    week: 342,
-    month: store.visitCount || 0
-  };
-}
-
-function getActivity() {
-  return store.activityLog || [];
-}
-
-app.get('/api/admin/credits/replicate', async (req, res) => {
-  res.json(await getReplicateCredits());
-});
-
-app.get('/api/admin/credits/byteplus', async (req, res) => {
-  res.json(await getByteplusCredits());
-});
-
-app.get('/api/admin/revenue', (req, res) => {
-  try {
-    res.json(getRevenue());
-  } catch (error) {
-    console.error('Error fetching revenue:', error);
-    res.json({ error: error.message });
-  }
-});
-
-app.get('/api/admin/usage', (req, res) => {
-  try {
-    res.json(getUsage());
-  } catch (error) {
-    console.error('Error fetching usage:', error);
-    res.json({ error: error.message });
-  }
-});
-
-app.get('/api/admin/visits', (req, res) => {
-  try {
-    res.json(getVisits());
-  } catch (error) {
-    console.error('Error fetching visits:', error);
-    res.json({ error: error.message });
-  }
-});
-
-app.get('/api/admin/activity', (req, res) => {
-  try {
-    res.json(getActivity());
-  } catch (error) {
-    console.error('Error fetching activity:', error);
-    res.json({ error: error.message });
-  }
-});
-
-app.get('/api/admin/dashboard', async (req, res) => {
-  try {
-    const [creditsReplicate, creditsByteplus] = await Promise.all([
-      getReplicateCredits(),
-      getByteplusCredits()
-    ]);
-
-    res.json({
-      credits: {
-        replicate: creditsReplicate.balance || 0,
-        byteplus: creditsByteplus.balance || 0,
-        total: (creditsReplicate.balance || 0) + (creditsByteplus.balance || 0)
-      },
-      revenue: getRevenue(),
-      usage: getUsage(),
-      visits: getVisits(),
-      recentActivity: getActivity()
-    });
-  } catch (error) {
-    console.error('Error fetching dashboard data:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard data' });
-  }
 });
 
 // ============================================
@@ -1275,17 +1406,13 @@ app.get('/api/test', (req, res) => {
     paymentEnforced: '✅ Yes',
     endpoints: [
       '/api/test', '/api/health',
-      '/api/generate-video (Dreamina Seedance)',
-      '/api/generate-image-to-video (Dreamina Seedance)',
+      '/api/generate-video',
+      '/api/generate-image-to-video',
       '/api/calculate-price',
       '/api/verify-payment',
       '/api/send-video-email',
-      '/api/check-free-retry',
-      '/api/check-failed-by-email',
-      '/api/failed-generation/:paymentReference',
-      '/api/manual-add-failed',
-      '/api/debug-failed',
-      '/api/admin/dashboard'
+      '/api/admin/dashboard',
+      '/api/admin/add-credits'
     ]
   });
 });
@@ -1298,7 +1425,8 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
     byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
     paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
-    email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No'
+    email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No',
+    database_connected: true
   });
 });
 
@@ -1315,12 +1443,8 @@ app.get('/', (req, res) => {
       { path: '/api/calculate-price', method: 'POST' },
       { path: '/api/verify-payment', method: 'POST' },
       { path: '/api/send-video-email', method: 'POST' },
-      { path: '/api/check-free-retry', method: 'POST' },
-      { path: '/api/check-failed-by-email', method: 'POST' },
-      { path: '/api/failed-generation/:paymentReference', method: 'GET' },
-      { path: '/api/manual-add-failed', method: 'POST' },
-      { path: '/api/debug-failed', method: 'GET' },
-      { path: '/api/admin/dashboard', method: 'GET' }
+      { path: '/api/admin/dashboard', method: 'GET' },
+      { path: '/api/admin/add-credits', method: 'POST' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
@@ -1368,5 +1492,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
+  console.log(`📊 Database: SQLite (data.db)`);
   console.log(`🎬 Using Dreamina Seedance for video generation`);
 });
