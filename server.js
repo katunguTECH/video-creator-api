@@ -32,7 +32,7 @@ let dataStore = {
   videoUsage: [],
   activityLog: [],
   siteVisits: [],
-  userPayments: [], // Track user payments
+  userPayments: [],
   initialBalances: {
     replicate: parseFloat(process.env.REPLICATE_BALANCE) || 10.00,
     byteplus: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40
@@ -118,13 +118,12 @@ function getApiBalances() {
   };
 }
 
-// Track user payments
 function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
   const entry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
     email,
     amount: parseFloat(amount),
-    paymentMethod, // 'mpesa', 'card', 'bank_transfer'
+    paymentMethod,
     serviceType,
     reference,
     status: 'completed',
@@ -144,6 +143,7 @@ function addRevenue(transactionId, email, amount, serviceType, paymentReference,
     serviceType,
     paymentReference,
     paymentMethod: paymentMethod || 'card',
+    duration: 5, // Will be updated when video is generated
     createdAt: new Date().toISOString()
   };
   dataStore.revenue.push(entry);
@@ -151,7 +151,7 @@ function addRevenue(transactionId, email, amount, serviceType, paymentReference,
   return entry.id;
 }
 
-function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider) {
+function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
   const entry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
     transactionId,
@@ -161,6 +161,7 @@ function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelU
     cost: cost || 0,
     modelUsed: modelUsed || 'unknown',
     provider: provider || 'unknown',
+    duration: duration || 5,
     createdAt: new Date().toISOString()
   };
   dataStore.videoUsage.push(entry);
@@ -308,72 +309,102 @@ const upload = multer({
 // ============================================
 app.post('/api/calculate-price', (req, res) => {
   try {
+    console.log('💰 Price calculation request received');
+    console.log('📦 Request body:', req.body);
+
     const { serviceType, options } = req.body;
     const duration = options?.duration || 5;
     const photoCount = options?.photoCount || 0;
 
-    let baseCost = 0, breakdown = [], serviceName = 'Dreamina Seedance';
+    // Duration-based pricing multiplier
+    const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
+    let baseCost = 0;
+    let breakdown = [];
+    let serviceName = 'Dreamina Seedance';
+
     if (serviceType === 'image_to_video') {
-      baseCost = 30 + (duration * 3);
-      breakdown = [{ item: 'AI Image-to-Video Generation', amount: 30 }, { item: `${duration}s video processing`, amount: duration * 3 }];
-      serviceName = 'Dreamina Seedance (Image-to-Video)';
+      const baseFee = 30 * durationMultiplier;
+      const perSecond = 3 * durationMultiplier;
+      baseCost = baseFee + (duration * perSecond);
+      breakdown = [
+        { item: 'AI Image-to-Video Generation', amount: baseFee },
+        { item: `${duration}s video processing`, amount: duration * perSecond }
+      ];
+      serviceName = `Dreamina Seedance (Image-to-Video, ${duration}s)`;
     } else if (serviceType === 'photos_to_video') {
-      baseCost = 20 + (photoCount * 2);
-      breakdown = [{ item: 'Base slideshow fee', amount: 20 }, { item: `${photoCount} photo(s)`, amount: photoCount * 2 }];
-      serviceName = 'Dreamina Seedance (Photos to Video)';
+      const baseFee = 20 * durationMultiplier;
+      const perPhoto = 2 * durationMultiplier;
+      baseCost = baseFee + (photoCount * perPhoto);
+      breakdown = [
+        { item: 'Base slideshow fee', amount: baseFee },
+        { item: `${photoCount} photo(s)`, amount: photoCount * perPhoto }
+      ];
+      serviceName = `Dreamina Seedance (Photos to Video, ${duration}s)`;
     } else {
-      baseCost = 20 + (duration * 2);
-      breakdown = [{ item: 'AI Video Generation', amount: 20 }, { item: `${duration}s video processing`, amount: duration * 2 }, { item: 'HD Quality', amount: 0 }];
-      serviceName = 'Dreamina Seedance (Text-to-Video)';
+      // Text to video
+      const baseFee = 20 * durationMultiplier;
+      const perSecond = 2 * durationMultiplier;
+      baseCost = baseFee + (duration * perSecond);
+      breakdown = [
+        { item: 'AI Video Generation', amount: baseFee },
+        { item: `${duration}s video processing`, amount: duration * perSecond },
+        { item: 'HD Quality', amount: 0 }
+      ];
+      serviceName = `Dreamina Seedance (Text-to-Video, ${duration}s)`;
     }
 
     const markupMultiplier = 10;
     const finalPrice = baseCost * markupMultiplier;
     const markupAmount = baseCost * (markupMultiplier - 1);
 
+    const priceData = {
+      serviceType: serviceType || 'dreamina',
+      serviceName: serviceName,
+      baseCost: baseCost,
+      markupMultiplier: markupMultiplier,
+      markupAmount: markupAmount,
+      finalPrice: finalPrice,
+      breakdown: breakdown,
+      currency: 'KES'
+    };
+
+    console.log('✅ Price calculated:', priceData);
+
     res.json({
       success: true,
-      price: {
-        serviceType: serviceType || 'dreamina',
-        serviceName,
-        baseCost,
-        markupMultiplier,
-        markupAmount,
-        finalPrice,
-        breakdown,
-        currency: 'KES'
-      },
+      price: priceData,
       formatted: `KES ${finalPrice}`
     });
+
   } catch (error) {
     console.error('❌ Price calculation error:', error.message);
-    res.status(400).json({ success: false, error: error.message });
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
   }
 });
 
 // ============================================
-// PAYMENT ENDPOINTS - Supports Card & M-Pesa
+// PAYMENT ENDPOINTS
 // ============================================
 
 app.post('/api/verify-payment', async (req, res) => {
   try {
-    const { reference, email, amount, serviceType, paymentMethod } = req.body;
+    const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
     
-    console.log(`🔍 Verifying payment: ${reference}`, { email, amount, serviceType, paymentMethod });
+    console.log(`🔍 Verifying payment: ${reference}`, { email, amount, serviceType, paymentMethod, duration });
     
     if (!secretKey) {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
-      // Test mode - accept payment
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-      
-      // Record the payment
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
       
       addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
       addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
-      addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}`, amount);
+      addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
       
       return res.json({ 
         success: true, 
@@ -383,7 +414,6 @@ app.post('/api/verify-payment', async (req, res) => {
       });
     }
 
-    // Verify with Paystack
     const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
       method: 'GET',
       headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
@@ -397,10 +427,9 @@ app.post('/api/verify-payment', async (req, res) => {
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
       
-      // Record the payment
       addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
       addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
-      addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}`, amount);
+      addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
 
       res.json({ 
         success: true, 
@@ -436,16 +465,14 @@ app.post('/api/webhook/paystack', (req, res) => {
       console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
       console.log(`   Customer: ${transaction.customer.email}`);
       
-      // Record the payment from webhook
       const amount = transaction.amount / 100;
       const email = transaction.customer.email;
       const reference = transaction.reference;
-      
-      // Try to get service type from metadata
       const serviceType = transaction.metadata?.custom_fields?.find(f => f.display_name === "Video Type")?.value || 'text-to-video';
+      const duration = parseInt(transaction.metadata?.custom_fields?.find(f => f.display_name === "Duration")?.value) || 5;
       
       addUserPayment(email, amount, 'card', serviceType, reference);
-      addActivityLog(email, `💰 Payment received via webhook`, `Amount: KES ${amount}, Ref: ${reference}`, amount);
+      addActivityLog(email, `💰 Payment received via webhook`, `Amount: KES ${amount}, Ref: ${reference}, Duration: ${duration}s`, amount);
     }
     res.sendStatus(200);
   } catch (error) {
@@ -468,7 +495,7 @@ const transporter = nodemailer.createTransport({
   }
 });
 
-function generateVideoEmail(email, videoUrl, prompt, amount) {
+function generateVideoEmail(email, videoUrl, prompt, amount, duration) {
   return {
     from: process.env.EMAIL_FROM || `"VidAI Creator" <${process.env.EMAIL_USER}>`,
     to: email,
@@ -499,6 +526,7 @@ function generateVideoEmail(email, videoUrl, prompt, amount) {
           
           <div class="details">
             <p><strong>📝 Prompt:</strong> ${prompt}</p>
+            <p><strong>⏱️ Duration:</strong> ${duration || 5}s</p>
             <p><strong>💰 Amount Paid:</strong> KES ${amount}</p>
           </div>
           
@@ -532,9 +560,9 @@ function generateVideoEmail(email, videoUrl, prompt, amount) {
 
 app.post('/api/send-video-email', async (req, res) => {
   try {
-    const { email, videoUrl, prompt, amount } = req.body;
+    const { email, videoUrl, prompt, amount, duration } = req.body;
     if (!email || !videoUrl) throw new Error('Email and video URL are required');
-    const mailOptions = generateVideoEmail(email, videoUrl, prompt, amount);
+    const mailOptions = generateVideoEmail(email, videoUrl, prompt, amount, duration || 5);
     await transporter.sendMail(mailOptions);
     res.json({ success: true, message: 'Video sent to your email' });
   } catch (error) {
@@ -544,7 +572,7 @@ app.post('/api/send-video-email', async (req, res) => {
 });
 
 // ============================================
-// VIDEO GENERATION WITH TRACKING
+// VIDEO GENERATION WITH DURATION SUPPORT
 // ============================================
 
 const failedGenerations = {};
@@ -573,9 +601,12 @@ function createFallbackVideo(prompt, paymentReference) {
 
 app.post('/api/generate-video', async (req, res) => {
   try {
-    const { prompt, paymentReference, email, retry } = req.body;
+    const { prompt, paymentReference, email, retry, duration } = req.body;
+    const videoDuration = duration || 5;
+    
     console.log('🎬 Generating video...');
     console.log('📝 Prompt:', prompt ? prompt.substring(0, 100) : 'No prompt');
+    console.log('⏱️ Duration:', videoDuration, 's');
     console.log('👤 User Email:', email);
     console.log('💳 Payment Reference:', paymentReference);
 
@@ -600,11 +631,14 @@ app.post('/api/generate-video', async (req, res) => {
       console.log('✅ Payment verified:', paymentReference);
     }
 
+    // Duration-based cost
+    const durationMultiplier = videoDuration === 5 ? 1 : videoDuration === 10 ? 2 : videoDuration === 15 ? 3 : 1;
+
     // Try Replicate HappyHorse first
     let videoUrl = null;
     let usedModel = null;
     let provider = null;
-    let cost = 0;
+    let cost = 0.08 * durationMultiplier;
 
     try {
       const replicateToken = process.env.REPLICATE_API_TOKEN;
@@ -620,7 +654,7 @@ app.post('/api/generate-video', async (req, res) => {
             version: "alibaba/happy-horse:latest",
             input: {
               prompt: prompt,
-              num_frames: 16,
+              num_frames: videoDuration === 5 ? 16 : videoDuration === 10 ? 32 : 48,
               fps: 8,
               guidance_scale: 7.0,
               num_inference_steps: 30,
@@ -650,12 +684,9 @@ app.post('/api/generate-video', async (req, res) => {
             videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
             usedModel = 'HappyHorse';
             provider = 'replicate';
-            cost = 0.08;
+            cost = 0.08 * durationMultiplier;
             console.log('✅ Replicate video generated successfully!');
           }
-        } else {
-          const error = await response.text();
-          console.warn('⚠️ Replicate failed:', response.status);
         }
       }
     } catch (error) {
@@ -679,12 +710,18 @@ app.post('/api/generate-video', async (req, res) => {
                 body: JSON.stringify({
                   model: modelId,
                   content: [{ type: "text", text: prompt }],
-                  parameters: { duration: 5, resolution: "720p", ratio: "16:9", fps: 24, output_sound: "close", watermark: false }
+                  parameters: { 
+                    duration: videoDuration, 
+                    resolution: "720p", 
+                    ratio: "16:9", 
+                    fps: 24, 
+                    output_sound: "close", 
+                    watermark: false 
+                  }
                 })
               });
               
               if (!createResponse.ok) {
-                const errorText = await createResponse.text();
                 console.warn(`⚠️ BytePlus ${modelId} failed:`, createResponse.status);
                 continue;
               }
@@ -697,7 +734,7 @@ app.post('/api/generate-video', async (req, res) => {
               if (videoUrl) {
                 usedModel = modelId;
                 provider = 'byteplus';
-                cost = 0.15;
+                cost = 0.15 * durationMultiplier;
                 console.log(`✅ BytePlus video generated with ${modelId}!`);
                 break;
               }
@@ -720,6 +757,7 @@ app.post('/api/generate-video', async (req, res) => {
           timestamp: new Date().toISOString(),
           email: email,
           prompt: prompt,
+          duration: videoDuration,
           reason: 'Generation failed'
         };
       }
@@ -734,14 +772,13 @@ app.post('/api/generate-video', async (req, res) => {
       });
     }
 
-    // SUCCESS: Track everything
+    // SUCCESS: Track everything with duration
     if (provider === 'replicate') {
-      addApiTransaction('replicate', cost, 'usage', `Video generation with ${usedModel}`);
+      addApiTransaction('replicate', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
     } else if (provider === 'byteplus') {
-      addApiTransaction('byteplus', cost, 'usage', `Video generation with ${usedModel}`);
+      addApiTransaction('byteplus', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
     }
     
-    // Track video usage with user email
     addVideoUsage(
       paymentReference || 'test_' + Date.now(),
       email || 'anonymous',
@@ -749,12 +786,13 @@ app.post('/api/generate-video', async (req, res) => {
       prompt,
       cost,
       usedModel,
-      provider
+      provider,
+      videoDuration
     );
     
     addActivityLog(
       email || 'anonymous',
-      `🎬 Generated video with ${provider}`,
+      `🎬 Generated ${videoDuration}s video with ${provider}`,
       `Model: ${usedModel}, Cost: $${cost.toFixed(2)}`,
       0
     );
@@ -769,6 +807,7 @@ app.post('/api/generate-video', async (req, res) => {
       usedModel: usedModel,
       provider: provider,
       cost: cost,
+      duration: videoDuration,
       paymentReference,
       userEmail: email
     });
@@ -820,6 +859,10 @@ app.get('/api/admin/dashboard', async (req, res) => {
     const activity = getRecentActivity(10);
     const payments = getUserPayments(10);
 
+    // Calculate average duration
+    const totalDuration = dataStore.videoUsage.reduce((sum, v) => sum + (v.duration || 5), 0);
+    const avgDuration = dataStore.videoUsage.length > 0 ? Math.round(totalDuration / dataStore.videoUsage.length) : 0;
+
     res.json({
       credits: balances,
       revenue: { 
@@ -832,7 +875,8 @@ app.get('/api/admin/dashboard', async (req, res) => {
         totalVideos: usage.totalVideos || 0, 
         textToVideo: usage.textToVideo || 0, 
         photoToVideo: usage.photoToVideo || 0, 
-        translation: usage.translation || 0 
+        translation: usage.translation || 0,
+        avgDuration: avgDuration
       },
       visits: { 
         total: visits || 0, 
@@ -852,7 +896,9 @@ app.get('/api/admin/dashboard', async (req, res) => {
 // Admin endpoint to manually add missing payment
 app.post('/api/admin/add-missing-payment', async (req, res) => {
   try {
-    const { email, amount, serviceType, paymentMethod, reference } = req.body;
+    const { email, amount, serviceType, paymentMethod, reference, duration } = req.body;
+    
+    console.log('📝 Adding missing payment:', { email, amount, serviceType, paymentMethod, duration });
     
     if (!email || !amount) {
       return res.status(400).json({ 
@@ -864,17 +910,20 @@ app.post('/api/admin/add-missing-payment', async (req, res) => {
     const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
     const serviceKey = serviceType || 'textToVideo';
     const method = paymentMethod || 'mpesa';
+    const videoDuration = duration || 5;
     
     addRevenue(transactionId, email, amount, serviceKey, reference || 'manual_' + Date.now(), method);
     addUserPayment(email, amount, method, serviceKey, reference || 'manual_' + Date.now());
-    addActivityLog(email, `💰 Manual payment added`, `Amount: KES ${amount} via ${method}`, amount);
+    addActivityLog(email, `💰 Manual payment added`, `Amount: KES ${amount} via ${method}, Duration: ${videoDuration}s`, amount);
     
     res.json({ 
       success: true, 
       message: `Payment of KES ${amount} added for ${email}`,
-      transactionId
+      transactionId,
+      totalRevenue: dataStore.revenue.reduce((sum, r) => sum + r.amount, 0)
     });
   } catch (error) {
+    console.error('❌ Error adding missing payment:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });
@@ -974,6 +1023,7 @@ app.post('/api/manual-add-failed', (req, res) => {
     timestamp: new Date().toISOString(),
     email: email || 'katungu1@gmail.com',
     prompt: prompt || 'DukaApp promotional video',
+    duration: 5,
     reason: 'Manually added for testing'
   };
   res.json({ success: true, message: 'Failed generation added manually', paymentReference });
@@ -1143,4 +1193,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`💰 BytePlus Balance: $${getApiBalance('byteplus')}`);
   console.log(`📊 Total Revenue: KES ${dataStore.revenue.reduce((sum, r) => sum + r.amount, 0)}`);
   console.log(`📊 Total Videos: ${dataStore.videoUsage.length}`);
+  console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
 });

@@ -57,7 +57,8 @@ function Preview() {
           email: email,
           videoUrl: videoUrl,
           prompt: prompt || 'Your AI-generated video',
-          amount: amount || '0'
+          amount: amount || '0',
+          duration: duration || 5
         })
       });
 
@@ -117,7 +118,8 @@ function Preview() {
           paymentReference: paymentReference,
           email: email,
           serviceType: 'text-to-video',
-          retry: true
+          retry: true,
+          duration: duration || 5
         })
       });
       
@@ -209,6 +211,7 @@ function Preview() {
     try {
       setStatusMessage('🎬 Generating your video with AI...');
       console.log('📝 Prompt:', prompt);
+      console.log('⏱️ Duration:', duration || 5, 's');
       console.log('💳 Payment Reference:', paymentReference || 'Test Mode');
 
       if (!paymentReference) {
@@ -226,7 +229,8 @@ function Preview() {
           prompt: prompt,
           paymentReference: paymentReference || 'test_mode_' + Date.now(),
           email: email,
-          serviceType: 'text-to-video'
+          serviceType: 'text-to-video',
+          duration: duration || 5
         })
       });
 
@@ -234,7 +238,6 @@ function Preview() {
       console.log('📦 API Response:', data);
 
       if (data.success && data.videoUrl) {
-        // Check if it's a fallback (failed generation)
         if (data.isFallback) {
           setVideoUrl(data.videoUrl);
           setUsedModel('Preview (Fallback)');
@@ -242,7 +245,6 @@ function Preview() {
           setIsGenerating(false);
           setStatusMessage('⚠️ ' + (data.note || 'Video generation failed.'));
           
-          // Check if we can retry for free
           if (data.canRetry && paymentReference) {
             setCanRetry(true);
             setStatusMessage('⚠️ Video generation failed. Click "Retry for Free" to try again.');
@@ -254,9 +256,8 @@ function Preview() {
         setUsedModel(data.usedModel || 'Dreamina Seedance');
         setProgress(100);
         setIsGenerating(false);
-        setStatusMessage(`✅ Video generated successfully! 🎉`);
+        setStatusMessage(`✅ ${duration || 5}s video generated successfully! 🎉`);
 
-        // Auto-send email if email is provided
         if (email) {
           try {
             const emailResponse = await fetch(`${API_URL}/api/send-video-email`, {
@@ -268,13 +269,14 @@ function Preview() {
                 email: email,
                 videoUrl: data.videoUrl,
                 prompt: prompt,
-                amount: amount || '0'
+                amount: amount || '0',
+                duration: duration || 5
               })
             });
             const emailData = await emailResponse.json();
             if (emailData.success) {
               setEmailSent(true);
-              setStatusMessage('✅ Video generated and sent to your email! 📧');
+              setStatusMessage(`✅ ${duration || 5}s video generated and sent to your email! 📧`);
             }
           } catch (emailErr) {
             console.warn('Email auto-send failed:', emailErr);
@@ -309,7 +311,7 @@ function Preview() {
         setStatusMessage('❌ Generation failed');
       }
     }
-  }, [prompt, paymentReference, email, amount, createFallbackVideo]);
+  }, [prompt, paymentReference, email, amount, duration, createFallbackVideo]);
 
   useEffect(() => {
     if (!prompt && (!photos || photos.length === 0)) {
@@ -331,6 +333,7 @@ function Preview() {
     return () => clearInterval(progressInterval);
   }, [prompt, photos, activeTab, navigate, generateVideo]);
 
+  // Loading Screen
   if (isGenerating) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white flex flex-col items-center justify-center px-4">
@@ -344,6 +347,9 @@ function Preview() {
             )}
             {email && (
               <p className="text-xs text-gray-400 mt-1">📧 Video will be sent to: {email}</p>
+            )}
+            {duration && (
+              <p className="text-xs text-purple-400 mt-1">⏱️ Duration: {duration}s</p>
             )}
           </div>
 
@@ -362,7 +368,7 @@ function Preview() {
           </div>
 
           <div className="mt-8 p-4 bg-white/5 rounded-2xl text-left">
-            <p className="text-xs text-gray-400">💡 Video generation may take 30-60 seconds</p>
+            <p className="text-xs text-gray-400">💡 Video generation may take 30-90 seconds</p>
             <p className="text-xs text-gray-500 mt-1">🔍 Check console (F12) for details</p>
           </div>
         </div>
@@ -370,6 +376,7 @@ function Preview() {
     );
   }
 
+  // Error Screen
   if (error) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white flex flex-col items-center justify-center px-4">
@@ -403,6 +410,7 @@ function Preview() {
     );
   }
 
+  // Video Preview Screen
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
       <div className="max-w-4xl mx-auto">
@@ -412,6 +420,7 @@ function Preview() {
             <h2 className="text-3xl font-bold">🎬 Video Preview</h2>
             <p className="text-gray-400 text-sm mt-1">
               {usedModel} • {videoUrl?.startsWith('data:video') ? 'Video' : 'Image'}
+              {duration && <span className="ml-2 text-purple-400">⏱️ {duration}s</span>}
             </p>
             {paymentReference && (
               <p className="text-xs text-green-400 mt-1">✅ Payment: {paymentReference.substring(0, 15)}...</p>
@@ -463,7 +472,7 @@ function Preview() {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
           <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm">
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Type</h3>
             <p className="font-semibold text-lg">
@@ -473,6 +482,10 @@ function Preview() {
           <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm">
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Model</h3>
             <p className="font-semibold text-sm truncate">{usedModel}</p>
+          </div>
+          <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm">
+            <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Duration</h3>
+            <p className="font-semibold text-lg">{duration || 5}s</p>
           </div>
           <div className="bg-white/5 rounded-2xl p-4 backdrop-blur-sm">
             <h3 className="text-xs text-gray-400 uppercase tracking-wider mb-1">Status</h3>
@@ -558,7 +571,7 @@ function Preview() {
         )}
 
         <div className="mt-4 text-center text-gray-500 text-xs">
-          <p>Generated using {usedModel} • Download to save permanently</p>
+          <p>Generated using {usedModel} • Duration: {duration || 5}s • Download to save permanently</p>
           {email && <p>📧 Video link also sent to {email}</p>}
         </div>
 
