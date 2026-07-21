@@ -884,6 +884,52 @@ app.post('/api/check-free-retry', (req, res) => {
 });
 
 // ============================================
+// CHECK FAILED GENERATIONS BY EMAIL
+// ============================================
+
+app.post('/api/check-failed-by-email', (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.json({
+        success: false,
+        error: 'Email required'
+      });
+    }
+    
+    // Find failed generation for this email
+    let foundReference = null;
+    for (const [ref, data] of Object.entries(failedGenerations)) {
+      if (data.email === email) {
+        foundReference = ref;
+        break;
+      }
+    }
+    
+    if (foundReference) {
+      res.json({
+        success: true,
+        hasFailed: true,
+        paymentReference: foundReference,
+        details: failedGenerations[foundReference]
+      });
+    } else {
+      res.json({
+        success: true,
+        hasFailed: false
+      });
+    }
+  } catch (error) {
+    console.error('Error checking failed by email:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
 // GET FAILED GENERATION STATUS
 // ============================================
 
@@ -1182,6 +1228,7 @@ app.get('/api/test', (req, res) => {
       '/api/verify-payment',
       '/api/send-video-email',
       '/api/check-free-retry',
+      '/api/check-failed-by-email',
       '/api/failed-generation/:paymentReference',
       '/api/admin/dashboard'
     ]
@@ -1214,6 +1261,7 @@ app.get('/', (req, res) => {
       { path: '/api/verify-payment', method: 'POST' },
       { path: '/api/send-video-email', method: 'POST' },
       { path: '/api/check-free-retry', method: 'POST' },
+      { path: '/api/check-failed-by-email', method: 'POST' },
       { path: '/api/failed-generation/:paymentReference', method: 'GET' },
       { path: '/api/admin/dashboard', method: 'GET' }
     ],
