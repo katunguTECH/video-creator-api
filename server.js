@@ -18,10 +18,9 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
-console.log('📧 Email configured:', process.env.EMAIL_USER ? '✅ Set' : '❌ Not set');
 
 // ============================================
-// FILE-BASED DATA STORE (No SQLite)
+// FILE-BASED DATA STORE
 // ============================================
 
 const DATA_FILE = path.join(__dirname, 'data.json');
@@ -32,7 +31,12 @@ let dataStore = {
   videoUsage: [],
   apiCredits: [],
   activityLog: [],
-  siteVisits: []
+  siteVisits: [],
+  // Track initial balances
+  initialBalances: {
+    replicate: parseFloat(process.env.REPLICATE_BALANCE) || 10.00,
+    byteplus: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40
+  }
 };
 
 // Load data from file if exists
@@ -41,8 +45,18 @@ function loadData() {
     if (fs.existsSync(DATA_FILE)) {
       const rawData = fs.readFileSync(DATA_FILE, 'utf8');
       const parsed = JSON.parse(rawData);
-      dataStore = parsed;
+      // Merge with defaults to handle new fields
+      dataStore = {
+        ...dataStore,
+        ...parsed,
+        initialBalances: {
+          ...dataStore.initialBalances,
+          ...(parsed.initialBalances || {})
+        }
+      };
       console.log('✅ Data loaded from file');
+      console.log(`📊 Revenue records: ${dataStore.revenue.length}`);
+      console.log(`📊 Video usage records: ${dataStore.videoUsage.length}`);
       return true;
     }
     console.log('ℹ️ No existing data file found, starting fresh');
@@ -68,7 +82,10 @@ function saveData() {
 // Load data on startup
 loadData();
 
-// Helper functions
+// ============================================
+// DATA ACCESS FUNCTIONS
+// ============================================
+
 function addRevenue(transactionId, email, amount, serviceType, paymentReference) {
   const entry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
@@ -84,14 +101,15 @@ function addRevenue(transactionId, email, amount, serviceType, paymentReference)
   return entry.id;
 }
 
-function addVideoUsage(transactionId, userEmail, videoType, prompt, cost) {
+function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed) {
   const entry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
     transactionId,
-    userEmail,
+    userEmail: userEmail || 'anonymous',
     videoType,
-    prompt: prompt.substring(0, 200),
-    cost,
+    prompt: prompt ? prompt.substring(0, 200) : '',
+    cost: cost || 0,
+    modelUsed: modelUsed || 'unknown',
     createdAt: new Date().toISOString()
   };
   dataStore.videoUsage.push(entry);
@@ -103,8 +121,8 @@ function addApiCredit(provider, amount, type, description) {
   const entry = {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
     provider,
-    amount,
-    type,
+    amount: parseFloat(amount),
+    type, // 'purchase' or 'usage'
     description,
     createdAt: new Date().toISOString()
   };
@@ -118,11 +136,15 @@ function addActivityLog(userEmail, action, details, amount) {
     id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
     userEmail: userEmail || 'anonymous',
     action,
-    details,
+    details: details || '',
     amount: amount || 0,
     createdAt: new Date().toISOString()
   };
   dataStore.activityLog.push(entry);
+  // Keep only last 1000 entries
+  if (dataStore.activityLog.length > 1000) {
+    dataStore.activityLog = dataStore.activityLog.slice(-1000);
+  }
   saveData();
   return entry.id;
 }
@@ -136,11 +158,22 @@ function recordSiteVisit(page, ip, userAgent) {
     createdAt: new Date().toISOString()
   };
   dataStore.siteVisits.push(entry);
+  // Keep only last 5000 visits
+  if (dataStore.siteVisits.length > 5000) {
+    dataStore.siteVisits = dataStore.siteVisits.slice(-5000);
+  }
   saveData();
   return entry.id;
 }
 
+// ============================================
+// CALCULATION FUNCTIONS FOR DASHBOARD
+// ============================================
+
 function getApiCredits() {
+  const initialReplicate = dataStore.initialBalances?.replicate || 10.00;
+  const initialByteplus = dataStore.initialBalances?.byteplus || 29.40;
+  
   const replicatePurchases = dataStore.apiCredits
     .filter(c => c.provider === 'replicate' && c.type === 'purchase')
     .reduce((sum, c) => sum + c.amount, 0);
@@ -155,9 +188,10 @@ function getApiCredits() {
     .reduce((sum, c) => sum + c.amount, 0);
   
   return {
-    replicate: replicatePurchases - replicateUsage,
-    byteplus: byteplusPurchases - byteplusUsage,
-    total: (replicatePurchases - replicateUsage) + (byteplusPurchases - byteplusUsage)
+    replicate: initialReplicate + replicatePurchases - replicateUsage,
+    byteplus: initialByteplus + byteplusPurchases - byteplusUsage,
+    total: (initialReplicate + replicatePurchases - replicateUsage) + 
+           (initialByteplus + byteplusPurchases - byteplusUsage)
   };
 }
 
@@ -205,6 +239,7 @@ function getRecentActivity(limit = 10) {
       id: log.id,
       user: log.userEmail || 'Anonymous',
       action: log.action,
+      details: log.details || '',
       amount: log.amount || 0,
       time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
     }));
@@ -284,51 +319,6 @@ function generateVideoEmail(email, videoUrl, prompt, amount) {
       </html>
     `
   };
-}
-
-// ============================================
-// IN-MEMORY DATA STORE (Fallback)
-// ============================================
-const store = {
-  activityLog: [],
-  visitCount: 0,
-  videoCounts: {
-    textToVideo: 0,
-    photoToVideo: 0,
-    translation: 0
-  },
-  revenue: {
-    total: 0,
-    textToVideo: 0,
-    photoToVideo: 0,
-    translation: 0
-  }
-};
-
-const failedGenerations = {};
-
-// ============================================
-// PAYMENT VERIFICATION FUNCTION
-// ============================================
-
-async function verifyPayment(reference) {
-  try {
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey) return false;
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json',
-      }
-    });
-    if (!response.ok) return false;
-    const data = await response.json();
-    return data.status && data.data?.status === 'success';
-  } catch (error) {
-    console.error('❌ Payment verification error:', error.message);
-    return false;
-  }
 }
 
 // ============================================
@@ -447,7 +437,7 @@ app.post('/api/verify-payment', async (req, res) => {
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
       
       addRevenue(transactionId, email, amount, serviceKey, reference);
-      addActivityLog(email, `Paid for ${serviceType}`, `Amount: KES ${amount}`, amount);
+      addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount}`, amount);
 
       res.json({ success: true, data: data.data, message: 'Payment verified successfully', transactionId });
     } else {
@@ -521,11 +511,18 @@ function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 }
 
+// Track failed generations for free retry
+const failedGenerations = {};
+
+// Text-to-Video
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, retry } = req.body;
     console.log('🎬 Generating video...');
+    console.log('📝 Prompt:', prompt ? prompt.substring(0, 100) : 'No prompt');
+    console.log('💳 Payment Reference:', paymentReference);
 
+    // Check for free retry
     if (retry && paymentReference && failedGenerations[paymentReference]) {
       console.log(`✅ Free retry allowed for payment: ${paymentReference}`);
     } else if (!paymentReference) {
@@ -540,11 +537,19 @@ app.post('/api/generate-video', async (req, res) => {
     if (!token) throw new Error('MODELARK_API_KEY not set');
 
     const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-    const modelIds = ['dreamina-seedance-2-0-260128', 'dreamina-seedance-2-0', 'seedance-2-0'];
+    
+    // Try models in order of preference
+    const modelIds = [
+      'dreamina-seedance-2-0-mini',  // Your activated model
+      'dreamina-seedance-2-0',
+      'seedance-2-0'
+    ];
+    
     let videoUrl = null, usedModel = null, lastError = null;
 
     for (const modelId of modelIds) {
       try {
+        console.log(`🔄 Trying model: ${modelId}`);
         const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
@@ -554,19 +559,47 @@ app.post('/api/generate-video', async (req, res) => {
             parameters: { duration: 5, resolution: "720p", ratio: "16:9", fps: 24, output_sound: "close", watermark: false }
           })
         });
-        if (!createResponse.ok) { lastError = `Model ${modelId}: ${createResponse.status}`; continue; }
+        
+        if (!createResponse.ok) {
+          const errorText = await createResponse.text();
+          console.warn(`⚠️ Model ${modelId} failed:`, createResponse.status, errorText.substring(0, 100));
+          lastError = `Model ${modelId}: ${createResponse.status}`;
+          continue;
+        }
 
         const taskData = await createResponse.json();
+        console.log(`✅ Task created with ${modelId}:`, taskData.id);
+        
         const result = await pollDreaminaTask(taskData.id, token, endpoint);
         videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
-        if (videoUrl) { usedModel = modelId; break; }
-      } catch (error) { lastError = error.message; continue; }
+        
+        if (videoUrl) {
+          usedModel = modelId;
+          console.log(`✅ Video generated successfully with ${modelId}!`);
+          console.log('📹 Video URL:', videoUrl);
+          break;
+        }
+      } catch (error) {
+        console.warn(`❌ Model ${modelId} error:`, error.message);
+        lastError = error.message;
+        continue;
+      }
     }
 
+    // If no video was generated
     if (!videoUrl) {
+      console.log('🔄 Video generation failed, marking for retry');
+      
       if (paymentReference) {
-        failedGenerations[paymentReference] = { timestamp: new Date().toISOString(), email, prompt, reason: lastError || 'Unknown error' };
+        failedGenerations[paymentReference] = {
+          timestamp: new Date().toISOString(),
+          email: email,
+          prompt: prompt,
+          reason: lastError || 'Unknown error'
+        };
+        console.log(`📝 Marked ${paymentReference} for free retry`);
       }
+      
       return res.json({
         success: true,
         videoUrl: createFallbackVideo(prompt, paymentReference),
@@ -578,19 +611,50 @@ app.post('/api/generate-video', async (req, res) => {
       });
     }
 
-    // Record usage
-    const cost = 0.15;
-    addApiCredit('byteplus', cost, 'usage', `Video generation using ${usedModel}`);
-    addVideoUsage(paymentReference || 'test_' + Date.now(), email || 'anonymous', 'text-to-video', prompt.substring(0, 100), cost);
-    addActivityLog(email || 'anonymous', 'Generated text-to-video', `Model: ${usedModel}, Cost: $${cost.toFixed(2)}`, 0);
+    // SUCCESS: Track usage
+    const estimatedCost = 0.15; // Approximate cost in USD
+    
+    // Deduct from BytePlus credits
+    await addApiCredit('byteplus', estimatedCost, 'usage', `Video generation using ${usedModel}`);
+    await addVideoUsage(
+      paymentReference || 'test_' + Date.now(),
+      email || 'anonymous',
+      'text-to-video',
+      prompt,
+      estimatedCost,
+      usedModel
+    );
+    await addActivityLog(
+      email || 'anonymous',
+      '🎬 Generated text-to-video',
+      `Model: ${usedModel}, Cost: $${estimatedCost.toFixed(2)}`,
+      0
+    );
 
-    if (failedGenerations[paymentReference]) delete failedGenerations[paymentReference];
+    // If it was a retry, remove from failed list
+    if (failedGenerations[paymentReference]) {
+      delete failedGenerations[paymentReference];
+      console.log(`✅ Removed ${paymentReference} from failed list`);
+    }
 
-    res.json({ success: true, videoUrl, usedModel: usedModel || 'Dreamina Seedance', paymentReference, cost });
+    res.json({
+      success: true,
+      videoUrl: videoUrl,
+      usedModel: usedModel || 'Dreamina Seedance',
+      paymentReference,
+      cost: estimatedCost
+    });
   } catch (error) {
     console.error('❌ Error:', error.message);
     const fallbackUrl = createFallbackVideo(req.body.prompt, req.body.paymentReference);
-    res.json({ success: true, videoUrl: fallbackUrl, usedModel: 'Preview (Fallback)', isFallback: true, canRetry: true, note: 'Video generation failed. You can retry for free.' });
+    res.json({ 
+      success: true, 
+      videoUrl: fallbackUrl, 
+      usedModel: 'Preview (Fallback)', 
+      isFallback: true, 
+      canRetry: true, 
+      note: 'Video generation failed. You can retry for free.' 
+    });
   }
 });
 
@@ -607,10 +671,29 @@ app.get('/api/admin/dashboard', async (req, res) => {
     const activity = getRecentActivity(10);
 
     res.json({
-      credits: { replicate: credits.replicate || 0, byteplus: credits.byteplus || 0, total: credits.total || 0 },
-      revenue: { total: revenue.total || 0, textToVideo: revenue.textToVideo || 0, photoToVideo: revenue.photoToVideo || 0, translation: revenue.translation || 0 },
-      usage: { totalVideos: usage.totalVideos || 0, textToVideo: usage.textToVideo || 0, photoToVideo: usage.photoToVideo || 0, translation: usage.translation || 0 },
-      visits: { total: visits || 0, today: 0, week: 0, month: 0 },
+      credits: { 
+        replicate: Math.round(credits.replicate * 100) / 100 || 0, 
+        byteplus: Math.round(credits.byteplus * 100) / 100 || 0, 
+        total: Math.round(credits.total * 100) / 100 || 0 
+      },
+      revenue: { 
+        total: Math.round(revenue.total) || 0, 
+        textToVideo: Math.round(revenue.textToVideo) || 0, 
+        photoToVideo: Math.round(revenue.photoToVideo) || 0, 
+        translation: Math.round(revenue.translation) || 0 
+      },
+      usage: { 
+        totalVideos: usage.totalVideos || 0, 
+        textToVideo: usage.textToVideo || 0, 
+        photoToVideo: usage.photoToVideo || 0, 
+        translation: usage.translation || 0 
+      },
+      visits: { 
+        total: visits || 0, 
+        today: 0, 
+        week: 0, 
+        month: 0 
+      },
       recentActivity: activity
     });
   } catch (error) {
@@ -619,12 +702,34 @@ app.get('/api/admin/dashboard', async (req, res) => {
   }
 });
 
+// Add credits manually
 app.post('/api/admin/add-credits', async (req, res) => {
   try {
     const { provider, amount, description } = req.body;
     if (!provider || !amount) return res.status(400).json({ success: false, error: 'Provider and amount are required' });
-    addApiCredit(provider, amount, 'purchase', description || 'Manual credit addition');
-    res.json({ success: true, message: `Added ${amount} ${provider} credits` });
+    addApiCredit(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
+    res.json({ 
+      success: true, 
+      message: `Added ${amount} ${provider} credits`,
+      currentBalance: getApiCredits()
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get current balances
+app.get('/api/admin/balances', async (req, res) => {
+  try {
+    const credits = getApiCredits();
+    res.json({
+      success: true,
+      credits: {
+        replicate: Math.round(credits.replicate * 100) / 100 || 0,
+        byteplus: Math.round(credits.byteplus * 100) / 100 || 0,
+        total: Math.round(credits.total * 100) / 100 || 0
+      }
+    });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -747,7 +852,8 @@ app.get('/api/test', (req, res) => {
       '/api/verify-payment',
       '/api/send-video-email',
       '/api/admin/dashboard',
-      '/api/admin/add-credits'
+      '/api/admin/add-credits',
+      '/api/admin/balances'
     ]
   });
 });
@@ -760,7 +866,8 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
     byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
     paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
-    email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No'
+    email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No',
+    data_file_exists: fs.existsSync(DATA_FILE)
   });
 });
 
@@ -778,7 +885,8 @@ app.get('/', (req, res) => {
       { path: '/api/verify-payment', method: 'POST' },
       { path: '/api/send-video-email', method: 'POST' },
       { path: '/api/admin/dashboard', method: 'GET' },
-      { path: '/api/admin/add-credits', method: 'POST' }
+      { path: '/api/admin/add-credits', method: 'POST' },
+      { path: '/api/admin/balances', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
@@ -817,4 +925,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
   console.log(`📊 Data file: ${DATA_FILE}`);
   console.log(`🎬 Using Dreamina Seedance for video generation`);
+  console.log(`💰 Initial BytePlus Balance: $${dataStore.initialBalances?.byteplus || 29.40}`);
+  console.log(`💰 Initial Replicate Balance: $${dataStore.initialBalances?.replicate || 10.00}`);
 });
