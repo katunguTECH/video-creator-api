@@ -692,7 +692,7 @@ app.post('/api/calculate-price', (req, res) => {
 });
 
 // ============================================
-// PAYMENT ENDPOINTS
+// PAYMENT ENDPOINTS - LIVE PAYSTACK INTEGRATION
 // ============================================
 
 app.post('/api/initialize-payment', async (req, res) => {
@@ -700,7 +700,10 @@ app.post('/api/initialize-payment', async (req, res) => {
     const { email, amount, serviceType, metadata } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
     
-    console.log('💰 Initializing payment:', { email, amount, serviceType });
+    console.log('💰 Initializing payment...');
+    console.log('📧 Email:', email);
+    console.log('💰 Amount:', amount);
+    console.log('🔑 Secret Key exists:', !!secretKey);
     
     // Validate required fields
     if (!email) {
@@ -717,50 +720,71 @@ app.post('/api/initialize-payment', async (req, res) => {
       });
     }
     
-    // If no secret key, use test mode
+    // Check if secret key is properly configured
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      const reference = 'test_ref_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-      console.log('⚠️ Test mode: Using mock reference:', reference);
-      
-      return res.json({
-        success: true,
-        reference: reference,
-        message: 'Test mode: Payment will be simulated',
-        metadata: metadata,
-        testMode: true
+      console.error('❌ Invalid Paystack secret key. Please set PAYSTACK_SECRET_KEY in environment.');
+      return res.status(500).json({
+        success: false,
+        error: 'Payment configuration error. Please contact support.'
       });
     }
 
+    console.log('🔑 Using Paystack secret key:', secretKey.substring(0, 10) + '...');
+
     // Make request to Paystack
     try {
+      const requestBody = {
+        email: email,
+        amount: Math.round(amount * 100), // Convert to kobo
+        metadata: {
+          serviceType: serviceType || 'translation',
+          ...metadata,
+          custom_fields: [
+            {
+              display_name: "Service Type",
+              variable_name: "service_type",
+              value: serviceType || 'translation'
+            },
+            {
+              display_name: "Amount",
+              variable_name: "amount",
+              value: `${amount} KES`
+            },
+            ...(metadata?.custom_fields || [])
+          ]
+        },
+        callback_url: process.env.FRONTEND_URL || 'https://www.katareel.com/translation-success'
+      };
+
+      console.log('📤 Sending request to Paystack...');
+
       const response = await fetch('https://api.paystack.co/transaction/initialize', {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${secretKey}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({
-          email: email,
-          amount: Math.round(amount * 100),
-          metadata: {
-            serviceType: serviceType || 'translation',
-            ...metadata,
-            custom_fields: metadata?.custom_fields || []
-          },
-          callback_url: process.env.FRONTEND_URL || 'https://www.katareel.com/translation-success'
-        })
+        body: JSON.stringify(requestBody)
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        console.error('❌ Paystack API error:', response.status, errorText);
-        throw new Error(`Paystack API error: ${response.status}`);
+      const responseText = await response.text();
+      console.log('📦 Raw Paystack response received');
+
+      let data;
+      try {
+        data = JSON.parse(responseText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse Paystack response:', parseError);
+        console.error('Response text:', responseText);
+        throw new Error('Invalid response from Paystack');
       }
 
-      const data = await response.json();
-      console.log('📦 Paystack response:', data);
+      console.log('📦 Paystack response status:', data.status);
       
       if (data.status) {
+        console.log('✅ Payment initialized successfully!');
+        console.log('📝 Reference:', data.data.reference);
+        
         res.json({
           success: true,
           reference: data.data.reference,
@@ -768,30 +792,18 @@ app.post('/api/initialize-payment', async (req, res) => {
           metadata: metadata
         });
       } else {
+        console.error('❌ Paystack error:', data.message);
         throw new Error(data.message || 'Payment initialization failed');
       }
     } catch (fetchError) {
       console.error('❌ Fetch error:', fetchError.message);
-      // Fallback to test mode
-      const reference = 'fallback_ref_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-      console.log('⚠️ Falling back to test mode with reference:', reference);
-      
-      return res.json({
-        success: true,
-        reference: reference,
-        message: 'Payment initialization failed, using test mode',
-        metadata: metadata,
-        testMode: true,
-        fallback: true
-      });
+      throw new Error(`Paystack API error: ${fetchError.message}`);
     }
   } catch (error) {
     console.error('❌ Payment initialization error:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Payment initialization failed',
-      testMode: true,
-      reference: 'error_fallback_' + Date.now()
+      error: error.message || 'Payment initialization failed. Please try again.'
     });
   }
 });

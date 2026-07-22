@@ -22,7 +22,7 @@ function TranslateVideo() {
   const [selectedFile, setSelectedFile] = useState(null);
   const [videoUrl, setVideoUrl] = useState(null);
   const [sourceLanguage, setSourceLanguage] = useState('auto');
-  const [targetLanguage, setTargetLanguage] = useState('');
+  const [targetLanguage, setTargetLanguage] = useState('sw');
   const [languages, setLanguages] = useState(FALLBACK_LANGUAGES);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -30,44 +30,25 @@ function TranslateVideo() {
   const [success, setSuccess] = useState('');
   const [translatedVideo, setTranslatedVideo] = useState(null);
   const [translatedText, setTranslatedText] = useState('');
-  const [paymentReference, setPaymentReference] = useState('');
   const fileInputRef = useRef(null);
   const videoRef = useRef(null);
 
-  // Fixed price - KES 300
   const TRANSLATION_PRICE = 300;
 
-  // Load available languages
   useEffect(() => {
     const fetchLanguages = async () => {
       try {
         console.log('🌐 Fetching languages...');
         const response = await fetch('/api/free-languages');
-        console.log('📦 Response status:', response.status);
-        
         if (response.ok) {
           const data = await response.json();
-          console.log('📦 Languages data:', data);
-          
           if (data.success && data.languages) {
             setLanguages(data.languages);
-            setTargetLanguage('sw');
-            console.log('✅ Languages loaded successfully:', Object.keys(data.languages).length);
-          } else {
-            console.warn('⚠️ No languages in response, using fallback');
-            setLanguages(FALLBACK_LANGUAGES);
-            setTargetLanguage('sw');
+            console.log('✅ Languages loaded:', Object.keys(data.languages).length);
           }
-        } else {
-          console.warn('⚠️ API returned error, using fallback languages');
-          setLanguages(FALLBACK_LANGUAGES);
-          setTargetLanguage('sw');
         }
       } catch (error) {
         console.error('❌ Error loading languages:', error);
-        setLanguages(FALLBACK_LANGUAGES);
-        setTargetLanguage('sw');
-        setError('Could not load languages from server. Using default languages.');
       }
     };
     fetchLanguages();
@@ -108,7 +89,6 @@ function TranslateVideo() {
           videoRef.current.src = data.videoUrl;
           videoRef.current.load();
         }
-        console.log('✅ Video uploaded:', data.videoUrl);
         setSuccess('✅ Video uploaded successfully!');
       } else {
         setError('Failed to upload video: ' + data.error);
@@ -199,8 +179,8 @@ function TranslateVideo() {
       console.log('💰 Starting payment process...');
       console.log('📧 Email:', email);
       console.log('💰 Amount:', TRANSLATION_PRICE);
-      console.log('🌐 Target Language:', targetLanguage);
-
+      
+      // Step 1: Initialize payment
       const paymentResponse = await fetch('/api/initialize-payment', {
         method: 'POST',
         headers: { 
@@ -237,18 +217,33 @@ function TranslateVideo() {
         })
       });
 
+      // Check if response is ok
       if (!paymentResponse.ok) {
         const errorText = await paymentResponse.text();
         console.error('❌ Payment API error:', paymentResponse.status, errorText);
-        throw new Error(`Server error: ${paymentResponse.status}`);
+        
+        let errorMessage = `Server error: ${paymentResponse.status}`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.error) {
+            errorMessage = errorJson.error;
+          }
+        } catch (e) {
+          if (errorText) {
+            errorMessage = errorText;
+          }
+        }
+        
+        throw new Error(errorMessage);
       }
 
+      // Parse response
       let paymentData;
       try {
         paymentData = await paymentResponse.json();
       } catch (parseError) {
         console.error('❌ Failed to parse payment response:', parseError);
-        throw new Error('Invalid response from server. Please try again.');
+        throw new Error('Invalid response from payment server');
       }
 
       console.log('📦 Payment response:', paymentData);
@@ -257,55 +252,48 @@ function TranslateVideo() {
         throw new Error(paymentData.error || 'Payment initialization failed');
       }
 
-      if (paymentData.testMode) {
-        console.log('⚠️ Test mode activated');
-        setPaymentReference(paymentData.reference);
-        await processTranslation(paymentData.reference);
-        return;
-      }
-
-      if (window.PaystackPop) {
+      // Step 2: Open Paystack popup
+      if (typeof window !== 'undefined' && window.PaystackPop) {
         try {
           const popup = new window.PaystackPop();
+          const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+          
+          if (!publicKey || publicKey === 'pk_test_xxx') {
+            throw new Error('Paystack public key not configured. Please set REACT_APP_PAYSTACK_PUBLIC_KEY');
+          }
+
+          console.log('🔑 Using Paystack public key:', publicKey.substring(0, 10) + '...');
+          console.log('📝 Payment reference:', paymentData.reference);
+          
           popup.open({
-            key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_xxx',
+            key: publicKey,
             email: email,
             amount: TRANSLATION_PRICE * 100,
             ref: paymentData.reference,
             metadata: paymentData.metadata,
+            currency: 'KES',
             callback: async (response) => {
               console.log('✅ Payment successful:', response);
-              setPaymentReference(response.reference);
+              setSuccess('✅ Payment successful! Processing translation...');
               await processTranslation(response.reference);
             },
             onClose: () => {
               console.log('❌ Payment popup closed');
               setLoading(false);
-              setError('Payment was cancelled');
+              setError('Payment was cancelled. Please try again.');
             }
           });
         } catch (popupError) {
           console.error('❌ Paystack popup error:', popupError);
-          const fallbackRef = 'fallback_' + Date.now();
-          setPaymentReference(fallbackRef);
-          await processTranslation(fallbackRef);
+          throw new Error('Failed to open payment window: ' + popupError.message);
         }
       } else {
-        console.warn('⚠️ PaystackPop not available, using test mode');
-        const fallbackRef = 'test_ref_' + Date.now();
-        setPaymentReference(fallbackRef);
-        await processTranslation(fallbackRef);
+        throw new Error('Paystack is not available. Please check your internet connection.');
       }
     } catch (error) {
       console.error('❌ Payment error:', error);
       setError('Payment failed: ' + error.message);
       setLoading(false);
-      
-      if (window.confirm('Payment failed. Would you like to try in test mode?')) {
-        const fallbackRef = 'test_ref_' + Date.now();
-        setPaymentReference(fallbackRef);
-        await processTranslation(fallbackRef);
-      }
     }
   };
 
@@ -421,7 +409,7 @@ function TranslateVideo() {
             </div>
           </div>
 
-          {/* Action Button */}
+          {/* Payment Button */}
           <button 
             className="translate-btn"
             onClick={handlePayment}
@@ -429,29 +417,6 @@ function TranslateVideo() {
           >
             {loading ? '⏳ Processing...' : `💰 Pay KES ${TRANSLATION_PRICE} & Translate 🚀`}
           </button>
-
-          {/* Test Mode Button */}
-          <div className="test-mode-section">
-            <button 
-              className="test-mode-btn"
-              onClick={async () => {
-                if (!selectedFile) {
-                  setError('Please upload a video first');
-                  return;
-                }
-                if (!targetLanguage) {
-                  setError('Please select a target language');
-                  return;
-                }
-                const testRef = 'test_' + Date.now();
-                setPaymentReference(testRef);
-                await processTranslation(testRef);
-              }}
-              disabled={loading || !selectedFile || !targetLanguage}
-            >
-              🧪 Test Mode (Skip Payment)
-            </button>
-          </div>
 
           {/* Messages */}
           {error && <div className="error-message">❌ {error}</div>}
@@ -479,7 +444,6 @@ function TranslateVideo() {
             <div className="translated-text">
               <h4>📝 Translated Text</h4>
               <div className="text-content">
-                <p><strong>Original:</strong> {translatedText.replace(/\[.*?\]\s*/, '')}</p>
                 <p><strong>Translated:</strong> {translatedText}</p>
               </div>
             </div>
