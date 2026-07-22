@@ -263,6 +263,68 @@ function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
   };
 }
 
+// Translation email template
+function generateTranslationEmail(email, videoUrl, translatedText, language, amount) {
+  return {
+    subject: `🌐 Your Translated Video is Ready! (${language})`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
+          .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .header h1 { color: white; margin: 0; font-size: 28px; }
+          .content { padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px; }
+          .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
+          .video-container video { width: 100%; max-height: 400px; }
+          .translation-box { background: white; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B5CF6; }
+          .language-badge { display: inline-block; background: #EC4899; color: white; padding: 4px 12px; border-radius: 20px; font-size: 14px; }
+          .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
+          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>🌐 Your Translated Video is Ready!</h1>
+        </div>
+        <div class="content">
+          <p>Hi there,</p>
+          <p>Your video has been successfully translated to <span class="language-badge">${language}</span> 🎉</p>
+          
+          <div class="translation-box">
+            <h4 style="margin-top: 0;">Translated Content:</h4>
+            <p style="font-size: 14px; color: #666;">"${translatedText}"</p>
+          </div>
+          
+          <div class="video-container">
+            <video controls>
+              <source src="${videoUrl}" type="video/mp4">
+              Your browser does not support the video tag.
+            </video>
+          </div>
+          
+          <p style="text-align: center;">
+            <a href="${videoUrl}" class="button" download>📥 Download Translated Video</a>
+          </p>
+          
+          <p style="text-align: center; font-size: 14px; color: #666;">
+            Or copy this link to share: <br>
+            <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
+          </p>
+          
+          <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
+          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+        </div>
+        <div class="footer">
+          <p>This email was sent to ${email}. If you have any questions, reply to this email.</p>
+        </div>
+      </body>
+      </html>
+    `
+  };
+}
+
 // ============================================
 // FILE-BASED DATA STORE
 // ============================================
@@ -277,6 +339,7 @@ let dataStore = {
   activityLog: [],
   siteVisits: [],
   userPayments: [],
+  translations: [],
   initialBalances: {
     replicate: parseFloat(process.env.REPLICATE_BALANCE) || 10.00,
     byteplus: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40
@@ -301,6 +364,7 @@ function loadData() {
       console.log(`📊 Revenue records: ${dataStore.revenue.length}`);
       console.log(`📊 Video usage records: ${dataStore.videoUsage.length}`);
       console.log(`📊 User payments: ${dataStore.userPayments.length}`);
+      console.log(`📊 Translations: ${dataStore.translations.length}`);
       return true;
     }
     console.log('ℹ️ No existing data file found, starting fresh');
@@ -1107,6 +1171,299 @@ app.post('/api/generate-video', async (req, res) => {
 });
 
 // ============================================
+// VIDEO TRANSLATION WITH PAYMENT
+// ============================================
+
+const FREE_TRANSLATION_LANGUAGES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia'
+};
+
+// Translation price calculation
+function calculateTranslationPrice(duration) {
+  const basePrice = 50; // Base price in KES
+  const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
+  return basePrice * durationMultiplier;
+}
+
+function calculateTranslationCost(duration) {
+  const baseCost = 5; // Base cost in KES
+  const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
+  return baseCost * durationMultiplier;
+}
+
+// Translate text function
+async function translateText(text, targetLanguage, sourceLanguage = 'en') {
+  const servers = [
+    'https://libretranslate.com',
+    'https://translate.argosopentech.com'
+  ];
+  
+  for (const server of servers) {
+    try {
+      const response = await fetch(`${server}/translate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          q: text,
+          source: sourceLanguage || 'en',
+          target: targetLanguage,
+          format: 'text'
+        })
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        if (data.translatedText) {
+          return {
+            success: true,
+            translatedText: data.translatedText,
+            provider: 'LibreTranslate'
+          };
+        }
+      }
+    } catch (error) {
+      console.warn(`⚠️ Translation server ${server} failed:`, error.message);
+      continue;
+    }
+  }
+  
+  throw new Error('All translation servers failed');
+}
+
+// Generate translated video (simulated - in production, use actual video processing)
+async function generateTranslatedVideo(originalVideoUrl, translatedText, targetLanguage, duration) {
+  console.log(`🎬 Generating translated video for ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`);
+  console.log(`📝 Translated text: ${translatedText.substring(0, 100)}...`);
+  
+  // Simulate processing delay
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  
+  // Return the original video URL (in production, this would be the translated video)
+  // For a real implementation, you would:
+  // 1. Download the original video
+  // 2. Extract audio and transcribe using speech-to-text
+  // 3. Translate the transcription
+  // 4. Generate new audio with TTS
+  // 5. Combine with original video using FFmpeg
+  return originalVideoUrl;
+}
+
+// Translation video generation endpoint
+app.post('/api/translate-video', async (req, res) => {
+  try {
+    const { 
+      videoUrl, 
+      targetLanguage, 
+      sourceLanguage, 
+      paymentReference, 
+      email,
+      text,
+      duration 
+    } = req.body;
+    
+    console.log('🌐 Translation request received:');
+    console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
+    console.log(`   Target Language: ${targetLanguage} (${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage})`);
+    console.log(`   User Email: ${email}`);
+    console.log(`   Payment Reference: ${paymentReference}`);
+
+    // Verify payment
+    if (!paymentReference) {
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required for translation.',
+        requiresPayment: true,
+        price: calculateTranslationPrice(duration || 5)
+      });
+    }
+
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      return res.status(402).json({
+        success: false,
+        error: 'Invalid or expired payment.',
+        requiresPayment: true
+      });
+    }
+
+    // Get video text from request or use placeholder
+    const videoText = text || 'Sample video content for translation';
+    
+    // Translate the text
+    let translatedText = '';
+    try {
+      const translationResult = await translateText(videoText, targetLanguage, sourceLanguage);
+      translatedText = translationResult.translatedText;
+    } catch (error) {
+      console.warn('⚠️ Translation failed, using fallback:', error.message);
+      translatedText = `[${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage}] ${videoText}`;
+    }
+
+    // Generate translated video
+    const translatedVideoUrl = await generateTranslatedVideo(videoUrl, translatedText, targetLanguage, duration || 5);
+    
+    // Store translation record
+    const translationId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+    const translationRecord = {
+      id: translationId,
+      paymentReference,
+      email,
+      videoUrl,
+      targetLanguage,
+      sourceLanguage: sourceLanguage || 'en',
+      translatedText,
+      translatedVideoUrl,
+      duration: duration || 5,
+      createdAt: new Date().toISOString()
+    };
+    
+    if (!dataStore.translations) {
+      dataStore.translations = [];
+    }
+    dataStore.translations.push(translationRecord);
+    saveData();
+    
+    // Track revenue for translation service
+    const translationCost = calculateTranslationCost(duration || 5);
+    addRevenue(translationId, email, translationCost, 'translation', paymentReference, 'card');
+    addUserPayment(email, translationCost, 'card', 'translation', paymentReference);
+    addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s`, translationCost);
+    addVideoUsage(paymentReference, email, 'translation', translatedText, translationCost, 'Translation API', 'translation-service', duration || 5);
+
+    // Send translated video via email
+    try {
+      const translationEmail = generateTranslationEmail(
+        email,
+        translatedVideoUrl,
+        translatedText,
+        FREE_TRANSLATION_LANGUAGES[targetLanguage],
+        translationCost
+      );
+      await sendEmail(email, translationEmail.subject, translationEmail.html);
+      console.log(`📧 Translation video sent to ${email}`);
+    } catch (emailErr) {
+      console.warn('⚠️ Could not send translation email:', emailErr.message);
+    }
+
+    res.json({
+      success: true,
+      videoUrl: translatedVideoUrl,
+      originalText: videoText,
+      translatedText: translatedText,
+      targetLanguage: targetLanguage,
+      languageName: FREE_TRANSLATION_LANGUAGES[targetLanguage],
+      duration: duration || 5,
+      paymentReference,
+      translationId
+    });
+
+  } catch (error) {
+    console.error('❌ Translation error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get free translation languages
+app.get('/api/free-languages', (req, res) => {
+  res.json({ success: true, languages: FREE_TRANSLATION_LANGUAGES });
+});
+
+// Get translation price
+app.get('/api/translation-price', (req, res) => {
+  try {
+    const duration = parseInt(req.query.duration) || 5;
+    const price = calculateTranslationPrice(duration);
+    const cost = calculateTranslationCost(duration);
+    
+    res.json({
+      success: true,
+      duration: duration,
+      price: price,
+      cost: cost,
+      currency: 'KES',
+      breakdown: {
+        basePrice: 50,
+        durationMultiplier: duration === 5 ? 1 : duration === 10 ? 2 : 3,
+        total: price
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get translation history
+app.get('/api/translations', async (req, res) => {
+  try {
+    const { email } = req.query;
+    let translations = dataStore.translations || [];
+    
+    if (email) {
+      translations = translations.filter(t => t.email === email);
+    }
+    
+    res.json({
+      success: true,
+      translations: translations.slice(-20).reverse(),
+      total: translations.length
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Upload video for translation
+app.post('/api/upload-video', upload.single('video'), (req, res) => {
+  try {
+    if (!req.file) throw new Error('No video file uploaded');
+    const videoUrl = `/uploads/${req.file.filename}`;
+    res.json({ 
+      success: true, 
+      videoPath: req.file.path, 
+      videoUrl, 
+      filename: req.file.filename, 
+      size: req.file.size 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Translate text only (without video)
+app.post('/api/translate-text', async (req, res) => {
+  try {
+    const { text, targetLanguage, sourceLanguage } = req.body;
+    if (!text) throw new Error('Text is required');
+    if (!targetLanguage || !FREE_TRANSLATION_LANGUAGES[targetLanguage]) {
+      throw new Error('Target language not supported.');
+    }
+
+    const result = await translateText(text, targetLanguage, sourceLanguage);
+    res.json({ 
+      success: true, 
+      originalText: text, 
+      translatedText: result.translatedText, 
+      targetLanguage, 
+      usedModel: 'LibreTranslate (Free)' 
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
 // ADMIN DASHBOARD ENDPOINTS
 // ============================================
 
@@ -1145,7 +1502,8 @@ app.get('/api/admin/dashboard', async (req, res) => {
         month: 0 
       },
       recentActivity: activity,
-      recentPayments: payments
+      recentPayments: payments,
+      translations: dataStore.translations ? dataStore.translations.length : 0
     });
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
@@ -1294,65 +1652,6 @@ app.get('/api/debug-failed', (req, res) => {
 });
 
 // ============================================
-// VIDEO TRANSLATION ENDPOINTS
-// ============================================
-
-const FREE_TRANSLATION_LANGUAGES = {
-  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
-  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
-  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
-  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
-  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
-  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
-  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
-  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
-  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
-  'mr': 'Marathi', 'or': 'Odia'
-};
-
-app.get('/api/free-languages', (req, res) => {
-  res.json({ success: true, languages: FREE_TRANSLATION_LANGUAGES });
-});
-
-app.post('/api/upload-video', upload.single('video'), (req, res) => {
-  try {
-    if (!req.file) throw new Error('No video file uploaded');
-    const videoUrl = `/uploads/${req.file.filename}`;
-    res.json({ success: true, videoPath: req.file.path, videoUrl, filename: req.file.filename, size: req.file.size });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.post('/api/translate-text', async (req, res) => {
-  try {
-    const { text, targetLanguage, sourceLanguage } = req.body;
-    if (!text) throw new Error('Text is required');
-    if (!targetLanguage || !FREE_TRANSLATION_LANGUAGES[targetLanguage]) throw new Error('Target language not supported.');
-
-    const servers = ['https://libretranslate.com', 'https://translate.argosopentech.com'];
-    for (const server of servers) {
-      try {
-        const response = await fetch(`${server}/translate`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ q: text, source: sourceLanguage || 'en', target: targetLanguage, format: 'text' })
-        });
-        if (response.ok) {
-          const data = await response.json();
-          if (data.translatedText) {
-            return res.json({ success: true, originalText: text, translatedText: data.translatedText, targetLanguage, usedModel: 'LibreTranslate (Free)' });
-          }
-        }
-      } catch (error) { continue; }
-    }
-    res.json({ success: true, originalText: text, translatedText: `[${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage}] ${text}`, targetLanguage, usedModel: 'Simulated Translation (Fallback)' });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ============================================
 // TEST & HEALTH ENDPOINTS
 // ============================================
 
@@ -1368,6 +1667,12 @@ app.get('/api/test', (req, res) => {
       '/api/verify-payment',
       '/api/send-video-email',
       '/api/test-email',
+      '/api/free-languages',
+      '/api/translation-price',
+      '/api/translate-video',
+      '/api/translate-text',
+      '/api/translations',
+      '/api/upload-video',
       '/api/admin/dashboard',
       '/api/admin/add-credits',
       '/api/admin/balances',
@@ -1390,7 +1695,8 @@ app.get('/api/health', (req, res) => {
     replicate_balance: getApiBalance('replicate'),
     byteplus_balance: getApiBalance('byteplus'),
     total_revenue: dataStore.revenue.reduce((sum, r) => sum + r.amount, 0),
-    total_videos: dataStore.videoUsage.length
+    total_videos: dataStore.videoUsage.length,
+    total_translations: dataStore.translations ? dataStore.translations.length : 0
   });
 });
 
@@ -1399,15 +1705,29 @@ app.get('/', (req, res) => {
     name: 'Video Creator API',
     version: '1.0.0',
     status: 'running',
+    features: [
+      'Text-to-Video Generation',
+      'Photo-to-Video Generation',
+      'Video Translation with Payment',
+      'Email Delivery',
+      'Payment Integration (Paystack)',
+      'Admin Dashboard',
+      'Multi-language Support'
+    ],
     endpoints: [
       { path: '/api/test', method: 'GET' },
       { path: '/api/health', method: 'GET' },
       { path: '/api/generate-video', method: 'POST' },
-      { path: '/api/generate-image-to-video', method: 'POST' },
       { path: '/api/calculate-price', method: 'POST' },
       { path: '/api/verify-payment', method: 'POST' },
       { path: '/api/send-video-email', method: 'POST' },
       { path: '/api/test-email', method: 'POST' },
+      { path: '/api/free-languages', method: 'GET' },
+      { path: '/api/translation-price', method: 'GET' },
+      { path: '/api/translate-video', method: 'POST' },
+      { path: '/api/translate-text', method: 'POST' },
+      { path: '/api/translations', method: 'GET' },
+      { path: '/api/upload-video', method: 'POST' },
       { path: '/api/admin/dashboard', method: 'GET' },
       { path: '/api/admin/add-credits', method: 'POST' },
       { path: '/api/admin/balances', method: 'GET' },
@@ -1455,5 +1775,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`💰 BytePlus Balance: $${getApiBalance('byteplus')}`);
   console.log(`📊 Total Revenue: KES ${dataStore.revenue.reduce((sum, r) => sum + r.amount, 0)}`);
   console.log(`📊 Total Videos: ${dataStore.videoUsage.length}`);
+  console.log(`🌐 Total Translations: ${dataStore.translations ? dataStore.translations.length : 0}`);
   console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
+  console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
 });

@@ -82,7 +82,6 @@ function CreateVideo() {
     setError(null);
     
     try {
-      // Navigate to preview with retry flag
       navigate('/preview', {
         state: {
           prompt,
@@ -135,16 +134,18 @@ function CreateVideo() {
     } catch (error) {
       console.error('❌ Price calculation error:', error);
       setPriceError(error.message);
-      const fallbackPrice = 300;
+      // Fallback pricing based on duration
+      const fallbackPrice = duration === 10 ? 600 : 300;
       setAmount(fallbackPrice);
       setPriceData({
         finalPrice: fallbackPrice,
-        baseCost: 30,
+        baseCost: duration === 10 ? 60 : 30,
         markupMultiplier: 10,
-        markupAmount: 270,
+        markupAmount: duration === 10 ? 540 : 270,
         breakdown: [
-          { item: 'AI Video Generation (BytePlus)', amount: 20 },
-          { item: 'Processing fee', amount: 10 }
+          { item: 'AI Video Generation (BytePlus)', amount: duration === 10 ? 40 : 20 },
+          { item: `${duration}s video processing`, amount: duration === 10 ? 20 : 10 },
+          { item: 'HD Quality', amount: 0 }
         ],
         currency: 'KES'
       });
@@ -275,19 +276,50 @@ function CreateVideo() {
           <p className="text-xs text-gray-500 mt-1">Your video will be sent to this email after generation</p>
         </div>
 
+        {/* Duration Selector - Now with 10-second option */}
         {activeTab === 'text' && (
           <div className="mb-4">
             <label className="block text-gray-300 mb-2 font-semibold">⏱️ Video Duration</label>
-            <select
-              value={duration}
-              onChange={(e) => setDuration(parseInt(e.target.value))}
-              className="w-full bg-white/10 border border-white/20 rounded-2xl p-4 text-white focus:outline-none focus:border-pink-500"
-            >
-              <option value="3">3 seconds</option>
-              <option value="5">5 seconds</option>
-              <option value="8">8 seconds</option>
-              <option value="10">10 seconds</option>
-            </select>
+            <div className="grid grid-cols-3 gap-3">
+              <button
+                onClick={() => setDuration(5)}
+                className={`py-3 px-4 rounded-xl font-semibold transition-all ${
+                  duration === 5 
+                    ? 'bg-pink-500 shadow-lg shadow-pink-500/30' 
+                    : 'bg-white/10 hover:bg-white/20'
+                }`}
+              >
+                5s
+                <span className="block text-xs text-gray-400 font-normal">Standard</span>
+              </button>
+              <button
+                onClick={() => setDuration(10)}
+                className={`py-3 px-4 rounded-xl font-semibold transition-all ${
+                  duration === 10 
+                    ? 'bg-purple-500 shadow-lg shadow-purple-500/30' 
+                    : 'bg-white/10 hover:bg-white/20'
+                }`}
+              >
+                10s
+                <span className="block text-xs text-gray-400 font-normal">Premium</span>
+              </button>
+              <button
+                onClick={() => setDuration(15)}
+                className={`py-3 px-4 rounded-xl font-semibold transition-all ${
+                  duration === 15 
+                    ? 'bg-gradient-to-r from-pink-500 to-purple-500 shadow-lg shadow-purple-500/30' 
+                    : 'bg-white/10 hover:bg-white/20'
+                }`}
+              >
+                15s
+                <span className="block text-xs text-gray-400 font-normal">Pro</span>
+              </button>
+            </div>
+            <p className="text-xs text-gray-500 mt-2">
+              {duration === 5 && '🎯 Standard quality, perfect for social media'}
+              {duration === 10 && '🌟 Premium quality with more detail and motion'}
+              {duration === 15 && '👑 Pro quality, cinematic experience'}
+            </p>
           </div>
         )}
 
@@ -371,6 +403,7 @@ function CreateVideo() {
           />
         </div>
 
+        {/* Price Display with Breakdown */}
         <div className="bg-white/10 rounded-2xl p-4 mb-6">
           <div className="flex justify-between items-center">
             <div>
@@ -385,6 +418,12 @@ function CreateVideo() {
                   <p className="text-xs text-gray-500">
                     Base: KES {priceData.baseCost.toFixed(2)} × {priceData.markupMultiplier}x markup
                   </p>
+                  {duration === 10 && (
+                    <p className="text-xs text-purple-400 mt-1">⭐ Premium 10s video</p>
+                  )}
+                  {duration === 15 && (
+                    <p className="text-xs text-yellow-400 mt-1">👑 Pro 15s video</p>
+                  )}
                 </div>
               ) : (
                 <p className="text-yellow-400 text-sm">Select options to calculate price</p>
@@ -393,13 +432,31 @@ function CreateVideo() {
             <div className="text-right">
               <span className="text-xs text-gray-500">Includes:</span>
               <ul className="text-xs text-gray-400">
-                <li>✅ AI video generation (BytePlus)</li>
+                <li>✅ AI video generation</li>
                 <li>✅ Music & effects</li>
                 <li>✅ HD quality</li>
                 <li>✅ Email delivery</li>
               </ul>
             </div>
           </div>
+
+          {priceData && priceData.breakdown && (
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <p className="text-xs font-semibold text-gray-400">📊 Price Breakdown</p>
+              <div className="mt-1 space-y-1">
+                {priceData.breakdown.map((item, index) => (
+                  <div key={index} className="flex justify-between text-xs text-gray-400">
+                    <span>{item.item}</span>
+                    <span>KES {item.amount.toFixed(2)}</span>
+                  </div>
+                ))}
+                <div className="flex justify-between text-xs text-yellow-400 border-t border-white/10 pt-1 mt-1">
+                  <span>➕ {priceData.markupMultiplier}x Markup</span>
+                  <span>KES {priceData.markupAmount.toFixed(2)}</span>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {!showPayment ? (
