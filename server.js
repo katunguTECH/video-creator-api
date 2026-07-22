@@ -335,7 +335,15 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
           .translation-box { background: white; padding: 15px; border-radius: 8px; margin: 15px 0; border-left: 4px solid #8B5CF6; }
           .language-badge { display: inline-block; background: #EC4899; color: white; padding: 4px 12px; border-radius: 20px; font-size: 14px; }
           .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
+          .receipt-box { background: #f0f0f0; padding: 15px; border-radius: 8px; margin: 15px 0; }
           .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
+          .download-section {
+            background: #e8f5e9;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: center;
+          }
         </style>
       </head>
       <body>
@@ -347,7 +355,7 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
           <p>Your video has been successfully translated to <span class="language-badge">${language}</span> 🎉</p>
           
           <div class="translation-box">
-            <h4 style="margin-top: 0;">Translated Content:</h4>
+            <h4 style="margin-top: 0;">📝 Translated Content:</h4>
             <p style="font-size: 14px; color: #666;">"${translatedText}"</p>
           </div>
           
@@ -358,14 +366,30 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
             </video>
           </div>
           
-          <p style="text-align: center;">
-            <a href="${videoUrl}" class="button" download>📥 Download Translated Video</a>
-          </p>
+          <!-- DOWNLOAD SECTION - CLEAR AND PROMINENT -->
+          <div class="download-section">
+            <h3>📥 Download Your Translated Video</h3>
+            <p style="font-size: 16px; margin: 10px 0;">
+              Click the button below to download your video
+            </p>
+            <a href="${videoUrl}" class="button" download style="font-size: 18px; padding: 15px 40px;">
+              ⬇️ Download Video
+            </a>
+            <p style="font-size: 12px; color: #666; margin-top: 10px;">
+              Or copy this link: <br>
+              <a href="${videoUrl}" style="word-break: break-all; font-size: 12px;">${videoUrl}</a>
+            </p>
+          </div>
           
-          <p style="text-align: center; font-size: 14px; color: #666;">
-            Or copy this link to share: <br>
-            <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
-          </p>
+          <!-- RECEIPT SECTION -->
+          <div class="receipt-box">
+            <h3>🧾 Payment Receipt</h3>
+            <p><strong>Service:</strong> Video Translation</p>
+            <p><strong>Language:</strong> ${language}</p>
+            <p><strong>Amount Paid:</strong> KES ${amount}</p>
+            <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
+            <p><strong>Status:</strong> ✅ Completed</p>
+          </div>
           
           <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
           <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
@@ -1542,6 +1566,41 @@ async function translateText(text, targetLanguage, sourceLanguage = 'en') {
   throw new Error('All translation servers failed');
 }
 
+// Process translation helper function
+async function processTranslation(params) {
+  const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = params;
+  
+  console.log('🔄 Processing translation...');
+  console.log('📹 Video URL:', videoUrl.substring(0, 100) + '...');
+  console.log('🎯 Target Language:', targetLanguage);
+  
+  // Simulate processing delay
+  await new Promise(resolve => setTimeout(resolve, 2000));
+  
+  // Generate translated text
+  const translatedText = `[Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French'}] Sample translated content`;
+  
+  // Return the original video URL (in production, this would be the translated video)
+  return {
+    videoUrl: videoUrl,
+    translatedText: translatedText
+  };
+}
+
+// Helper function to send translation email
+async function sendTranslationEmail(email, videoUrl, translatedText, language, amount) {
+  const translationEmail = generateTranslationEmail(email, videoUrl, translatedText, language, amount);
+  await sendEmail(email, translationEmail.subject, translationEmail.html);
+  console.log(`📧 Translation video sent to ${email}`);
+}
+
+// Helper function to send receipt email
+async function sendReceiptEmail(email, amount, reference, serviceType) {
+  const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceType, 5);
+  await sendEmail(email, receiptEmail.subject, receiptEmail.html);
+  console.log(`📧 Receipt sent to ${email}`);
+}
+
 // Generate translated video (simulated)
 async function generateTranslatedVideo(originalVideoUrl, translatedText, targetLanguage, duration) {
   console.log(`🎬 Generating translated video for ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`);
@@ -1664,6 +1723,82 @@ app.post('/api/translate-video', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// ============================================
+// FREE RETRY ENDPOINT FOR PAID USERS
+// ============================================
+
+app.post('/api/translate-video-free', async (req, res) => {
+  try {
+    const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = req.body;
+    
+    console.log('🔄 Free retry translation for:', email);
+    console.log('📝 Payment Reference:', paymentReference);
+    console.log('🎯 Target Language:', targetLanguage);
+    console.log('📹 Video URL:', videoUrl ? videoUrl.substring(0, 100) + '...' : 'Not provided');
+    
+    // Check if payment exists
+    const payment = dataStore.userPayments.find(p => 
+      p.reference === paymentReference && 
+      p.email === email && 
+      p.status === 'completed'
+    );
+    
+    if (!payment) {
+      console.log('❌ Payment not found for reference:', paymentReference);
+      return res.status(404).json({
+        success: false,
+        error: 'Payment not found. Please verify your payment reference.'
+      });
+    }
+    
+    console.log('✅ Payment found:', payment);
+    
+    // Check if video URL is provided
+    if (!videoUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'Video URL is required. Please upload your video again.'
+      });
+    }
+    
+    // Process translation for free
+    const result = await processTranslation({
+      videoUrl: videoUrl,
+      targetLanguage: targetLanguage || 'sw',
+      sourceLanguage: sourceLanguage || 'en',
+      paymentReference: paymentReference,
+      email: email,
+      duration: duration || 5
+    });
+    
+    // Send email with download link
+    await sendTranslationEmail(
+      email,
+      result.videoUrl,
+      result.translatedText,
+      FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French',
+      300 // Payment amount
+    );
+    
+    // Send receipt
+    await sendReceiptEmail(email, 300, paymentReference, 'translation');
+    
+    res.json({
+      success: true,
+      message: '✅ Translation complete! Check your email for the download link and receipt.',
+      videoUrl: result.videoUrl,
+      paymentReference: paymentReference
+    });
+    
+  } catch (error) {
+    console.error('❌ Free retry error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Retry failed. Please try again.'
     });
   }
 });
@@ -1968,7 +2103,8 @@ app.get('/api/test', (req, res) => {
       '/api/test-payment',
       '/api/test-json',
       '/api/debug-payment',
-      '/api/health-check'
+      '/api/health-check',
+      '/api/translate-video-free'
     ]
   });
 });
@@ -2028,7 +2164,8 @@ app.get('/', (req, res) => {
       { path: '/api/test-payment', method: 'GET' },
       { path: '/api/test-json', method: 'GET' },
       { path: '/api/debug-payment', method: 'GET' },
-      { path: '/api/health-check', method: 'GET' }
+      { path: '/api/health-check', method: 'GET' },
+      { path: '/api/translate-video-free', method: 'POST' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
