@@ -361,7 +361,7 @@ function TranslateVideo() {
 
         console.log('✅ Payment initialized with reference:', paymentData.reference);
 
-        // Open Paystack popup
+        // Open Paystack popup (V1 InlineJS API — PaystackPop.setup() + handler.openIframe())
         if (typeof window !== 'undefined' && window.PaystackPop) {
           const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
           
@@ -369,25 +369,25 @@ function TranslateVideo() {
             throw new Error('Payment configuration error. Please contact support.');
           }
 
-          const popup = new window.PaystackPop();
-          popup.open({
+          const handler = window.PaystackPop.setup({
             key: publicKey,
             email: email,
             amount: TRANSLATION_PRICE * 100,
             ref: paymentData.reference,
             metadata: paymentData.metadata,
             currency: 'KES',
-            callback: async (response) => {
+            callback: function (response) {
               console.log('✅ Payment successful:', response);
               setSuccess('✅ Payment successful! Processing translation...');
-              await processTranslation(response.reference);
+              processTranslation(response.reference);
             },
-            onClose: () => {
+            onClose: function () {
               console.log('❌ Payment popup closed');
               setLoading(false);
               setError('Payment was cancelled. Please try again.');
             }
           });
+          handler.openIframe();
         } else {
           throw new Error('Payment system not available. Please check your internet connection.');
         }
