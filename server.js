@@ -19,6 +19,8 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
+console.log('🔑 Paystack Secret Key length:', process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.length : 0);
+console.log('🔑 Paystack Secret Key prefix:', process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.substring(0, 10) : 'none');
 
 // ============================================
 // MIDDLEWARE - UPDATED WITH HIGHER LIMITS
@@ -593,7 +595,7 @@ function getUserPayments(limit = 20) {
 }
 
 // ============================================
-// FILE UPLOAD CONFIGURATION - COMPLETE FIX
+// FILE UPLOAD CONFIGURATION
 // ============================================
 
 // Ensure uploads directory exists
@@ -620,7 +622,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: { 
-    fileSize: 100 * 1024 * 1024, // 100MB
+    fileSize: 100 * 1024 * 1024,
     fieldSize: 100 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
@@ -644,7 +646,6 @@ app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
   
   upload.single('video')(req, res, function(err) {
-    // Handle multer errors
     if (err) {
       console.error('❌ Multer error:', err.message);
       return res.status(400).json({
@@ -653,7 +654,6 @@ app.post('/api/upload-video', (req, res) => {
       });
     }
     
-    // Check if file was uploaded
     if (!req.file) {
       console.error('❌ No file in request');
       return res.status(400).json({
@@ -772,8 +772,20 @@ app.post('/api/calculate-price', (req, res) => {
 });
 
 // ============================================
-// PAYMENT ENDPOINTS - FIXED
+// PAYMENT ENDPOINTS - COMPLETE FIX
 // ============================================
+
+// Test endpoint to verify server is working
+app.get('/api/test-payment', (req, res) => {
+  console.log('✅ Test payment endpoint called');
+  res.json({
+    success: true,
+    message: 'Payment endpoint is working',
+    timestamp: new Date().toISOString(),
+    hasPaystackKey: !!process.env.PAYSTACK_SECRET_KEY,
+    paystackKeyLength: process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.length : 0
+  });
+});
 
 app.post('/api/initialize-payment', async (req, res) => {
   try {
@@ -837,7 +849,6 @@ app.post('/api/initialize-payment', async (req, res) => {
     };
 
     console.log('📤 Sending request to Paystack...');
-    console.log('📤 Request body:', JSON.stringify(requestBody, null, 2));
 
     // Make request to Paystack
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
@@ -850,35 +861,41 @@ app.post('/api/initialize-payment', async (req, res) => {
     });
 
     console.log('📦 Response status:', response.status);
-    console.log('📦 Response headers:', response.headers);
 
-    // Get response text first
+    // Get response text
     const responseText = await response.text();
-    console.log('📦 Raw response:', responseText);
+    console.log('📦 Raw response length:', responseText.length);
+    console.log('📦 Raw response:', responseText.substring(0, 200) + '...');
 
-    // Try to parse JSON
+    // If response is empty, return error
+    if (!responseText || responseText.trim() === '') {
+      console.error('❌ Empty response from Paystack');
+      return res.status(500).json({
+        success: false,
+        error: 'Payment gateway returned empty response. Please try again.'
+      });
+    }
+
+    // Parse JSON
     let data;
     try {
       data = JSON.parse(responseText);
     } catch (parseError) {
       console.error('❌ Failed to parse Paystack response:', parseError);
-      console.error('Response text was:', responseText);
-      
-      // Return a proper error response
+      console.error('Response was:', responseText);
       return res.status(500).json({
         success: false,
-        error: 'Invalid response from payment gateway. Please try again.',
-        debug: 'Could not parse Paystack response'
+        error: 'Invalid response from payment gateway. Please try again.'
       });
     }
 
-    console.log('📦 Paystack response:', data);
+    console.log('📦 Paystack response status:', data.status);
     
     if (data.status) {
       console.log('✅ Payment initialized successfully!');
       console.log('📝 Reference:', data.data.reference);
       
-      return res.json({
+      return res.status(200).json({
         success: true,
         reference: data.data.reference,
         authorization_url: data.data.authorization_url,
@@ -895,11 +912,9 @@ app.post('/api/initialize-payment', async (req, res) => {
     console.error('❌ Payment initialization error:', error);
     console.error('Stack trace:', error.stack);
     
-    // Always return a valid JSON response
     return res.status(500).json({
       success: false,
-      error: error.message || 'Payment initialization failed. Please try again.',
-      debug: error.message
+      error: 'Payment initialization failed. Please try again.'
     });
   }
 });
@@ -1870,6 +1885,7 @@ app.get('/api/test', (req, res) => {
       '/api/admin/balances',
       '/api/admin/payments',
       '/api/admin/add-missing-payment',
+      '/api/test-payment',
       '/api/debug-payment'
     ]
   });
@@ -1927,6 +1943,7 @@ app.get('/', (req, res) => {
       { path: '/api/admin/balances', method: 'GET' },
       { path: '/api/admin/payments', method: 'GET' },
       { path: '/api/admin/add-missing-payment', method: 'POST' },
+      { path: '/api/test-payment', method: 'GET' },
       { path: '/api/debug-payment', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'

@@ -265,39 +265,46 @@ function TranslateVideo() {
       });
 
       console.log('📦 Response status:', paymentResponse.status);
+      console.log('📦 Response ok:', paymentResponse.ok);
 
       // Check if response is ok
       if (!paymentResponse.ok) {
-        const errorText = await paymentResponse.text();
-        console.error('❌ Payment API error:', paymentResponse.status, errorText);
-        
         let errorMessage = `Server error: ${paymentResponse.status}`;
         try {
-          const errorJson = JSON.parse(errorText);
-          if (errorJson.error) {
-            errorMessage = errorJson.error;
-          }
-          if (errorJson.debug) {
-            console.error('Debug info:', errorJson.debug);
+          const errorData = await paymentResponse.json();
+          if (errorData.error) {
+            errorMessage = errorData.error;
           }
         } catch (e) {
-          if (errorText) {
-            errorMessage = errorText;
+          try {
+            const text = await paymentResponse.text();
+            if (text) {
+              errorMessage = text;
+            }
+          } catch (textError) {
+            // Ignore
           }
         }
-        
         throw new Error(errorMessage);
       }
 
-      // Parse response
+      // Get response as text first
+      const responseText = await paymentResponse.text();
+      console.log('📦 Raw response length:', responseText.length);
+      console.log('📦 Raw response:', responseText);
+
+      // Check if response is empty
+      if (!responseText || responseText.trim() === '') {
+        throw new Error('Empty response from server. Please try again.');
+      }
+
+      // Parse JSON
       let paymentData;
       try {
-        const responseText = await paymentResponse.text();
-        console.log('📦 Raw response:', responseText);
-        
         paymentData = JSON.parse(responseText);
       } catch (parseError) {
         console.error('❌ Failed to parse payment response:', parseError);
+        console.error('Response was:', responseText);
         throw new Error('Invalid response from payment server. Please try again.');
       }
 
