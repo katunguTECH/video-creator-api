@@ -226,6 +226,8 @@ function TranslateVideo() {
       console.log('💰 Amount:', TRANSLATION_PRICE);
       
       // Step 1: Initialize payment
+      console.log('📤 Calling /api/initialize-payment...');
+      
       const paymentResponse = await fetch('/api/initialize-payment', {
         method: 'POST',
         headers: { 
@@ -262,6 +264,8 @@ function TranslateVideo() {
         })
       });
 
+      console.log('📦 Response status:', paymentResponse.status);
+
       // Check if response is ok
       if (!paymentResponse.ok) {
         const errorText = await paymentResponse.text();
@@ -272,6 +276,9 @@ function TranslateVideo() {
           const errorJson = JSON.parse(errorText);
           if (errorJson.error) {
             errorMessage = errorJson.error;
+          }
+          if (errorJson.debug) {
+            console.error('Debug info:', errorJson.debug);
           }
         } catch (e) {
           if (errorText) {
@@ -285,10 +292,13 @@ function TranslateVideo() {
       // Parse response
       let paymentData;
       try {
-        paymentData = await paymentResponse.json();
+        const responseText = await paymentResponse.text();
+        console.log('📦 Raw response:', responseText);
+        
+        paymentData = JSON.parse(responseText);
       } catch (parseError) {
         console.error('❌ Failed to parse payment response:', parseError);
-        throw new Error('Invalid response from payment server');
+        throw new Error('Invalid response from payment server. Please try again.');
       }
 
       console.log('📦 Payment response:', paymentData);
@@ -297,19 +307,28 @@ function TranslateVideo() {
         throw new Error(paymentData.error || 'Payment initialization failed');
       }
 
+      // Check if we have a reference
+      if (!paymentData.reference) {
+        console.error('❌ No reference in response:', paymentData);
+        throw new Error('Payment reference missing. Please try again.');
+      }
+
+      console.log('✅ Payment initialized with reference:', paymentData.reference);
+
       // Step 2: Open Paystack popup
       if (typeof window !== 'undefined' && window.PaystackPop) {
         try {
-          const popup = new window.PaystackPop();
           const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
           
-          if (!publicKey || publicKey === 'pk_test_xxx') {
-            throw new Error('Paystack public key not configured. Please set REACT_APP_PAYSTACK_PUBLIC_KEY');
+          if (!publicKey || publicKey === 'pk_test_xxx' || publicKey === 'pk_live_xxx') {
+            console.error('❌ Invalid Paystack public key:', publicKey);
+            throw new Error('Payment configuration error. Please contact support.');
           }
 
           console.log('🔑 Using Paystack public key:', publicKey.substring(0, 10) + '...');
-          console.log('📝 Payment reference:', paymentData.reference);
+          console.log('📝 Opening Paystack popup with reference:', paymentData.reference);
           
+          const popup = new window.PaystackPop();
           popup.open({
             key: publicKey,
             email: email,
@@ -333,7 +352,8 @@ function TranslateVideo() {
           throw new Error('Failed to open payment window: ' + popupError.message);
         }
       } else {
-        throw new Error('Paystack is not available. Please check your internet connection.');
+        console.error('❌ PaystackPop not available');
+        throw new Error('Payment system not available. Please check your internet connection.');
       }
     } catch (error) {
       console.error('❌ Payment error:', error);

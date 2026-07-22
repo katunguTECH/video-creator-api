@@ -772,7 +772,7 @@ app.post('/api/calculate-price', (req, res) => {
 });
 
 // ============================================
-// PAYMENT ENDPOINTS - LIVE PAYSTACK INTEGRATION
+// PAYMENT ENDPOINTS - FIXED
 // ============================================
 
 app.post('/api/initialize-payment', async (req, res) => {
@@ -784,6 +784,7 @@ app.post('/api/initialize-payment', async (req, res) => {
     console.log('📧 Email:', email);
     console.log('💰 Amount:', amount);
     console.log('🔑 Secret Key exists:', !!secretKey);
+    console.log('🔑 Secret Key length:', secretKey ? secretKey.length : 0);
     
     // Validate required fields
     if (!email) {
@@ -801,8 +802,8 @@ app.post('/api/initialize-payment', async (req, res) => {
     }
     
     // Check if secret key is properly configured
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      console.error('❌ Invalid Paystack secret key. Please set PAYSTACK_SECRET_KEY in environment.');
+    if (!secretKey || secretKey === 'your_paystack_secret_key' || secretKey.length < 10) {
+      console.error('❌ Invalid Paystack secret key.');
       return res.status(500).json({
         success: false,
         error: 'Payment configuration error. Please contact support.'
@@ -811,81 +812,118 @@ app.post('/api/initialize-payment', async (req, res) => {
 
     console.log('🔑 Using Paystack secret key:', secretKey.substring(0, 10) + '...');
 
+    // Prepare request body
+    const requestBody = {
+      email: email,
+      amount: Math.round(amount * 100),
+      metadata: {
+        serviceType: serviceType || 'translation',
+        ...metadata,
+        custom_fields: [
+          {
+            display_name: "Service Type",
+            variable_name: "service_type",
+            value: serviceType || 'translation'
+          },
+          {
+            display_name: "Amount",
+            variable_name: "amount",
+            value: `${amount} KES`
+          },
+          ...(metadata?.custom_fields || [])
+        ]
+      },
+      callback_url: process.env.FRONTEND_URL || 'https://www.katareel.com/translation-success'
+    };
+
+    console.log('📤 Sending request to Paystack...');
+    console.log('📤 Request body:', JSON.stringify(requestBody, null, 2));
+
     // Make request to Paystack
+    const response = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    console.log('📦 Response status:', response.status);
+    console.log('📦 Response headers:', response.headers);
+
+    // Get response text first
+    const responseText = await response.text();
+    console.log('📦 Raw response:', responseText);
+
+    // Try to parse JSON
+    let data;
     try {
-      const requestBody = {
-        email: email,
-        amount: Math.round(amount * 100), // Convert to kobo
-        metadata: {
-          serviceType: serviceType || 'translation',
-          ...metadata,
-          custom_fields: [
-            {
-              display_name: "Service Type",
-              variable_name: "service_type",
-              value: serviceType || 'translation'
-            },
-            {
-              display_name: "Amount",
-              variable_name: "amount",
-              value: `${amount} KES`
-            },
-            ...(metadata?.custom_fields || [])
-          ]
-        },
-        callback_url: process.env.FRONTEND_URL || 'https://www.katareel.com/translation-success'
-      };
-
-      console.log('📤 Sending request to Paystack...');
-
-      const response = await fetch('https://api.paystack.co/transaction/initialize', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${secretKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody)
-      });
-
-      const responseText = await response.text();
-      console.log('📦 Raw Paystack response received');
-
-      let data;
-      try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('❌ Failed to parse Paystack response:', parseError);
-        console.error('Response text:', responseText);
-        throw new Error('Invalid response from Paystack');
-      }
-
-      console.log('📦 Paystack response status:', data.status);
+      data = JSON.parse(responseText);
+    } catch (parseError) {
+      console.error('❌ Failed to parse Paystack response:', parseError);
+      console.error('Response text was:', responseText);
       
-      if (data.status) {
-        console.log('✅ Payment initialized successfully!');
-        console.log('📝 Reference:', data.data.reference);
-        
-        res.json({
-          success: true,
-          reference: data.data.reference,
-          authorization_url: data.data.authorization_url,
-          metadata: metadata
-        });
-      } else {
-        console.error('❌ Paystack error:', data.message);
-        throw new Error(data.message || 'Payment initialization failed');
-      }
-    } catch (fetchError) {
-      console.error('❌ Fetch error:', fetchError.message);
-      throw new Error(`Paystack API error: ${fetchError.message}`);
+      // Return a proper error response
+      return res.status(500).json({
+        success: false,
+        error: 'Invalid response from payment gateway. Please try again.',
+        debug: 'Could not parse Paystack response'
+      });
+    }
+
+    console.log('📦 Paystack response:', data);
+    
+    if (data.status) {
+      console.log('✅ Payment initialized successfully!');
+      console.log('📝 Reference:', data.data.reference);
+      
+      return res.json({
+        success: true,
+        reference: data.data.reference,
+        authorization_url: data.data.authorization_url,
+        metadata: metadata
+      });
+    } else {
+      console.error('❌ Paystack error:', data.message);
+      return res.status(400).json({
+        success: false,
+        error: data.message || 'Payment initialization failed'
+      });
     }
   } catch (error) {
     console.error('❌ Payment initialization error:', error);
-    res.status(500).json({
+    console.error('Stack trace:', error.stack);
+    
+    // Always return a valid JSON response
+    return res.status(500).json({
       success: false,
-      error: error.message || 'Payment initialization failed. Please try again.'
+      error: error.message || 'Payment initialization failed. Please try again.',
+      debug: error.message
     });
   }
+});
+
+// Debug endpoint to test payment configuration
+app.get('/api/debug-payment', (req, res) => {
+  const secretKey = process.env.PAYSTACK_SECRET_KEY;
+  const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+  
+  res.json({
+    success: true,
+    debug: {
+      hasSecretKey: !!secretKey,
+      secretKeyLength: secretKey ? secretKey.length : 0,
+      secretKeyPrefix: secretKey ? secretKey.substring(0, 10) : 'none',
+      secretKeyValid: secretKey && secretKey.length > 10 && secretKey.startsWith('sk_'),
+      hasPublicKey: !!publicKey,
+      publicKeyLength: publicKey ? publicKey.length : 0,
+      publicKeyPrefix: publicKey ? publicKey.substring(0, 10) : 'none',
+      publicKeyValid: publicKey && publicKey.length > 10 && publicKey.startsWith('pk_'),
+      frontendUrl: process.env.FRONTEND_URL || 'not set',
+      environment: process.env.NODE_ENV || 'development'
+    }
+  });
 });
 
 app.post('/api/verify-payment', async (req, res) => {
@@ -1831,7 +1869,8 @@ app.get('/api/test', (req, res) => {
       '/api/admin/add-credits',
       '/api/admin/balances',
       '/api/admin/payments',
-      '/api/admin/add-missing-payment'
+      '/api/admin/add-missing-payment',
+      '/api/debug-payment'
     ]
   });
 });
@@ -1887,7 +1926,8 @@ app.get('/', (req, res) => {
       { path: '/api/admin/add-credits', method: 'POST' },
       { path: '/api/admin/balances', method: 'GET' },
       { path: '/api/admin/payments', method: 'GET' },
-      { path: '/api/admin/add-missing-payment', method: 'POST' }
+      { path: '/api/admin/add-missing-payment', method: 'POST' },
+      { path: '/api/debug-payment', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
