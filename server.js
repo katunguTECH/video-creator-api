@@ -11,6 +11,9 @@ const path = require('path');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const mailgun = require('mailgun-js');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -19,19 +22,20 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
-console.log('🔑 Paystack Secret Key length:', process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.length : 0);
-console.log('🔑 Paystack Secret Key prefix:', process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.substring(0, 10) : 'none');
 
-// Global error handlers
-process.on('uncaughtException', (error) => {
-  console.error('❌ Uncaught Exception:', error);
-  console.error('Stack trace:', error.stack);
+// ============================================
+// CLOUDINARY CONFIGURATION
+// ============================================
+
+// Configure Cloudinary with your credentials
+cloudinary.config({
+  cloud_name: 'y7d1nk2i',
+  api_key: '289646568483629',
+  api_secret: 'XmlwCnuLWkO-xe3BQw-lpl-ELU0'
 });
 
-process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise);
-  console.error('Reason:', reason);
-});
+console.log('☁️ Cloudinary configured successfully!');
+console.log(`   Cloud Name: y7d1nk2i`);
 
 // ============================================
 // MIDDLEWARE - UPDATED WITH HIGHER LIMITS
@@ -47,7 +51,7 @@ app.options('*', cors());
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
-// Serve uploaded files
+// Serve uploaded files (for backward compatibility)
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use((req, res, next) => {
@@ -57,6 +61,17 @@ app.use((req, res, next) => {
     recordSiteVisit(req.path, ip, req.headers['user-agent']);
   }
   next();
+});
+
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  console.error('Stack trace:', error.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise);
+  console.error('Reason:', reason);
 });
 
 // ============================================
@@ -606,50 +621,30 @@ function getUserPayments(limit = 20) {
 }
 
 // ============================================
-// FILE UPLOAD CONFIGURATION - COMPLETE FIX
+// FILE UPLOAD CONFIGURATION - CLOUDINARY STORAGE
 // ============================================
 
-// Ensure uploads directory exists with proper permissions
-const uploadsDir = path.join(__dirname, 'uploads');
-try {
-  if (!fs.existsSync(uploadsDir)) {
-    fs.mkdirSync(uploadsDir, { recursive: true });
-    console.log('📁 Uploads directory created:', uploadsDir);
-  }
-  // Test write permissions
-  fs.accessSync(uploadsDir, fs.constants.W_OK);
-  console.log('📁 Uploads directory is writable');
-} catch (error) {
-  console.error('❌ Uploads directory error:', error.message);
-  // Try to create with different permissions
-  try {
-    fs.mkdirSync(uploadsDir, { recursive: true, mode: 0o777 });
-    console.log('📁 Uploads directory created with 777 permissions');
-  } catch (err) {
-    console.error('❌ Failed to create uploads directory:', err.message);
-  }
-}
-
-// Configure storage
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => {
-    cb(null, uploadsDir);
-  },
-  filename: (req, file, cb) => {
-    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-    const finalFilename = uniqueSuffix + '-' + sanitizedFilename;
-    cb(null, finalFilename);
+// Configure Cloudinary storage for multer
+const cloudinaryStorage = new CloudinaryStorage({
+  cloudinary: cloudinary,
+  params: {
+    folder: 'video-creator-uploads',
+    allowed_formats: ['mp4', 'avi', 'mov', 'webm', 'quicktime'],
+    resource_type: 'video',
+    public_id: (req, file) => {
+      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+      const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+      return uniqueSuffix + '-' + sanitizedFilename;
+    }
   }
 });
 
-// Configure multer with error handling
+// Configure multer with Cloudinary storage
 const upload = multer({
-  storage: storage,
+  storage: cloudinaryStorage,
   limits: { 
-    fileSize: 100 * 1024 * 1024, // 100MB
-    fieldSize: 100 * 1024 * 1024,
-    files: 1
+    fileSize: 100 * 1024 * 1024,
+    fieldSize: 100 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
@@ -667,27 +662,30 @@ const upload = multer({
   }
 });
 
-// Upload video endpoint with comprehensive error handling
+// Keep local uploads directory for temporary files (optional)
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('📁 Uploads directory created:', uploadsDir);
+}
+
+// Upload video endpoint with Cloudinary
 app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
   console.log('📤 Content-Type:', req.headers['content-type']);
   console.log('📤 Content-Length:', req.headers['content-length']);
   
-  // Set timeout for upload
-  req.setTimeout(120000); // 2 minutes
+  req.setTimeout(120000);
   
   upload.single('video')(req, res, function(err) {
-    // Handle multer errors
     if (err) {
-      console.error('❌ Multer error:', err.message);
-      console.error('❌ Multer error stack:', err.stack);
+      console.error('❌ Multer/Cloudinary error:', err.message);
       return res.status(400).json({
         success: false,
         error: err.message || 'File upload failed'
       });
     }
     
-    // Check if file was uploaded
     if (!req.file) {
       console.error('❌ No file in request');
       return res.status(400).json({
@@ -698,27 +696,24 @@ app.post('/api/upload-video', (req, res) => {
 
     try {
       const fileSizeMB = (req.file.size / 1024 / 1024).toFixed(2);
-      console.log('✅ Video uploaded successfully:');
+      console.log('✅ Video uploaded to Cloudinary successfully:');
       console.log(`   Filename: ${req.file.filename}`);
       console.log(`   Original: ${req.file.originalname}`);
       console.log(`   Size: ${fileSizeMB} MB`);
-      console.log(`   Type: ${req.file.mimetype}`);
+      console.log(`   URL: ${req.file.path}`);
 
-      const videoUrl = `/uploads/${req.file.filename}`;
-      
       return res.status(200).json({
         success: true,
-        videoPath: req.file.path,
-        videoUrl: videoUrl,
+        videoUrl: req.file.path,
         filename: req.file.filename,
         originalName: req.file.originalname,
         size: req.file.size,
         sizeMB: parseFloat(fileSizeMB),
-        mimetype: req.file.mimetype
+        mimetype: req.file.mimetype,
+        cloudinaryPublicId: req.file.public_id
       });
     } catch (error) {
       console.error('❌ Upload processing error:', error.message);
-      console.error('❌ Upload processing stack:', error.stack);
       return res.status(500).json({
         success: false,
         error: 'Server error processing upload: ' + error.message
@@ -2074,6 +2069,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
   console.log(`📊 Data file: ${DATA_FILE}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
+  console.log(`☁️ Cloudinary storage configured`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
   console.log(`💰 Replicate Balance: $${getApiBalance('replicate')}`);
   console.log(`💰 BytePlus Balance: $${getApiBalance('byteplus')}`);

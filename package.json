@@ -50,3 +50,12 @@
     "node": ">=16.0.0 <22.0.0"
   }
 }
+{
+  "name": "video-creator-app",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@paystack/inline-js": "^2.0.0",
+    ...
+  }
+}
