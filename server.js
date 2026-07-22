@@ -724,7 +724,7 @@ app.post('/api/initialize-payment', async (req, res) => {
       },
       body: JSON.stringify({
         email: email,
-        amount: amount * 100, // Convert to kobo
+        amount: amount * 100,
         metadata: {
           serviceType: serviceType,
           ...metadata,
@@ -773,7 +773,6 @@ app.post('/api/verify-payment', async (req, res) => {
       addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
       addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
       
-      // Send payment receipt email
       try {
         const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
         await sendEmail(email, receiptEmail.subject, receiptEmail.html);
@@ -806,7 +805,6 @@ app.post('/api/verify-payment', async (req, res) => {
       addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
       addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
 
-      // Send payment receipt email
       try {
         const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
         await sendEmail(email, receiptEmail.subject, receiptEmail.html);
@@ -1250,13 +1248,11 @@ const FREE_TRANSLATION_LANGUAGES = {
 
 // Translation price calculation - Fixed at KES 300
 function calculateTranslationPrice(duration) {
-  // Fixed price of KES 300 for any duration
   return 300;
 }
 
 function calculateTranslationCost(duration) {
-  // Cost to you (for tracking purposes)
-  return 50; // Fixed cost for translation service
+  return 50;
 }
 
 // Translate text function
@@ -1307,12 +1303,6 @@ async function generateTranslatedVideo(originalVideoUrl, translatedText, targetL
   await new Promise(resolve => setTimeout(resolve, 2000));
   
   // Return the original video URL (in production, this would be the translated video)
-  // For a real implementation, you would:
-  // 1. Download the original video
-  // 2. Extract audio and transcribe using speech-to-text
-  // 3. Translate the transcription
-  // 4. Generate new audio with TTS
-  // 5. Combine with original video using FFmpeg
   return originalVideoUrl;
 }
 
@@ -1329,7 +1319,7 @@ app.post('/api/translate-video', async (req, res) => {
       duration 
     } = req.body;
     
-    const TRANSLATION_PRICE = 300; // Fixed price
+    const TRANSLATION_PRICE = 300;
     
     console.log('🌐 Translation request received:');
     console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
@@ -1441,15 +1431,20 @@ app.post('/api/translate-video', async (req, res) => {
 
 // Get free translation languages
 app.get('/api/free-languages', (req, res) => {
-  res.json({ success: true, languages: FREE_TRANSLATION_LANGUAGES });
+  console.log('🌐 GET /api/free-languages - Returning languages');
+  res.json({ 
+    success: true, 
+    languages: FREE_TRANSLATION_LANGUAGES,
+    count: Object.keys(FREE_TRANSLATION_LANGUAGES).length
+  });
 });
 
 // Get translation price - Always KES 300
 app.get('/api/translation-price', (req, res) => {
   try {
     const duration = parseInt(req.query.duration) || 5;
-    const price = 300; // Fixed price
-    const cost = 50; // Fixed cost
+    const price = 300;
+    const cost = 50;
     
     res.json({
       success: true,
@@ -1541,7 +1536,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
     const activity = getRecentActivity(10);
     const payments = getUserPayments(10);
 
-    // Calculate average duration
     const totalDuration = dataStore.videoUsage.reduce((sum, v) => sum + (v.duration || 5), 0);
     const avgDuration = dataStore.videoUsage.length > 0 ? Math.round(totalDuration / dataStore.videoUsage.length) : 0;
 
@@ -1576,7 +1570,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
   }
 });
 
-// Admin endpoint to manually add missing payment
 app.post('/api/admin/add-missing-payment', async (req, res) => {
   try {
     const { email, amount, serviceType, paymentMethod, reference, duration } = req.body;
@@ -1611,7 +1604,6 @@ app.post('/api/admin/add-missing-payment', async (req, res) => {
   }
 });
 
-// Admin endpoint to add credits
 app.post('/api/admin/add-credits', async (req, res) => {
   try {
     const { provider, amount, description } = req.body;
@@ -1642,7 +1634,6 @@ app.post('/api/admin/add-credits', async (req, res) => {
   }
 });
 
-// Get current balances
 app.get('/api/admin/balances', async (req, res) => {
   try {
     const balances = getApiBalances();
@@ -1657,7 +1648,6 @@ app.get('/api/admin/balances', async (req, res) => {
   }
 });
 
-// Get all payments
 app.get('/api/admin/payments', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
