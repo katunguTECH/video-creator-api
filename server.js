@@ -695,6 +695,67 @@ app.post('/api/calculate-price', (req, res) => {
 // PAYMENT ENDPOINTS
 // ============================================
 
+app.post('/api/initialize-payment', async (req, res) => {
+  try {
+    const { email, amount, serviceType, metadata } = req.body;
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    
+    console.log('💰 Initializing payment:', { email, amount, serviceType });
+    
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
+      // Test mode - return mock reference
+      const reference = 'test_ref_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+      console.log('⚠️ Test mode: Using mock reference:', reference);
+      
+      return res.json({
+        success: true,
+        reference: reference,
+        message: 'Test mode: Payment will be simulated',
+        metadata: metadata,
+        testMode: true
+      });
+    }
+
+    const response = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: email,
+        amount: amount * 100, // Convert to kobo
+        metadata: {
+          serviceType: serviceType,
+          ...metadata,
+          custom_fields: metadata?.custom_fields || []
+        },
+        callback_url: process.env.FRONTEND_URL || 'https://www.katareel.com/translation-success'
+      })
+    });
+
+    const data = await response.json();
+    console.log('📦 Paystack response:', data);
+    
+    if (data.status) {
+      res.json({
+        success: true,
+        reference: data.data.reference,
+        authorization_url: data.data.authorization_url,
+        metadata: metadata
+      });
+    } else {
+      throw new Error(data.message || 'Payment initialization failed');
+    }
+  } catch (error) {
+    console.error('❌ Payment initialization error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.post('/api/verify-payment', async (req, res) => {
   try {
     const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
@@ -702,7 +763,7 @@ app.post('/api/verify-payment', async (req, res) => {
     
     console.log(`🔍 Verifying payment: ${reference}`, { email, amount, serviceType, paymentMethod, duration });
     
-    if (!secretKey) {
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
@@ -918,7 +979,7 @@ function createFallbackVideo(prompt, paymentReference) {
 async function verifyPayment(reference) {
   try {
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey) {
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.log('⚠️ No secret key, accepting test payment');
       return true;
     }
@@ -1171,7 +1232,7 @@ app.post('/api/generate-video', async (req, res) => {
 });
 
 // ============================================
-// VIDEO TRANSLATION WITH PAYMENT
+// VIDEO TRANSLATION WITH PAYMENT - FIXED PRICE KES 300
 // ============================================
 
 const FREE_TRANSLATION_LANGUAGES = {
@@ -1187,17 +1248,15 @@ const FREE_TRANSLATION_LANGUAGES = {
   'mr': 'Marathi', 'or': 'Odia'
 };
 
-// Translation price calculation
+// Translation price calculation - Fixed at KES 300
 function calculateTranslationPrice(duration) {
-  const basePrice = 50; // Base price in KES
-  const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
-  return basePrice * durationMultiplier;
+  // Fixed price of KES 300 for any duration
+  return 300;
 }
 
 function calculateTranslationCost(duration) {
-  const baseCost = 5; // Base cost in KES
-  const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
-  return baseCost * durationMultiplier;
+  // Cost to you (for tracking purposes)
+  return 50; // Fixed cost for translation service
 }
 
 // Translate text function
@@ -1270,19 +1329,21 @@ app.post('/api/translate-video', async (req, res) => {
       duration 
     } = req.body;
     
+    const TRANSLATION_PRICE = 300; // Fixed price
+    
     console.log('🌐 Translation request received:');
     console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
     console.log(`   Target Language: ${targetLanguage} (${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage})`);
     console.log(`   User Email: ${email}`);
     console.log(`   Payment Reference: ${paymentReference}`);
 
-    // Verify payment
+    // Verify payment - Always expects KES 300
     if (!paymentReference) {
       return res.status(402).json({
         success: false,
         error: 'Payment required for translation.',
         requiresPayment: true,
-        price: calculateTranslationPrice(duration || 5)
+        price: TRANSLATION_PRICE
       });
     }
 
@@ -1291,7 +1352,8 @@ app.post('/api/translate-video', async (req, res) => {
       return res.status(402).json({
         success: false,
         error: 'Invalid or expired payment.',
-        requiresPayment: true
+        requiresPayment: true,
+        price: TRANSLATION_PRICE
       });
     }
 
@@ -1323,6 +1385,7 @@ app.post('/api/translate-video', async (req, res) => {
       translatedText,
       translatedVideoUrl,
       duration: duration || 5,
+      price: TRANSLATION_PRICE,
       createdAt: new Date().toISOString()
     };
     
@@ -1332,11 +1395,11 @@ app.post('/api/translate-video', async (req, res) => {
     dataStore.translations.push(translationRecord);
     saveData();
     
-    // Track revenue for translation service
-    const translationCost = calculateTranslationCost(duration || 5);
+    // Track revenue for translation service - KES 300
+    const translationCost = TRANSLATION_PRICE;
     addRevenue(translationId, email, translationCost, 'translation', paymentReference, 'card');
     addUserPayment(email, translationCost, 'card', 'translation', paymentReference);
-    addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s`, translationCost);
+    addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
     addVideoUsage(paymentReference, email, 'translation', translatedText, translationCost, 'Translation API', 'translation-service', duration || 5);
 
     // Send translated video via email
@@ -1363,7 +1426,8 @@ app.post('/api/translate-video', async (req, res) => {
       languageName: FREE_TRANSLATION_LANGUAGES[targetLanguage],
       duration: duration || 5,
       paymentReference,
-      translationId
+      translationId,
+      price: TRANSLATION_PRICE
     });
 
   } catch (error) {
@@ -1380,12 +1444,12 @@ app.get('/api/free-languages', (req, res) => {
   res.json({ success: true, languages: FREE_TRANSLATION_LANGUAGES });
 });
 
-// Get translation price
+// Get translation price - Always KES 300
 app.get('/api/translation-price', (req, res) => {
   try {
     const duration = parseInt(req.query.duration) || 5;
-    const price = calculateTranslationPrice(duration);
-    const cost = calculateTranslationCost(duration);
+    const price = 300; // Fixed price
+    const cost = 50; // Fixed cost
     
     res.json({
       success: true,
@@ -1394,10 +1458,11 @@ app.get('/api/translation-price', (req, res) => {
       cost: cost,
       currency: 'KES',
       breakdown: {
-        basePrice: 50,
-        durationMultiplier: duration === 5 ? 1 : duration === 10 ? 2 : 3,
-        total: price
-      }
+        basePrice: 300,
+        serviceFee: 300,
+        total: 300
+      },
+      message: 'Fixed price of KES 300 for video translation'
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1662,9 +1727,9 @@ app.get('/api/test', (req, res) => {
     endpoints: [
       '/api/test', '/api/health',
       '/api/generate-video',
-      '/api/generate-image-to-video',
       '/api/calculate-price',
       '/api/verify-payment',
+      '/api/initialize-payment',
       '/api/send-video-email',
       '/api/test-email',
       '/api/free-languages',
@@ -1720,6 +1785,7 @@ app.get('/', (req, res) => {
       { path: '/api/generate-video', method: 'POST' },
       { path: '/api/calculate-price', method: 'POST' },
       { path: '/api/verify-payment', method: 'POST' },
+      { path: '/api/initialize-payment', method: 'POST' },
       { path: '/api/send-video-email', method: 'POST' },
       { path: '/api/test-email', method: 'POST' },
       { path: '/api/free-languages', method: 'GET' },
@@ -1778,4 +1844,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Total Translations: ${dataStore.translations ? dataStore.translations.length : 0}`);
   console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
   console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
+  console.log(`💰 Translation Price: KES 300 (Fixed)`);
 });
