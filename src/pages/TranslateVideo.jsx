@@ -2,6 +2,47 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './TranslateVideo.css';
 
+// Hardcoded languages as fallback
+const FALLBACK_LANGUAGES = {
+  'en': 'English',
+  'es': 'Spanish',
+  'fr': 'French',
+  'de': 'German',
+  'it': 'Italian',
+  'pt': 'Portuguese',
+  'ru': 'Russian',
+  'ja': 'Japanese',
+  'ko': 'Korean',
+  'zh': 'Chinese (Simplified)',
+  'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic',
+  'hi': 'Hindi',
+  'bn': 'Bengali',
+  'ur': 'Urdu',
+  'id': 'Indonesian',
+  'ms': 'Malay',
+  'tl': 'Tagalog',
+  'vi': 'Vietnamese',
+  'th': 'Thai',
+  'sw': 'Swahili',
+  'ha': 'Hausa',
+  'yo': 'Yoruba',
+  'ig': 'Igbo',
+  'zu': 'Zulu',
+  'af': 'Afrikaans',
+  'am': 'Amharic',
+  'ne': 'Nepali',
+  'si': 'Sinhala',
+  'ta': 'Tamil',
+  'te': 'Telugu',
+  'ml': 'Malayalam',
+  'kn': 'Kannada',
+  'pa': 'Punjabi',
+  'gu': 'Gujarati',
+  'mr': 'Marathi',
+  'or': 'Odia'
+};
+
 function TranslateVideo() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('katungu1@gmail.com');
@@ -9,7 +50,7 @@ function TranslateVideo() {
   const [videoUrl, setVideoUrl] = useState(null);
   const [sourceLanguage, setSourceLanguage] = useState('auto');
   const [targetLanguage, setTargetLanguage] = useState('');
-  const [languages, setLanguages] = useState({});
+  const [languages, setLanguages] = useState(FALLBACK_LANGUAGES); // Use fallback initially
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
@@ -27,16 +68,35 @@ function TranslateVideo() {
   useEffect(() => {
     const fetchLanguages = async () => {
       try {
+        console.log('🌐 Fetching languages...');
         const response = await fetch('/api/free-languages');
-        const data = await response.json();
-        if (data.success) {
-          setLanguages(data.languages);
-          // Set default target language to Swahili
+        console.log('📦 Response status:', response.status);
+        
+        if (response.ok) {
+          const data = await response.json();
+          console.log('📦 Languages data:', data);
+          
+          if (data.success && data.languages) {
+            setLanguages(data.languages);
+            // Set default target language to Swahili
+            setTargetLanguage('sw');
+            console.log('✅ Languages loaded successfully:', Object.keys(data.languages).length);
+          } else {
+            console.warn('⚠️ No languages in response, using fallback');
+            setLanguages(FALLBACK_LANGUAGES);
+            setTargetLanguage('sw');
+          }
+        } else {
+          console.warn('⚠️ API returned error, using fallback languages');
+          setLanguages(FALLBACK_LANGUAGES);
           setTargetLanguage('sw');
         }
       } catch (error) {
-        console.error('Error loading languages:', error);
-        setError('Failed to load languages. Please refresh the page.');
+        console.error('❌ Error loading languages:', error);
+        // Use fallback languages
+        setLanguages(FALLBACK_LANGUAGES);
+        setTargetLanguage('sw');
+        setError('Could not load languages from server. Using default languages.');
       }
     };
     fetchLanguages();
@@ -135,7 +195,7 @@ function TranslateVideo() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: email,
-          amount: TRANSLATION_PRICE, // KES 300
+          amount: TRANSLATION_PRICE,
           serviceType: 'translation',
           metadata: {
             videoUrl: videoUrl,
@@ -181,7 +241,7 @@ function TranslateVideo() {
         popup.open({
           key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_xxx',
           email: email,
-          amount: TRANSLATION_PRICE * 100, // Convert to kobo
+          amount: TRANSLATION_PRICE * 100,
           ref: paymentData.reference,
           metadata: paymentData.metadata,
           callback: async (response) => {
@@ -350,7 +410,7 @@ function TranslateVideo() {
                 <p>✅ AI video translation</p>
                 <p>✅ Audio processing</p>
                 <p>✅ Email delivery</p>
-                <p>✅ 37 languages supported</p>
+                <p>✅ {Object.keys(languages).length} languages supported</p>
               </div>
             </div>
             <div className="price-note">
