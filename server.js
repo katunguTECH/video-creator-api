@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const nodemailer = require('nodemailer');
+const mailgun = require('mailgun-js');
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -18,6 +19,249 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
+
+// ============================================
+// EMAIL CONFIGURATION - Mailgun with katareel.com
+// ============================================
+
+const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY;
+const MAILGUN_DOMAIN = process.env.MAILGUN_DOMAIN || 'katareel.com';
+
+let mg = null;
+let emailProvider = 'none';
+
+if (MAILGUN_API_KEY && MAILGUN_API_KEY !== 'your_mailgun_api_key') {
+  try {
+    mg = mailgun({
+      apiKey: MAILGUN_API_KEY,
+      domain: MAILGUN_DOMAIN,
+      host: 'api.mailgun.net'
+    });
+    emailProvider = 'mailgun';
+    console.log('📧 Mailgun configured successfully!');
+    console.log(`   Domain: ${MAILGUN_DOMAIN}`);
+    console.log(`   From: VidAI Creator <noreply@${MAILGUN_DOMAIN}>`);
+  } catch (error) {
+    console.error('❌ Mailgun configuration error:', error.message);
+  }
+}
+
+// Configure Gmail (Fallback)
+let transporter = null;
+if (!mg) {
+  const EMAIL_USER = process.env.EMAIL_USER;
+  const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD;
+  
+  if (EMAIL_USER && EMAIL_PASSWORD && EMAIL_USER !== 'your-email@gmail.com') {
+    transporter = nodemailer.createTransport({
+      host: process.env.EMAIL_HOST || 'smtp.gmail.com',
+      port: parseInt(process.env.EMAIL_PORT) || 587,
+      secure: process.env.EMAIL_SECURE === 'true',
+      auth: {
+        user: EMAIL_USER,
+        pass: EMAIL_PASSWORD
+      }
+    });
+    emailProvider = 'gmail';
+    console.log('📧 Gmail configured as fallback!');
+  } else {
+    console.warn('⚠️ No email provider configured. Email sending will be disabled.');
+  }
+}
+
+// Email sending function with Mailgun + Gmail fallback
+async function sendEmail(to, subject, html, text) {
+  const fromEmail = process.env.EMAIL_FROM || `noreply@${MAILGUN_DOMAIN}`;
+  const fromName = 'VidAI Creator';
+  
+  console.log(`📧 Sending email to ${to} via ${emailProvider.toUpperCase()}`);
+  
+  // Try Mailgun first
+  if (emailProvider === 'mailgun' && mg) {
+    try {
+      const data = {
+        from: `${fromName} <${fromEmail}>`,
+        to: to,
+        subject: subject,
+        html: html,
+        text: text || html.replace(/<[^>]*>/g, '')
+      };
+      
+      const result = await new Promise((resolve, reject) => {
+        mg.messages().send(data, (error, body) => {
+          if (error) reject(error);
+          else resolve(body);
+        });
+      });
+      
+      console.log(`✅ Email sent via Mailgun to ${to}`);
+      console.log(`   Message ID: ${result.id}`);
+      return { success: true, provider: 'mailgun', id: result.id };
+    } catch (error) {
+      console.error('❌ Mailgun error:', error.message);
+      // Try Gmail fallback
+    }
+  }
+
+  // Try Gmail as fallback
+  if (emailProvider === 'gmail' && transporter) {
+    try {
+      const mailOptions = {
+        from: `${fromName} <${process.env.EMAIL_USER}>`,
+        to: to,
+        subject: subject,
+        html: html,
+        text: text || html.replace(/<[^>]*>/g, '')
+      };
+      
+      const info = await transporter.sendMail(mailOptions);
+      console.log(`✅ Email sent via Gmail to ${to}`);
+      console.log(`   Message ID: ${info.messageId}`);
+      return { success: true, provider: 'gmail', id: info.messageId };
+    } catch (error) {
+      console.error('❌ Gmail error:', error.message);
+    }
+  }
+
+  console.error(`❌ Failed to send email to ${to}`);
+  return { success: false, error: 'No email provider available' };
+}
+
+// ============================================
+// EMAIL TEMPLATES
+// ============================================
+
+function generatePaymentReceiptEmail(email, amount, reference, serviceType, duration) {
+  const serviceLabels = {
+    'textToVideo': 'Text to Video',
+    'photoToVideo': 'Photos to Video',
+    'translation': 'Video Translation'
+  };
+  
+  return {
+    subject: '🧾 Payment Confirmation - VidAI Creator',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
+          .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .header h1 { color: white; margin: 0; font-size: 28px; }
+          .content { padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px; }
+          .receipt-box { background: white; padding: 20px; border-radius: 8px; margin: 15px 0; border: 1px solid #e0e0e0; }
+          .receipt-row { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #eee; }
+          .receipt-row:last-child { border-bottom: none; }
+          .total { font-weight: bold; font-size: 18px; color: #8B5CF6; }
+          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
+          .status-badge { background: #10B981; color: white; padding: 4px 12px; border-radius: 20px; font-size: 12px; display: inline-block; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>🧾 Payment Receipt</h1>
+        </div>
+        <div class="content">
+          <p>Hi there,</p>
+          <p>Thank you for your payment! Your transaction has been completed successfully. 🎉</p>
+          
+          <div class="receipt-box">
+            <h3 style="margin-top: 0;">Payment Details</h3>
+            <div class="receipt-row">
+              <span>Transaction ID</span>
+              <span><strong>${reference}</strong></span>
+            </div>
+            <div class="receipt-row">
+              <span>Service</span>
+              <span><strong>${serviceLabels[serviceType] || serviceType}</strong></span>
+            </div>
+            <div class="receipt-row">
+              <span>Duration</span>
+              <span><strong>${duration || 5}s</strong></span>
+            </div>
+            <div class="receipt-row">
+              <span>Status</span>
+              <span><span class="status-badge">✅ Completed</span></span>
+            </div>
+            <div class="receipt-row">
+              <span class="total">Total Paid</span>
+              <span class="total">KES ${amount}</span>
+            </div>
+          </div>
+          
+          <p style="margin-top: 20px;">Your video is being generated and will be sent to you shortly.</p>
+          <p>If you have any questions, please reply to this email.</p>
+          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+        </div>
+        <div class="footer">
+          <p>This is a system-generated receipt. Please keep it for your records.</p>
+        </div>
+      </body>
+      </html>
+    `
+  };
+}
+
+function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
+  return {
+    subject: '🎬 Your AI Video is Ready!',
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
+          .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .header h1 { color: white; margin: 0; font-size: 28px; }
+          .content { padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px; }
+          .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
+          .video-container video { width: 100%; max-height: 400px; }
+          .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
+          .details { background: white; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e0e0e0; }
+          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="header">
+          <h1>🎬 Your AI Video is Ready!</h1>
+        </div>
+        <div class="content">
+          <p>Hi there,</p>
+          <p>Your AI-generated video has been created successfully! 🎉</p>
+          
+          <div class="details">
+            <p><strong>📝 Prompt:</strong> ${prompt}</p>
+            <p><strong>⏱️ Duration:</strong> ${duration || 5}s</p>
+            <p><strong>💰 Amount Paid:</strong> KES ${amount}</p>
+          </div>
+          
+          <div class="video-container">
+            <video controls>
+              <source src="${videoUrl}" type="video/mp4">
+              Your browser does not support the video tag.
+            </video>
+          </div>
+          
+          <p style="text-align: center;">
+            <a href="${videoUrl}" class="button" download>📥 Download Video</a>
+          </p>
+          
+          <p style="text-align: center; font-size: 14px; color: #666;">
+            Or copy this link to share: <br>
+            <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
+          </p>
+          
+          <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
+          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+        </div>
+        <div class="footer">
+          <p>This email was sent to ${email}. If you have any questions, reply to this email.</p>
+        </div>
+      </body>
+      </html>
+    `
+  };
+}
 
 // ============================================
 // FILE-BASED DATA STORE
@@ -143,7 +387,7 @@ function addRevenue(transactionId, email, amount, serviceType, paymentReference,
     serviceType,
     paymentReference,
     paymentMethod: paymentMethod || 'card',
-    duration: 5, // Will be updated when video is generated
+    duration: 5,
     createdAt: new Date().toISOString()
   };
   dataStore.revenue.push(entry);
@@ -316,7 +560,6 @@ app.post('/api/calculate-price', (req, res) => {
     const duration = options?.duration || 5;
     const photoCount = options?.photoCount || 0;
 
-    // Duration-based pricing multiplier
     const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
     let baseCost = 0;
     let breakdown = [];
@@ -341,7 +584,6 @@ app.post('/api/calculate-price', (req, res) => {
       ];
       serviceName = `Dreamina Seedance (Photos to Video, ${duration}s)`;
     } else {
-      // Text to video
       const baseFee = 20 * durationMultiplier;
       const perSecond = 2 * durationMultiplier;
       baseCost = baseFee + (duration * perSecond);
@@ -406,6 +648,14 @@ app.post('/api/verify-payment', async (req, res) => {
       addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
       addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
       
+      // Send payment receipt email
+      try {
+        const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
+        await sendEmail(email, receiptEmail.subject, receiptEmail.html);
+      } catch (emailErr) {
+        console.warn('⚠️ Could not send receipt email:', emailErr.message);
+      }
+      
       return res.json({ 
         success: true, 
         data: { reference, status: 'success' }, 
@@ -430,6 +680,15 @@ app.post('/api/verify-payment', async (req, res) => {
       addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
       addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
       addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
+
+      // Send payment receipt email
+      try {
+        const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
+        await sendEmail(email, receiptEmail.subject, receiptEmail.html);
+        console.log(`📧 Receipt email sent to ${email}`);
+      } catch (emailErr) {
+        console.warn('⚠️ Could not send receipt email:', emailErr.message);
+      }
 
       res.json({ 
         success: true, 
@@ -485,89 +744,81 @@ app.post('/api/webhook/paystack', (req, res) => {
 // SEND VIDEO EMAIL ENDPOINT
 // ============================================
 
-const transporter = nodemailer.createTransport({
-  host: process.env.EMAIL_HOST || 'smtp.gmail.com',
-  port: parseInt(process.env.EMAIL_PORT) || 587,
-  secure: process.env.EMAIL_SECURE === 'true',
-  auth: {
-    user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASSWORD
-  }
-});
-
-function generateVideoEmail(email, videoUrl, prompt, amount, duration) {
-  return {
-    from: process.env.EMAIL_FROM || `"VidAI Creator" <${process.env.EMAIL_USER}>`,
-    to: email,
-    subject: '🎬 Your AI Video is Ready!',
-    html: `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <style>
-          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
-          .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
-          .header h1 { color: white; margin: 0; font-size: 28px; }
-          .content { padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px; }
-          .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
-          .video-container video { width: 100%; max-height: 400px; }
-          .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
-          .details { background: white; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e0e0e0; }
-          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
-        </style>
-      </head>
-      <body>
-        <div class="header">
-          <h1>🎬 Your AI Video is Ready!</h1>
-        </div>
-        <div class="content">
-          <p>Hi there,</p>
-          <p>Your AI-generated video has been created successfully! 🎉</p>
-          
-          <div class="details">
-            <p><strong>📝 Prompt:</strong> ${prompt}</p>
-            <p><strong>⏱️ Duration:</strong> ${duration || 5}s</p>
-            <p><strong>💰 Amount Paid:</strong> KES ${amount}</p>
-          </div>
-          
-          <div class="video-container">
-            <video controls>
-              <source src="${videoUrl}" type="video/mp4">
-              Your browser does not support the video tag.
-            </video>
-          </div>
-          
-          <p style="text-align: center;">
-            <a href="${videoUrl}" class="button" download>📥 Download Video</a>
-          </p>
-          
-          <p style="text-align: center; font-size: 14px; color: #666;">
-            Or copy this link to share: <br>
-            <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
-          </p>
-          
-          <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
-          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
-        </div>
-        <div class="footer">
-          <p>This email was sent to ${email}. If you have any questions, reply to this email.</p>
-        </div>
-      </body>
-      </html>
-    `
-  };
-}
-
 app.post('/api/send-video-email', async (req, res) => {
   try {
     const { email, videoUrl, prompt, amount, duration } = req.body;
-    if (!email || !videoUrl) throw new Error('Email and video URL are required');
-    const mailOptions = generateVideoEmail(email, videoUrl, prompt, amount, duration || 5);
-    await transporter.sendMail(mailOptions);
-    res.json({ success: true, message: 'Video sent to your email' });
+    
+    if (!email || !videoUrl) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email and video URL are required' 
+      });
+    }
+
+    console.log(`📧 Sending video to ${email}`);
+    console.log(`📹 Video URL: ${videoUrl.substring(0, 100)}...`);
+
+    const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration || 5);
+    
+    const result = await sendEmail(email, videoEmail.subject, videoEmail.html);
+    
+    if (result.success) {
+      res.json({ 
+        success: true, 
+        message: 'Video sent to your email',
+        provider: result.provider
+      });
+    } else {
+      throw new Error('Failed to send email');
+    }
   } catch (error) {
     console.error('❌ Email error:', error.message);
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
+  }
+});
+
+// ============================================
+// TEST EMAIL ENDPOINT
+// ============================================
+
+app.post('/api/test-email', async (req, res) => {
+  try {
+    const { email } = req.body;
+    
+    if (!email) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email is required' 
+      });
+    }
+
+    console.log(`📧 Testing email to ${email}`);
+    
+    const result = await sendEmail(
+      email,
+      '✅ Test Email from VidAI Creator',
+      `
+        <h1>Test Email Successful!</h1>
+        <p>Your email configuration is working correctly.</p>
+        <p>Provider: ${emailProvider.toUpperCase()}</p>
+        <p>Time: ${new Date().toISOString()}</p>
+      `
+    );
+    
+    res.json({
+      success: result.success,
+      provider: result.provider,
+      message: result.success ? 'Test email sent successfully' : 'Failed to send test email'
+    });
+  } catch (error) {
+    console.error('❌ Test email error:', error.message);
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
+    });
   }
 });
 
@@ -597,6 +848,27 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 
 function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+}
+
+// Helper function to verify payment
+async function verifyPayment(reference) {
+  try {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey) {
+      console.log('⚠️ No secret key, accepting test payment');
+      return true;
+    }
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.status && data.data?.status === 'success';
+  } catch (error) {
+    console.error('❌ Payment verification error:', error.message);
+    return false;
+  }
 }
 
 app.post('/api/generate-video', async (req, res) => {
@@ -801,6 +1073,15 @@ app.post('/api/generate-video', async (req, res) => {
       delete failedGenerations[paymentReference];
     }
 
+    // Send video email
+    try {
+      const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, amount || 0, videoDuration);
+      await sendEmail(email, videoEmail.subject, videoEmail.html);
+      console.log(`📧 Video email sent to ${email}`);
+    } catch (emailErr) {
+      console.warn('⚠️ Could not send video email:', emailErr.message);
+    }
+
     res.json({
       success: true,
       videoUrl: videoUrl,
@@ -824,27 +1105,6 @@ app.post('/api/generate-video', async (req, res) => {
     });
   }
 });
-
-// Helper function to verify payment
-async function verifyPayment(reference) {
-  try {
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey) {
-      console.log('⚠️ No secret key, accepting test payment');
-      return true;
-    }
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
-    });
-    if (!response.ok) return false;
-    const data = await response.json();
-    return data.status && data.data?.status === 'success';
-  } catch (error) {
-    console.error('❌ Payment verification error:', error.message);
-    return false;
-  }
-}
 
 // ============================================
 // ADMIN DASHBOARD ENDPOINTS
@@ -1107,6 +1367,7 @@ app.get('/api/test', (req, res) => {
       '/api/calculate-price',
       '/api/verify-payment',
       '/api/send-video-email',
+      '/api/test-email',
       '/api/admin/dashboard',
       '/api/admin/add-credits',
       '/api/admin/balances',
@@ -1124,7 +1385,7 @@ app.get('/api/health', (req, res) => {
     uptime: process.uptime(),
     byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
     paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
-    email_configured: process.env.EMAIL_USER ? '✅ Yes' : '❌ No',
+    email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
     data_file_exists: fs.existsSync(DATA_FILE),
     replicate_balance: getApiBalance('replicate'),
     byteplus_balance: getApiBalance('byteplus'),
@@ -1146,6 +1407,7 @@ app.get('/', (req, res) => {
       { path: '/api/calculate-price', method: 'POST' },
       { path: '/api/verify-payment', method: 'POST' },
       { path: '/api/send-video-email', method: 'POST' },
+      { path: '/api/test-email', method: 'POST' },
       { path: '/api/admin/dashboard', method: 'GET' },
       { path: '/api/admin/add-credits', method: 'POST' },
       { path: '/api/admin/balances', method: 'GET' },
@@ -1186,7 +1448,7 @@ if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
-  console.log(`📧 Email: ${process.env.EMAIL_USER ? '✅ Configured' : '❌ Not configured'}`);
+  console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
   console.log(`📊 Data file: ${DATA_FILE}`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
   console.log(`💰 Replicate Balance: $${getApiBalance('replicate')}`);
