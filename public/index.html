@@ -28,8 +28,21 @@
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     
-    <!-- Paystack Script -->
-    <script src="https://js.paystack.co/v1/inline.js"></script>
+    <!-- Paystack Script - Load with async and proper error handling -->
+    <script src="https://js.paystack.co/v1/inline.js" async></script>
+    
+    <!-- Fallback script to check if Paystack loaded -->
+    <script>
+      window.addEventListener('load', function() {
+        if (typeof window.PaystackPop === 'undefined') {
+          console.warn('⚠️ Paystack script not loaded, loading from CDN...');
+          var script = document.createElement('script');
+          script.src = 'https://js.paystack.co/v1/inline.js';
+          script.async = true;
+          document.head.appendChild(script);
+        }
+      });
+    </script>
   </head>
   <body>
     <noscript>

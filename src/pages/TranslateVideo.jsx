@@ -2,14 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './TranslateVideo.css';
 
-// Point every API call at the backend explicitly. Using relative paths like
-// fetch('/api/...') sends the request to whatever origin serves this page
-// (katareel.com, a static frontend with no /api routes of its own) instead
-// of the actual backend — that's what was causing the 404s and empty
-// responses. If your translation backend lives on a different Render
-// service than the admin dashboard, change this URL to match.
-const API_URL = 'https://video-creator-api-kjzy.onrender.com';
-
 // Hardcoded languages as fallback
 const FALLBACK_LANGUAGES = {
   'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
@@ -48,7 +40,7 @@ function TranslateVideo() {
     const fetchLanguages = async () => {
       try {
         console.log('🌐 Fetching languages...');
-        const response = await fetch(`${API_URL}/api/free-languages`);
+        const response = await fetch('/api/free-languages');
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.languages) {
@@ -63,126 +55,132 @@ function TranslateVideo() {
     fetchLanguages();
   }, []);
 
+  // Load Paystack script on component mount
+  useEffect(() => {
+    const loadPaystack = () => {
+      if (typeof window.PaystackPop === 'undefined') {
+        console.log('⏳ Loading Paystack script...');
+        const script = document.createElement('script');
+        script.src = 'https://js.paystack.co/v1/inline.js';
+        script.async = true;
+        script.onload = () => {
+          console.log('✅ Paystack script loaded successfully');
+        };
+        script.onerror = () => {
+          console.error('❌ Failed to load Paystack script');
+        };
+        document.head.appendChild(script);
+      } else {
+        console.log('✅ Paystack already loaded');
+      }
+    };
+    loadPaystack();
+  }, []);
+
   // Handle file upload
- const handleFileUpload = async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
 
-  // Validate file size (max 100MB)
-  if (file.size > 100 * 1024 * 1024) {
-    setError('File size exceeds 100MB limit. Please compress your video.');
-    return;
-  }
+    if (file.size > 100 * 1024 * 1024) {
+      setError('File size exceeds 100MB limit. Please compress your video.');
+      return;
+    }
 
-  // Validate file type
-  const validTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
-  const fileType = file.type;
-  const fileExtension = file.name.split('.').pop().toLowerCase();
-  
-  if (!validTypes.includes(fileType) && !['mp4', 'avi', 'mov', 'webm'].includes(fileExtension)) {
-    setError('Please upload a valid video file (MP4, AVI, MOV, WEBM)');
-    return;
-  }
+    const validTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
+    const fileType = file.type;
+    const fileExtension = file.name.split('.').pop().toLowerCase();
+    
+    if (!validTypes.includes(fileType) && !['mp4', 'avi', 'mov', 'webm'].includes(fileExtension)) {
+      setError('Please upload a valid video file (MP4, AVI, MOV, WEBM)');
+      return;
+    }
 
-  setSelectedFile(file);
-  setError('');
-  setUploading(true);
-  setSuccess('');
-
-  try {
-    const formData = new FormData();
-    formData.append('video', file);
-
-    console.log('📤 Uploading video:', file.name, `(${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 60000); // 60 second timeout
+    setSelectedFile(file);
+    setError('');
+    setUploading(true);
+    setSuccess('');
 
     try {
-      const response = await fetch(`${API_URL}/api/upload-video`, {
-        method: 'POST',
-        body: formData,
-        signal: controller.signal
-      });
+      const formData = new FormData();
+      formData.append('video', file);
 
-      clearTimeout(timeoutId);
+      console.log('📤 Uploading video:', file.name, `(${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
-      console.log('📦 Upload response status:', response.status);
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 60000);
 
-      if (!response.ok) {
-        let errorMessage = `Upload failed (${response.status})`;
-        try {
-          const errorText = await response.text();
-          if (errorText) {
-            try {
-              const errorJson = JSON.parse(errorText);
-              if (errorJson.error) {
-                errorMessage = errorJson.error;
-              }
-            } catch (e) {
-              errorMessage = errorText;
-            }
-          }
-        } catch (e) {
-          // Ignore
-        }
-        throw new Error(errorMessage);
-      }
-
-      // Get response as text first
-      const responseText = await response.text();
-      console.log('📦 Raw upload response length:', responseText.length);
-      console.log('📦 Raw upload response:', responseText);
-
-      if (!responseText || responseText.trim() === '') {
-        throw new Error('Empty response from server. Please try again.');
-      }
-
-      let data;
       try {
-        data = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('❌ Failed to parse upload response:', parseError);
-        console.error('Response was:', responseText);
-        throw new Error('Invalid response from server. Please try again.');
-      }
+        const response = await fetch('/api/upload-video', {
+          method: 'POST',
+          body: formData,
+          signal: controller.signal
+        });
 
-      if (data.success) {
-        // data.videoUrl is a relative path like "/uploads/xyz.mp4" returned
-        // by the backend — it needs the backend's origin prefixed on it, or
-        // the browser will try to load it from katareel.com instead.
-        const fullVideoUrl = data.videoUrl.startsWith('http')
-          ? data.videoUrl
-          : `${API_URL}${data.videoUrl}`;
-        setVideoUrl(fullVideoUrl);
-        if (videoRef.current) {
-          videoRef.current.src = fullVideoUrl;
-          videoRef.current.load();
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          let errorMessage = `Upload failed (${response.status})`;
+          try {
+            const errorText = await response.text();
+            if (errorText) {
+              try {
+                const errorJson = JSON.parse(errorText);
+                if (errorJson.error) {
+                  errorMessage = errorJson.error;
+                }
+              } catch (e) {
+                errorMessage = errorText;
+              }
+            }
+          } catch (e) {
+            // Ignore
+          }
+          throw new Error(errorMessage);
         }
-        setSuccess(`✅ Video uploaded successfully! (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-        console.log('✅ Video uploaded:', fullVideoUrl);
-      } else {
-        throw new Error(data.error || 'Upload failed');
+
+        const responseText = await response.text();
+        if (!responseText || responseText.trim() === '') {
+          throw new Error('Empty response from server. Please try again.');
+        }
+
+        let data;
+        try {
+          data = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('❌ Failed to parse upload response:', parseError);
+          throw new Error('Invalid response from server. Please try again.');
+        }
+
+        if (data.success) {
+          setVideoUrl(data.videoUrl);
+          if (videoRef.current) {
+            videoRef.current.src = data.videoUrl;
+            videoRef.current.load();
+          }
+          setSuccess(`✅ Video uploaded successfully! (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+          console.log('✅ Video uploaded:', data.videoUrl);
+        } else {
+          throw new Error(data.error || 'Upload failed');
+        }
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Upload timed out. Please try again with a smaller file.');
+        }
+        throw fetchError;
       }
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      if (fetchError.name === 'AbortError') {
-        throw new Error('Upload timed out. Please try again with a smaller file.');
+    } catch (error) {
+      console.error('❌ Upload error:', error.message);
+      setError('Upload failed: ' + error.message);
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
       }
-      throw fetchError;
+    } finally {
+      setUploading(false);
     }
-  } catch (error) {
-    console.error('❌ Upload error:', error.message);
-    setError('Upload failed: ' + error.message);
-    // Reset file selection
-    setSelectedFile(null);
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
-    }
-  } finally {
-    setUploading(false);
-  }
-};
+  };
 
   const handleRemoveFile = () => {
     setSelectedFile(null);
@@ -204,7 +202,7 @@ function TranslateVideo() {
     try {
       setSuccess('🔄 Processing translation... This may take a few moments.');
 
-      const response = await fetch(`${API_URL}/api/translate-video`, {
+      const response = await fetch('/api/translate-video', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -220,16 +218,13 @@ function TranslateVideo() {
 
       const data = await response.json();
       if (data.success) {
-        const fullTranslatedUrl = data.videoUrl && !data.videoUrl.startsWith('http')
-          ? `${API_URL}${data.videoUrl}`
-          : data.videoUrl;
-        setTranslatedVideo(fullTranslatedUrl);
+        setTranslatedVideo(data.videoUrl);
         setTranslatedText(data.translatedText);
         setSuccess(`✅ Translation complete! Video sent to ${email}`);
         setLoading(false);
         
         if (videoRef.current) {
-          videoRef.current.src = fullTranslatedUrl;
+          videoRef.current.src = data.videoUrl;
           videoRef.current.load();
         }
       } else {
@@ -267,11 +262,26 @@ function TranslateVideo() {
       console.log('📧 Email:', email);
       console.log('💰 Amount:', TRANSLATION_PRICE);
       
+      // Check if Paystack is loaded
+      if (typeof window.PaystackPop === 'undefined') {
+        console.log('⏳ Paystack not loaded, attempting to load...');
+        await new Promise((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://js.paystack.co/v1/inline.js';
+          script.async = true;
+          script.onload = resolve;
+          script.onerror = reject;
+          document.head.appendChild(script);
+        });
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        console.log('✅ Paystack script loaded');
+      }
+      
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       try {
-        const paymentResponse = await fetch(`${API_URL}/api/initialize-payment`, {
+        const paymentResponse = await fetch('/api/initialize-payment', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -311,7 +321,6 @@ function TranslateVideo() {
         clearTimeout(timeoutId);
 
         console.log('📦 Response status:', paymentResponse.status);
-        console.log('📦 Response ok:', paymentResponse.ok);
 
         if (!paymentResponse.ok) {
           let errorMessage = `Server error: ${paymentResponse.status}`;
@@ -335,7 +344,6 @@ function TranslateVideo() {
 
         const responseText = await paymentResponse.text();
         console.log('📦 Raw response length:', responseText.length);
-        console.log('📦 Raw response:', responseText);
 
         if (!responseText || responseText.trim() === '') {
           throw new Error('Empty response from server. Please try again.');
@@ -361,36 +369,43 @@ function TranslateVideo() {
 
         console.log('✅ Payment initialized with reference:', paymentData.reference);
 
-        // Open Paystack popup (V1 InlineJS API — PaystackPop.setup() + handler.openIframe())
-        if (typeof window !== 'undefined' && window.PaystackPop) {
-          const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
-          
-          if (!publicKey || publicKey === 'pk_test_xxx' || publicKey === 'pk_live_xxx') {
-            throw new Error('Payment configuration error. Please contact support.');
-          }
-
-          const handler = window.PaystackPop.setup({
-            key: publicKey,
-            email: email,
-            amount: TRANSLATION_PRICE * 100,
-            ref: paymentData.reference,
-            metadata: paymentData.metadata,
-            currency: 'KES',
-            callback: function (response) {
-              console.log('✅ Payment successful:', response);
-              setSuccess('✅ Payment successful! Processing translation...');
-              processTranslation(response.reference);
-            },
-            onClose: function () {
-              console.log('❌ Payment popup closed');
-              setLoading(false);
-              setError('Payment was cancelled. Please try again.');
-            }
-          });
-          handler.openIframe();
-        } else {
-          throw new Error('Payment system not available. Please check your internet connection.');
+        // Check again if Paystack is available
+        if (typeof window.PaystackPop === 'undefined') {
+          console.error('❌ Paystack still not available after loading');
+          throw new Error('Payment system not available. Please refresh and try again.');
         }
+
+        const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
+        
+        if (!publicKey || publicKey === 'pk_test_xxx' || publicKey === 'pk_live_xxx') {
+          console.error('❌ Invalid Paystack public key:', publicKey);
+          throw new Error('Payment configuration error. Please contact support.');
+        }
+
+        console.log('🔑 Using Paystack public key:', publicKey.substring(0, 10) + '...');
+        
+        // Use PaystackPop with proper initialization
+        const PaystackPop = window.PaystackPop;
+        const popup = new PaystackPop();
+        
+        popup.open({
+          key: publicKey,
+          email: email,
+          amount: TRANSLATION_PRICE * 100,
+          ref: paymentData.reference,
+          metadata: paymentData.metadata,
+          currency: 'KES',
+          callback: async (response) => {
+            console.log('✅ Payment successful:', response);
+            setSuccess('✅ Payment successful! Processing translation...');
+            await processTranslation(response.reference);
+          },
+          onClose: () => {
+            console.log('❌ Payment popup closed');
+            setLoading(false);
+            setError('Payment was cancelled. Please try again.');
+          }
+        });
       } catch (fetchError) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
