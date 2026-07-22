@@ -22,6 +22,17 @@ console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set'
 console.log('🔑 Paystack Secret Key length:', process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.length : 0);
 console.log('🔑 Paystack Secret Key prefix:', process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.substring(0, 10) : 'none');
 
+// Global error handlers
+process.on('uncaughtException', (error) => {
+  console.error('❌ Uncaught Exception:', error);
+  console.error('Stack trace:', error.stack);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('❌ Unhandled Rejection at:', promise);
+  console.error('Reason:', reason);
+});
+
 // ============================================
 // MIDDLEWARE - UPDATED WITH HIGHER LIMITS
 // ============================================
@@ -787,12 +798,24 @@ app.get('/api/test-payment', (req, res) => {
   });
 });
 
+// Simple test endpoint to verify JSON response
+app.get('/api/test-json', (req, res) => {
+  console.log('✅ Test JSON endpoint called');
+  res.json({
+    success: true,
+    message: 'JSON response is working',
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.post('/api/initialize-payment', async (req, res) => {
+  const startTime = Date.now();
+  console.log('💰 Initializing payment...');
+  
   try {
     const { email, amount, serviceType, metadata } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
     
-    console.log('💰 Initializing payment...');
     console.log('📧 Email:', email);
     console.log('💰 Amount:', amount);
     console.log('🔑 Secret Key exists:', !!secretKey);
@@ -800,6 +823,7 @@ app.post('/api/initialize-payment', async (req, res) => {
     
     // Validate required fields
     if (!email) {
+      console.log('❌ Email is required');
       return res.status(400).json({
         success: false,
         error: 'Email is required'
@@ -807,6 +831,7 @@ app.post('/api/initialize-payment', async (req, res) => {
     }
     
     if (!amount || amount <= 0) {
+      console.log('❌ Valid amount is required');
       return res.status(400).json({
         success: false,
         error: 'Valid amount is required'
@@ -850,22 +875,47 @@ app.post('/api/initialize-payment', async (req, res) => {
 
     console.log('📤 Sending request to Paystack...');
 
-    // Make request to Paystack
-    const response = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
+    // Make request to Paystack with timeout
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 30000);
+
+    let response;
+    try {
+      response = await fetch('https://api.paystack.co/transaction/initialize', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${secretKey}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody),
+        signal: controller.signal
+      });
+      clearTimeout(timeoutId);
+    } catch (fetchError) {
+      clearTimeout(timeoutId);
+      console.error('❌ Network error calling Paystack:', fetchError.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Network error connecting to payment gateway. Please try again.'
+      });
+    }
 
     console.log('📦 Response status:', response.status);
 
     // Get response text
-    const responseText = await response.text();
+    let responseText;
+    try {
+      responseText = await response.text();
+    } catch (textError) {
+      console.error('❌ Error reading response:', textError.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Error reading payment gateway response. Please try again.'
+      });
+    }
+
     console.log('📦 Raw response length:', responseText.length);
-    console.log('📦 Raw response:', responseText.substring(0, 200) + '...');
+    console.log('📦 Raw response:', responseText ? responseText.substring(0, 200) + '...' : 'EMPTY');
 
     // If response is empty, return error
     if (!responseText || responseText.trim() === '') {
@@ -894,6 +944,7 @@ app.post('/api/initialize-payment', async (req, res) => {
     if (data.status) {
       console.log('✅ Payment initialized successfully!');
       console.log('📝 Reference:', data.data.reference);
+      console.log(`⏱️ Time: ${Date.now() - startTime}ms`);
       
       return res.status(200).json({
         success: true,
@@ -1886,6 +1937,7 @@ app.get('/api/test', (req, res) => {
       '/api/admin/payments',
       '/api/admin/add-missing-payment',
       '/api/test-payment',
+      '/api/test-json',
       '/api/debug-payment'
     ]
   });
@@ -1944,6 +1996,7 @@ app.get('/', (req, res) => {
       { path: '/api/admin/payments', method: 'GET' },
       { path: '/api/admin/add-missing-payment', method: 'POST' },
       { path: '/api/test-payment', method: 'GET' },
+      { path: '/api/test-json', method: 'GET' },
       { path: '/api/debug-payment', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'

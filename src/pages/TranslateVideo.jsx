@@ -225,116 +225,108 @@ function TranslateVideo() {
       console.log('📧 Email:', email);
       console.log('💰 Amount:', TRANSLATION_PRICE);
       
-      // Step 1: Initialize payment
-      console.log('📤 Calling /api/initialize-payment...');
-      
-      const paymentResponse = await fetch('/api/initialize-payment', {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          email: email,
-          amount: TRANSLATION_PRICE,
-          serviceType: 'translation',
-          metadata: {
-            videoUrl: videoUrl,
-            targetLanguage: targetLanguage,
-            sourceLanguage: sourceLanguage,
-            duration: 5,
-            custom_fields: [
-              {
-                display_name: "Video Type",
-                variable_name: "video_type",
-                value: "translation"
-              },
-              {
-                display_name: "Target Language",
-                variable_name: "target_language",
-                value: languages[targetLanguage] || targetLanguage
-              },
-              {
-                display_name: "Amount",
-                variable_name: "amount",
-                value: `${TRANSLATION_PRICE} KES`
-              }
-            ]
-          }
-        })
-      });
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-      console.log('📦 Response status:', paymentResponse.status);
-      console.log('📦 Response ok:', paymentResponse.ok);
-
-      // Check if response is ok
-      if (!paymentResponse.ok) {
-        let errorMessage = `Server error: ${paymentResponse.status}`;
-        try {
-          const errorData = await paymentResponse.json();
-          if (errorData.error) {
-            errorMessage = errorData.error;
-          }
-        } catch (e) {
-          try {
-            const text = await paymentResponse.text();
-            if (text) {
-              errorMessage = text;
+      try {
+        const paymentResponse = await fetch('/api/initialize-payment', {
+          method: 'POST',
+          headers: { 
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+          },
+          body: JSON.stringify({
+            email: email,
+            amount: TRANSLATION_PRICE,
+            serviceType: 'translation',
+            metadata: {
+              videoUrl: videoUrl,
+              targetLanguage: targetLanguage,
+              sourceLanguage: sourceLanguage,
+              duration: 5,
+              custom_fields: [
+                {
+                  display_name: "Video Type",
+                  variable_name: "video_type",
+                  value: "translation"
+                },
+                {
+                  display_name: "Target Language",
+                  variable_name: "target_language",
+                  value: languages[targetLanguage] || targetLanguage
+                },
+                {
+                  display_name: "Amount",
+                  variable_name: "amount",
+                  value: `${TRANSLATION_PRICE} KES`
+                }
+              ]
             }
-          } catch (textError) {
+          }),
+          signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        console.log('📦 Response status:', paymentResponse.status);
+        console.log('📦 Response ok:', paymentResponse.ok);
+
+        if (!paymentResponse.ok) {
+          let errorMessage = `Server error: ${paymentResponse.status}`;
+          try {
+            const errorText = await paymentResponse.text();
+            if (errorText) {
+              try {
+                const errorJson = JSON.parse(errorText);
+                if (errorJson.error) {
+                  errorMessage = errorJson.error;
+                }
+              } catch (e) {
+                errorMessage = errorText;
+              }
+            }
+          } catch (e) {
             // Ignore
           }
+          throw new Error(errorMessage);
         }
-        throw new Error(errorMessage);
-      }
 
-      // Get response as text first
-      const responseText = await paymentResponse.text();
-      console.log('📦 Raw response length:', responseText.length);
-      console.log('📦 Raw response:', responseText);
+        const responseText = await paymentResponse.text();
+        console.log('📦 Raw response length:', responseText.length);
+        console.log('📦 Raw response:', responseText);
 
-      // Check if response is empty
-      if (!responseText || responseText.trim() === '') {
-        throw new Error('Empty response from server. Please try again.');
-      }
+        if (!responseText || responseText.trim() === '') {
+          throw new Error('Empty response from server. Please try again.');
+        }
 
-      // Parse JSON
-      let paymentData;
-      try {
-        paymentData = JSON.parse(responseText);
-      } catch (parseError) {
-        console.error('❌ Failed to parse payment response:', parseError);
-        console.error('Response was:', responseText);
-        throw new Error('Invalid response from payment server. Please try again.');
-      }
-
-      console.log('📦 Payment response:', paymentData);
-
-      if (!paymentData.success) {
-        throw new Error(paymentData.error || 'Payment initialization failed');
-      }
-
-      // Check if we have a reference
-      if (!paymentData.reference) {
-        console.error('❌ No reference in response:', paymentData);
-        throw new Error('Payment reference missing. Please try again.');
-      }
-
-      console.log('✅ Payment initialized with reference:', paymentData.reference);
-
-      // Step 2: Open Paystack popup
-      if (typeof window !== 'undefined' && window.PaystackPop) {
+        let paymentData;
         try {
+          paymentData = JSON.parse(responseText);
+        } catch (parseError) {
+          console.error('❌ Failed to parse payment response:', parseError);
+          throw new Error('Invalid response from payment server. Please try again.');
+        }
+
+        console.log('📦 Payment response:', paymentData);
+
+        if (!paymentData.success) {
+          throw new Error(paymentData.error || 'Payment initialization failed');
+        }
+
+        if (!paymentData.reference) {
+          throw new Error('Payment reference missing. Please try again.');
+        }
+
+        console.log('✅ Payment initialized with reference:', paymentData.reference);
+
+        // Open Paystack popup
+        if (typeof window !== 'undefined' && window.PaystackPop) {
           const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
           
           if (!publicKey || publicKey === 'pk_test_xxx' || publicKey === 'pk_live_xxx') {
-            console.error('❌ Invalid Paystack public key:', publicKey);
             throw new Error('Payment configuration error. Please contact support.');
           }
 
-          console.log('🔑 Using Paystack public key:', publicKey.substring(0, 10) + '...');
-          console.log('📝 Opening Paystack popup with reference:', paymentData.reference);
-          
           const popup = new window.PaystackPop();
           popup.open({
             key: publicKey,
@@ -354,13 +346,15 @@ function TranslateVideo() {
               setError('Payment was cancelled. Please try again.');
             }
           });
-        } catch (popupError) {
-          console.error('❌ Paystack popup error:', popupError);
-          throw new Error('Failed to open payment window: ' + popupError.message);
+        } else {
+          throw new Error('Payment system not available. Please check your internet connection.');
         }
-      } else {
-        console.error('❌ PaystackPop not available');
-        throw new Error('Payment system not available. Please check your internet connection.');
+      } catch (fetchError) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Request timed out. Please try again.');
+        }
+        throw fetchError;
       }
     } catch (error) {
       console.error('❌ Payment error:', error);
