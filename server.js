@@ -606,14 +606,28 @@ function getUserPayments(limit = 20) {
 }
 
 // ============================================
-// FILE UPLOAD CONFIGURATION
+// FILE UPLOAD CONFIGURATION - COMPLETE FIX
 // ============================================
 
-// Ensure uploads directory exists
+// Ensure uploads directory exists with proper permissions
 const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-  console.log('📁 Uploads directory created:', uploadsDir);
+try {
+  if (!fs.existsSync(uploadsDir)) {
+    fs.mkdirSync(uploadsDir, { recursive: true });
+    console.log('📁 Uploads directory created:', uploadsDir);
+  }
+  // Test write permissions
+  fs.accessSync(uploadsDir, fs.constants.W_OK);
+  console.log('📁 Uploads directory is writable');
+} catch (error) {
+  console.error('❌ Uploads directory error:', error.message);
+  // Try to create with different permissions
+  try {
+    fs.mkdirSync(uploadsDir, { recursive: true, mode: 0o777 });
+    console.log('📁 Uploads directory created with 777 permissions');
+  } catch (err) {
+    console.error('❌ Failed to create uploads directory:', err.message);
+  }
 }
 
 // Configure storage
@@ -633,8 +647,9 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage: storage,
   limits: { 
-    fileSize: 100 * 1024 * 1024,
-    fieldSize: 100 * 1024 * 1024
+    fileSize: 100 * 1024 * 1024, // 100MB
+    fieldSize: 100 * 1024 * 1024,
+    files: 1
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
@@ -655,16 +670,24 @@ const upload = multer({
 // Upload video endpoint with comprehensive error handling
 app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
+  console.log('📤 Content-Type:', req.headers['content-type']);
+  console.log('📤 Content-Length:', req.headers['content-length']);
+  
+  // Set timeout for upload
+  req.setTimeout(120000); // 2 minutes
   
   upload.single('video')(req, res, function(err) {
+    // Handle multer errors
     if (err) {
       console.error('❌ Multer error:', err.message);
+      console.error('❌ Multer error stack:', err.stack);
       return res.status(400).json({
         success: false,
         error: err.message || 'File upload failed'
       });
     }
     
+    // Check if file was uploaded
     if (!req.file) {
       console.error('❌ No file in request');
       return res.status(400).json({
@@ -683,7 +706,7 @@ app.post('/api/upload-video', (req, res) => {
 
       const videoUrl = `/uploads/${req.file.filename}`;
       
-      res.json({
+      return res.status(200).json({
         success: true,
         videoPath: req.file.path,
         videoUrl: videoUrl,
@@ -695,7 +718,8 @@ app.post('/api/upload-video', (req, res) => {
       });
     } catch (error) {
       console.error('❌ Upload processing error:', error.message);
-      res.status(500).json({
+      console.error('❌ Upload processing stack:', error.stack);
+      return res.status(500).json({
         success: false,
         error: 'Server error processing upload: ' + error.message
       });
@@ -1913,6 +1937,16 @@ app.get('/api/debug-failed', (req, res) => {
 // TEST & HEALTH ENDPOINTS
 // ============================================
 
+// Simple health check
+app.get('/api/health-check', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    memory: process.memoryUsage()
+  });
+});
+
 app.get('/api/test', (req, res) => {
   res.json({
     status: 'Server is running!',
@@ -1938,7 +1972,8 @@ app.get('/api/test', (req, res) => {
       '/api/admin/add-missing-payment',
       '/api/test-payment',
       '/api/test-json',
-      '/api/debug-payment'
+      '/api/debug-payment',
+      '/api/health-check'
     ]
   });
 });
@@ -1997,7 +2032,8 @@ app.get('/', (req, res) => {
       { path: '/api/admin/add-missing-payment', method: 'POST' },
       { path: '/api/test-payment', method: 'GET' },
       { path: '/api/test-json', method: 'GET' },
-      { path: '/api/debug-payment', method: 'GET' }
+      { path: '/api/debug-payment', method: 'GET' },
+      { path: '/api/health-check', method: 'GET' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
