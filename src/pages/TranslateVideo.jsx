@@ -35,6 +35,7 @@ function TranslateVideo() {
 
   const TRANSLATION_PRICE = 300;
 
+  // Load available languages
   useEffect(() => {
     const fetchLanguages = async () => {
       try {
@@ -54,17 +55,23 @@ function TranslateVideo() {
     fetchLanguages();
   }, []);
 
+  // Handle file upload
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
+    // Validate file size (max 100MB)
     if (file.size > 100 * 1024 * 1024) {
-      setError('File size exceeds 100MB limit');
+      setError('File size exceeds 100MB limit. Please compress your video.');
       return;
     }
 
+    // Validate file type
     const validTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
-    if (!validTypes.includes(file.type)) {
+    const fileType = file.type;
+    const fileExtension = file.name.split('.').pop().toLowerCase();
+    
+    if (!validTypes.includes(fileType) && !['mp4', 'avi', 'mov', 'webm'].includes(fileExtension)) {
       setError('Please upload a valid video file (MP4, AVI, MOV, WEBM)');
       return;
     }
@@ -72,29 +79,67 @@ function TranslateVideo() {
     setSelectedFile(file);
     setError('');
     setUploading(true);
-
-    const formData = new FormData();
-    formData.append('video', file);
+    setSuccess('');
 
     try {
+      const formData = new FormData();
+      formData.append('video', file);
+
+      console.log('📤 Uploading video:', file.name, `(${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+
       const response = await fetch('/api/upload-video', {
         method: 'POST',
         body: formData,
       });
 
-      const data = await response.json();
+      // Check if response is ok
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Upload error:', response.status, errorText);
+        
+        let errorMessage = `Upload failed (${response.status})`;
+        try {
+          const errorJson = JSON.parse(errorText);
+          if (errorJson.error) {
+            errorMessage = errorJson.error;
+          }
+        } catch (e) {
+          if (errorText) {
+            errorMessage = errorText;
+          }
+        }
+        
+        throw new Error(errorMessage);
+      }
+
+      // Parse response
+      let data;
+      try {
+        data = await response.json();
+      } catch (parseError) {
+        console.error('❌ Failed to parse upload response:', parseError);
+        throw new Error('Invalid response from server. Please try again.');
+      }
+
       if (data.success) {
         setVideoUrl(data.videoUrl);
         if (videoRef.current) {
           videoRef.current.src = data.videoUrl;
           videoRef.current.load();
         }
-        setSuccess('✅ Video uploaded successfully!');
+        setSuccess(`✅ Video uploaded successfully! (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+        console.log('✅ Video uploaded:', data.videoUrl);
       } else {
-        setError('Failed to upload video: ' + data.error);
+        throw new Error(data.error || 'Upload failed');
       }
     } catch (error) {
-      setError('Error uploading video: ' + error.message);
+      console.error('❌ Upload error:', error.message);
+      setError('Upload failed: ' + error.message);
+      // Reset file selection
+      setSelectedFile(null);
+      if (fileInputRef.current) {
+        fileInputRef.current.value = '';
+      }
     } finally {
       setUploading(false);
     }

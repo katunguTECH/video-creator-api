@@ -21,6 +21,32 @@ console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
 
 // ============================================
+// MIDDLEWARE - UPDATED WITH HIGHER LIMITS
+// ============================================
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+}));
+app.options('*', cors());
+
+// Increase payload limits for video uploads
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+// Serve uploaded files
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
+app.use((req, res, next) => {
+  console.log(`${req.method} ${req.url}`);
+  if (!req.path.startsWith('/api')) {
+    const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress;
+    recordSiteVisit(req.path, ip, req.headers['user-agent']);
+  }
+  next();
+});
+
+// ============================================
 // EMAIL CONFIGURATION - Mailgun with katareel.com
 // ============================================
 
@@ -567,49 +593,103 @@ function getUserPayments(limit = 20) {
 }
 
 // ============================================
-// MIDDLEWARE
+// FILE UPLOAD CONFIGURATION - COMPLETE FIX
 // ============================================
-app.use(cors({
-  origin: '*',
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-}));
-app.options('*', cors());
-app.use(express.json({ limit: '50mb' }));
-app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.use((req, res, next) => {
-  console.log(`${req.method} ${req.url}`);
-  if (!req.path.startsWith('/api')) {
-    const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress;
-    recordSiteVisit(req.path, ip, req.headers['user-agent']);
-  }
-  next();
-});
+// Ensure uploads directory exists
+const uploadsDir = path.join(__dirname, 'uploads');
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+  console.log('📁 Uploads directory created:', uploadsDir);
+}
 
-// ============================================
-// FILE UPLOAD CONFIGURATION
-// ============================================
+// Configure storage
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
-    const uploadDir = path.join(__dirname, 'uploads');
-    if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-    cb(null, uploadDir);
+    cb(null, uploadsDir);
   },
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-    cb(null, uniqueSuffix + '-' + file.originalname);
+    const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const finalFilename = uniqueSuffix + '-' + sanitizedFilename;
+    cb(null, finalFilename);
   }
 });
 
+// Configure multer with error handling
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 100 * 1024 * 1024 },
+  limits: { 
+    fileSize: 100 * 1024 * 1024, // 100MB
+    fieldSize: 100 * 1024 * 1024
+  },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
-    allowedTypes.includes(file.mimetype) ? cb(null, true) : cb(new Error('Invalid file type.'), false);
+    const allowedExtensions = ['.mp4', '.avi', '.mov', '.webm'];
+    
+    const fileExt = path.extname(file.originalname).toLowerCase();
+    const isValidType = allowedTypes.includes(file.mimetype);
+    const isValidExt = allowedExtensions.includes(fileExt);
+    
+    if (isValidType || isValidExt) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid file type. Allowed: MP4, AVI, MOV, WEBM. Got: ${file.mimetype || fileExt}`), false);
+    }
   }
+});
+
+// Upload video endpoint with comprehensive error handling
+app.post('/api/upload-video', (req, res) => {
+  console.log('📤 Upload request received');
+  
+  upload.single('video')(req, res, function(err) {
+    // Handle multer errors
+    if (err) {
+      console.error('❌ Multer error:', err.message);
+      return res.status(400).json({
+        success: false,
+        error: err.message || 'File upload failed'
+      });
+    }
+    
+    // Check if file was uploaded
+    if (!req.file) {
+      console.error('❌ No file in request');
+      return res.status(400).json({
+        success: false,
+        error: 'No video file uploaded. Please select a video file.'
+      });
+    }
+
+    try {
+      const fileSizeMB = (req.file.size / 1024 / 1024).toFixed(2);
+      console.log('✅ Video uploaded successfully:');
+      console.log(`   Filename: ${req.file.filename}`);
+      console.log(`   Original: ${req.file.originalname}`);
+      console.log(`   Size: ${fileSizeMB} MB`);
+      console.log(`   Type: ${req.file.mimetype}`);
+
+      const videoUrl = `/uploads/${req.file.filename}`;
+      
+      res.json({
+        success: true,
+        videoPath: req.file.path,
+        videoUrl: videoUrl,
+        filename: req.file.filename,
+        originalName: req.file.originalname,
+        size: req.file.size,
+        sizeMB: parseFloat(fileSizeMB),
+        mimetype: req.file.mimetype
+      });
+    } catch (error) {
+      console.error('❌ Upload processing error:', error.message);
+      res.status(500).json({
+        success: false,
+        error: 'Server error processing upload: ' + error.message
+      });
+    }
+  });
 });
 
 // ============================================
@@ -1520,23 +1600,6 @@ app.get('/api/translations', async (req, res) => {
   }
 });
 
-// Upload video for translation
-app.post('/api/upload-video', upload.single('video'), (req, res) => {
-  try {
-    if (!req.file) throw new Error('No video file uploaded');
-    const videoUrl = `/uploads/${req.file.filename}`;
-    res.json({ 
-      success: true, 
-      videoPath: req.file.path, 
-      videoUrl, 
-      filename: req.file.filename, 
-      size: req.file.size 
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 // Translate text only (without video)
 app.post('/api/translate-text', async (req, res) => {
   try {
@@ -1854,14 +1917,17 @@ app.use((err, req, res, next) => {
 // ============================================
 // START SERVER
 // ============================================
-const uploadsDir = path.join(__dirname, 'uploads');
-if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+// Ensure uploads directory exists
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true });
+}
 
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
   console.log(`📊 Data file: ${DATA_FILE}`);
+  console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
   console.log(`💰 Replicate Balance: $${getApiBalance('replicate')}`);
   console.log(`💰 BytePlus Balance: $${getApiBalance('byteplus')}`);
