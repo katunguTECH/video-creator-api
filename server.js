@@ -620,9 +620,22 @@ function getUserPayments(limit = 20) {
   }));
 }
 
-// ============================================
+// // ============================================
 // FILE UPLOAD CONFIGURATION - CLOUDINARY STORAGE
 // ============================================
+
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
+
+// Configure Cloudinary with your credentials
+cloudinary.config({
+  cloud_name: 'y7d1nk2i',
+  api_key: '289646568483629',
+  api_secret: 'XmlwCnuLWkO-xe3BQw-lpl-ELU0'
+});
+
+console.log('☁️ Cloudinary configured successfully!');
+console.log(`   Cloud Name: y7d1nk2i`);
 
 // Configure Cloudinary storage for multer
 const cloudinaryStorage = new CloudinaryStorage({
@@ -721,7 +734,6 @@ app.post('/api/upload-video', (req, res) => {
     }
   });
 });
-
 // ============================================
 // PRICE CALCULATION ENDPOINT
 // ============================================
