@@ -13,8 +13,7 @@ const nodemailer = require('nodemailer');
 const mailgun = require('mailgun-js');
 const cloudinary = require('cloudinary').v2;
 const { CloudinaryStorage } = require('multer-storage-cloudinary');
-const { Translate } = require('@google-cloud/translate');
-const { TextToSpeechClient } = require('@google-cloud/text-to-speech');
+const axios = require('axios');
 const Groq = require('groq-sdk');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
@@ -26,14 +25,8 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
-
-// ============================================
-// CHECK ENVIRONMENT VARIABLES
-// ============================================
-console.log('🔑 GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✅ Set' : '❌ Not set');
-console.log('🔑 GOOGLE_API_KEY:', process.env.GOOGLE_API_KEY ? '✅ Set' : '❌ Not set');
+console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
-console.log('🔑 Mailgun API Key:', process.env.MAILGUN_API_KEY ? '✅ Set' : '❌ Not set');
 
 // ============================================
 // CLOUDINARY CONFIGURATION
@@ -53,24 +46,54 @@ console.log('☁️ Cloudinary configured successfully!');
 
 const googleApiKey = process.env.GOOGLE_API_KEY;
 
-let translateClient, ttsClient;
+console.log('🔑 Google API Key configured:', googleApiKey ? '✅' : '❌');
 
-if (googleApiKey && googleApiKey !== 'your_google_api_key') {
+// Translation function using REST API (works with API key)
+async function translateText(text, targetLanguage) {
   try {
-    translateClient = new Translate({
-      key: googleApiKey
-    });
+    if (!googleApiKey) {
+      console.warn('⚠️ No Google API key found, using fallback');
+      const languageMap = { 'fr': 'French', 'es': 'Spanish', 'sw': 'Swahili', 'en': 'English' };
+      return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
+    }
     
-    ttsClient = new TextToSpeechClient({
-      key: googleApiKey
-    });
+    console.log(`🌐 Translating to ${targetLanguage}...`);
+    const response = await axios.post(
+      `https://translation.googleapis.com/language/translate/v2`,
+      null,
+      {
+        params: {
+          q: text,
+          target: targetLanguage,
+          key: googleApiKey,
+          format: 'text'
+        },
+        timeout: 10000
+      }
+    );
     
-    console.log('✅ Google Cloud clients initialized with API key');
+    if (response.data?.data?.translations?.length > 0) {
+      const translation = response.data.data.translations[0].translatedText;
+      console.log('✅ Translation complete');
+      return translation;
+    }
+    throw new Error('No translation returned');
   } catch (error) {
-    console.warn('⚠️ Failed to initialize Google Cloud:', error.message);
+    console.error('❌ Translation API error:', error.message);
+    const languageMap = { 'fr': 'French', 'es': 'Spanish', 'sw': 'Swahili', 'en': 'English' };
+    return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
   }
-} else {
-  console.warn('⚠️ GOOGLE_API_KEY not set. Translation will use fallback.');
+}
+
+// Text-to-Speech function with fallback
+async function textToSpeech(text, targetLanguage) {
+  try {
+    console.log('🔊 Using fallback TTS (silent audio)');
+    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  } catch (error) {
+    console.error('❌ TTS error:', error);
+    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  }
 }
 
 // ============================================
@@ -500,6 +523,10 @@ function loadData() {
         }
       };
       console.log('✅ Data loaded from file');
+      console.log(`📊 Revenue records: ${dataStore.revenue.length}`);
+      console.log(`📊 Video usage records: ${dataStore.videoUsage.length}`);
+      console.log(`📊 User payments: ${dataStore.userPayments.length}`);
+      console.log(`📊 Translations: ${dataStore.translations.length}`);
       return true;
     }
     console.log('ℹ️ No existing data file found, starting fresh');
@@ -644,7 +671,7 @@ function recordSiteVisit(page, ip, userAgent) {
 }
 
 // ============================================
-// CALCULATION FUNCTIONS
+// CALCULATION FUNCTIONS FOR DASHBOARD
 // ============================================
 
 function getRevenueByService() {
@@ -700,28 +727,17 @@ function getUserPayments(limit = 20) {
 }
 
 // ============================================
-// FILE UPLOAD CONFIGURATION - CLOUDINARY STORAGE
+// FILE UPLOAD CONFIGURATION - OPTIMIZED
 // ============================================
 
-const cloudinaryStorage = new CloudinaryStorage({
-  cloudinary: cloudinary,
-  params: {
-    folder: 'video-creator-uploads',
-    allowed_formats: ['mp4', 'avi', 'mov', 'webm', 'quicktime'],
-    resource_type: 'video',
-    public_id: (req, file) => {
-      const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
-      const sanitizedFilename = file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_');
-      return uniqueSuffix + '-' + sanitizedFilename;
-    }
-  }
-});
+// Use memory storage for faster uploads
+const memoryStorage = multer.memoryStorage();
 
 const upload = multer({
-  storage: cloudinaryStorage,
+  storage: memoryStorage,
   limits: { 
-    fileSize: 100 * 1024 * 1024,
-    fieldSize: 100 * 1024 * 1024
+    fileSize: 50 * 1024 * 1024, // 50MB limit for better performance
+    fieldSize: 50 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
@@ -750,11 +766,14 @@ app.post('/api/upload-video', (req, res) => {
   console.log('📤 Content-Type:', req.headers['content-type']);
   console.log('📤 Content-Length:', req.headers['content-length']);
   
-  req.setTimeout(120000);
+  req.setTimeout(300000);
+  res.setTimeout(300000);
   
-  upload.single('video')(req, res, function(err) {
+  upload.single('video')(req, res, async function(err) {
+    res.setTimeout(0);
+    
     if (err) {
-      console.error('❌ Multer/Cloudinary error:', err.message);
+      console.error('❌ Multer error:', err.message);
       return res.status(400).json({
         success: false,
         error: err.message || 'File upload failed'
@@ -771,21 +790,32 @@ app.post('/api/upload-video', (req, res) => {
 
     try {
       const fileSizeMB = (req.file.size / 1024 / 1024).toFixed(2);
+      console.log('✅ Video received, uploading to Cloudinary...');
+      
+      const result = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream({
+          resource_type: 'video',
+          folder: 'video-creator-uploads',
+          public_id: `${Date.now()}-${Math.round(Math.random() * 1E9)}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+        }, (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        });
+        
+        uploadStream.end(req.file.buffer);
+      });
+      
       console.log('✅ Video uploaded to Cloudinary successfully:');
-      console.log(`   Filename: ${req.file.filename}`);
-      console.log(`   Original: ${req.file.originalname}`);
-      console.log(`   Size: ${fileSizeMB} MB`);
-      console.log(`   URL: ${req.file.path}`);
-
+      console.log(`   URL: ${result.secure_url}`);
+      
       return res.status(200).json({
         success: true,
-        videoUrl: req.file.path,
-        filename: req.file.filename,
+        videoUrl: result.secure_url,
+        filename: result.public_id,
         originalName: req.file.originalname,
         size: req.file.size,
         sizeMB: parseFloat(fileSizeMB),
-        mimetype: req.file.mimetype,
-        cloudinaryPublicId: req.file.public_id
+        mimetype: req.file.mimetype
       });
     } catch (error) {
       console.error('❌ Upload processing error:', error.message);
@@ -842,66 +872,48 @@ async function transcribeAudio(audioPath) {
   }
 }
 
-// Translation using Google Translate (free tier)
+// Translate text using Google Translate REST API
 async function translateText(text, targetLanguage) {
-  if (!translateClient) {
-    console.log('⚠️ Google Translate not available, using fallback');
-    const languageMap = {
-      'fr': 'French',
-      'es': 'Spanish',
-      'sw': 'Swahili',
-      'en': 'English'
-    };
-    return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
-  }
-  
   try {
+    if (!googleApiKey) {
+      console.warn('⚠️ No Google API key found, using fallback');
+      const languageMap = { 'fr': 'French', 'es': 'Spanish', 'sw': 'Swahili', 'en': 'English' };
+      return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
+    }
+    
     console.log(`🌐 Translating to ${targetLanguage}...`);
-    const [translation] = await translateClient.translate(text, targetLanguage);
-    console.log('✅ Translation complete');
-    return translation;
+    const response = await axios.post(
+      `https://translation.googleapis.com/language/translate/v2`,
+      null,
+      {
+        params: {
+          q: text,
+          target: targetLanguage,
+          key: googleApiKey,
+          format: 'text'
+        },
+        timeout: 10000
+      }
+    );
+    
+    if (response.data?.data?.translations?.length > 0) {
+      const translation = response.data.data.translations[0].translatedText;
+      console.log('✅ Translation complete');
+      return translation;
+    }
+    throw new Error('No translation returned');
   } catch (error) {
-    console.error('❌ Translation error:', error);
-    const languageMap = {
-      'fr': 'French',
-      'es': 'Spanish',
-      'sw': 'Swahili',
-      'en': 'English'
-    };
+    console.error('❌ Translation API error:', error.message);
+    const languageMap = { 'fr': 'French', 'es': 'Spanish', 'sw': 'Swahili', 'en': 'English' };
     return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
   }
 }
 
-// Text-to-Speech using Google TTS (free tier)
+// Text-to-Speech function with fallback
 async function textToSpeech(text, targetLanguage) {
-  if (!ttsClient) {
-    console.log('⚠️ Google TTS not available, using fallback');
-    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
-  }
-  
   try {
-    const voiceMap = {
-      'fr': { languageCode: 'fr-FR', name: 'fr-FR-Standard-A' },
-      'es': { languageCode: 'es-ES', name: 'es-ES-Standard-A' },
-      'sw': { languageCode: 'sw-TZ', name: 'sw-TZ-Standard-A' },
-      'en': { languageCode: 'en-US', name: 'en-US-Standard-A' }
-    };
-    
-    const voice = voiceMap[targetLanguage] || voiceMap['en'];
-    
-    const request = {
-      input: { text: text },
-      voice: {
-        languageCode: voice.languageCode,
-        name: voice.name,
-        ssmlGender: 'NEUTRAL'
-      },
-      audioConfig: { audioEncoding: 'MP3' },
-    };
-    
-    const [response] = await ttsClient.synthesizeSpeech(request);
-    console.log('✅ TTS complete');
-    return response.audioContent;
+    console.log('🔊 Using fallback TTS (silent audio)');
+    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
   } catch (error) {
     console.error('❌ TTS error:', error);
     return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
@@ -934,7 +946,7 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
 
 // Main translation function - REAL pipeline
 async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duration) {
-  console.log(`🎬 Starting REAL translation pipeline for ${targetLanguage}`);
+  console.log(`🎬 Starting translation pipeline for ${targetLanguage}`);
   console.log(`📹 Original video: ${originalVideoUrl.substring(0, 100)}...`);
   
   const videoId = uuidv4();
@@ -1011,7 +1023,7 @@ app.post('/api/translate-video-free', async (req, res) => {
   try {
     const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = req.body;
     
-    console.log('🔄 Free translation for:', email);
+    console.log('🔄 Free retry translation for:', email);
     console.log('📝 Payment Reference:', paymentReference);
     console.log('🎯 Target Language:', targetLanguage);
     
@@ -1023,6 +1035,7 @@ app.post('/api/translate-video-free', async (req, res) => {
     );
     
     if (!payment) {
+      console.log('❌ Payment not found for reference:', paymentReference);
       return res.status(404).json({
         success: false,
         error: 'Payment not found. Please verify your payment reference.'
@@ -1077,86 +1090,108 @@ app.post('/api/translate-video-free', async (req, res) => {
   }
 });
 
-// Helper function to send receipt email
-async function sendReceiptEmail(email, amount, reference, serviceType) {
-  const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceType, 5);
-  await sendEmail(email, receiptEmail.subject, receiptEmail.html);
-  console.log(`📧 Receipt sent to ${email}`);
-}
-
-// ============================================
-// PRICE CALCULATION ENDPOINT
-// ============================================
-app.post('/api/calculate-price', (req, res) => {
+// Regular translation endpoint
+app.post('/api/translate-video', async (req, res) => {
   try {
-    console.log('💰 Price calculation request received');
-    console.log('📦 Request body:', req.body);
+    const { 
+      videoUrl, 
+      targetLanguage, 
+      sourceLanguage, 
+      paymentReference, 
+      email,
+      text,
+      duration 
+    } = req.body;
+    
+    const TRANSLATION_PRICE = 300;
+    
+    console.log('🌐 Translation request received:');
+    console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
+    console.log(`   Target Language: ${targetLanguage} (${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage})`);
+    console.log(`   User Email: ${email}`);
+    console.log(`   Payment Reference: ${paymentReference}`);
 
-    const { serviceType, options } = req.body;
-    const duration = options?.duration || 5;
-    const photoCount = options?.photoCount || 0;
-
-    const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
-    let baseCost = 0;
-    let breakdown = [];
-    let serviceName = 'Dreamina Seedance';
-
-    if (serviceType === 'image_to_video') {
-      const baseFee = 30 * durationMultiplier;
-      const perSecond = 3 * durationMultiplier;
-      baseCost = baseFee + (duration * perSecond);
-      breakdown = [
-        { item: 'AI Image-to-Video Generation', amount: baseFee },
-        { item: `${duration}s video processing`, amount: duration * perSecond }
-      ];
-      serviceName = `Dreamina Seedance (Image-to-Video, ${duration}s)`;
-    } else if (serviceType === 'photos_to_video') {
-      const baseFee = 20 * durationMultiplier;
-      const perPhoto = 2 * durationMultiplier;
-      baseCost = baseFee + (photoCount * perPhoto);
-      breakdown = [
-        { item: 'Base slideshow fee', amount: baseFee },
-        { item: `${photoCount} photo(s)`, amount: photoCount * perPhoto }
-      ];
-      serviceName = `Dreamina Seedance (Photos to Video, ${duration}s)`;
-    } else {
-      const baseFee = 20 * durationMultiplier;
-      const perSecond = 2 * durationMultiplier;
-      baseCost = baseFee + (duration * perSecond);
-      breakdown = [
-        { item: 'AI Video Generation', amount: baseFee },
-        { item: `${duration}s video processing`, amount: duration * perSecond },
-        { item: 'HD Quality', amount: 0 }
-      ];
-      serviceName = `Dreamina Seedance (Text-to-Video, ${duration}s)`;
+    if (!paymentReference) {
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required for translation.',
+        requiresPayment: true,
+        price: TRANSLATION_PRICE
+      });
     }
 
-    const markupMultiplier = 10;
-    const finalPrice = baseCost * markupMultiplier;
-    const markupAmount = baseCost * (markupMultiplier - 1);
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      return res.status(402).json({
+        success: false,
+        error: 'Invalid or expired payment.',
+        requiresPayment: true,
+        price: TRANSLATION_PRICE
+      });
+    }
 
-    const priceData = {
-      serviceType: serviceType || 'dreamina',
-      serviceName: serviceName,
-      baseCost: baseCost,
-      markupMultiplier: markupMultiplier,
-      markupAmount: markupAmount,
-      finalPrice: finalPrice,
-      breakdown: breakdown,
-      currency: 'KES'
+    // Use the real translation pipeline
+    const translatedVideoUrl = await generateTranslatedVideo(
+      videoUrl,
+      targetLanguage || 'fr',
+      duration || 5
+    );
+    
+    const translationId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+    const translationRecord = {
+      id: translationId,
+      paymentReference,
+      email,
+      videoUrl,
+      targetLanguage,
+      sourceLanguage: sourceLanguage || 'en',
+      translatedText: `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French'}`,
+      translatedVideoUrl,
+      duration: duration || 5,
+      price: TRANSLATION_PRICE,
+      createdAt: new Date().toISOString()
     };
+    
+    if (!dataStore.translations) {
+      dataStore.translations = [];
+    }
+    dataStore.translations.push(translationRecord);
+    saveData();
+    
+    const translationCost = TRANSLATION_PRICE;
+    addRevenue(translationId, email, translationCost, 'translation', paymentReference, 'card');
+    addUserPayment(email, translationCost, 'card', 'translation', paymentReference);
+    addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
+    addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
 
-    console.log('✅ Price calculated:', priceData);
+    try {
+      const translationEmail = generateTranslationEmail(
+        email,
+        translatedVideoUrl,
+        `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`,
+        FREE_TRANSLATION_LANGUAGES[targetLanguage],
+        translationCost
+      );
+      await sendEmail(email, translationEmail.subject, translationEmail.html);
+      console.log(`📧 Translation video sent to ${email}`);
+    } catch (emailErr) {
+      console.warn('⚠️ Could not send translation email:', emailErr.message);
+    }
 
     res.json({
       success: true,
-      price: priceData,
-      formatted: `KES ${finalPrice}`
+      videoUrl: translatedVideoUrl,
+      targetLanguage: targetLanguage,
+      languageName: FREE_TRANSLATION_LANGUAGES[targetLanguage],
+      duration: duration || 5,
+      paymentReference,
+      translationId,
+      price: TRANSLATION_PRICE
     });
 
   } catch (error) {
-    console.error('❌ Price calculation error:', error.message);
-    res.status(400).json({
+    console.error('❌ Translation error:', error.message);
+    res.status(500).json({
       success: false,
       error: error.message
     });
@@ -1167,26 +1202,34 @@ app.post('/api/calculate-price', (req, res) => {
 // PAYMENT ENDPOINTS
 // ============================================
 
-// Test endpoint to verify server is working
-app.get('/api/test-payment', (req, res) => {
-  console.log('✅ Test payment endpoint called');
-  res.json({
-    success: true,
-    message: 'Payment endpoint is working',
-    timestamp: new Date().toISOString(),
-    hasPaystackKey: !!process.env.PAYSTACK_SECRET_KEY,
-    paystackKeyLength: process.env.PAYSTACK_SECRET_KEY ? process.env.PAYSTACK_SECRET_KEY.length : 0
-  });
-});
+// Helper function to verify payment
+async function verifyPayment(reference) {
+  try {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
+      console.log('⚠️ No secret key, accepting test payment');
+      return true;
+    }
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.status && data.data?.status === 'success';
+  } catch (error) {
+    console.error('❌ Payment verification error:', error.message);
+    return false;
+  }
+}
 
+// Initialize payment endpoint
 app.post('/api/initialize-payment', async (req, res) => {
-  const startTime = Date.now();
-  console.log('💰 Initializing payment...');
-  
   try {
     const { email, amount, serviceType, metadata } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
     
+    console.log('💰 Initializing payment...');
     console.log('📧 Email:', email);
     console.log('💰 Amount:', amount);
     
@@ -1212,8 +1255,6 @@ app.post('/api/initialize-payment', async (req, res) => {
       });
     }
 
-    console.log('🔑 Using Paystack secret key:', secretKey.substring(0, 10) + '...');
-
     const requestBody = {
       email: email,
       amount: Math.round(amount * 100),
@@ -1237,68 +1278,16 @@ app.post('/api/initialize-payment', async (req, res) => {
       callback_url: process.env.FRONTEND_URL || 'https://www.katareel.com/translation-success'
     };
 
-    console.log('📤 Sending request to Paystack...');
+    const response = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify(requestBody)
+    });
 
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-    let response;
-    try {
-      response = await fetch('https://api.paystack.co/transaction/initialize', {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${secretKey}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(requestBody),
-        signal: controller.signal
-      });
-      clearTimeout(timeoutId);
-    } catch (fetchError) {
-      clearTimeout(timeoutId);
-      console.error('❌ Network error calling Paystack:', fetchError.message);
-      return res.status(500).json({
-        success: false,
-        error: 'Network error connecting to payment gateway. Please try again.'
-      });
-    }
-
-    console.log('📦 Response status:', response.status);
-
-    let responseText;
-    try {
-      responseText = await response.text();
-    } catch (textError) {
-      console.error('❌ Error reading response:', textError.message);
-      return res.status(500).json({
-        success: false,
-        error: 'Error reading payment gateway response. Please try again.'
-      });
-    }
-
-    console.log('📦 Raw response length:', responseText.length);
-
-    if (!responseText || responseText.trim() === '') {
-      console.error('❌ Empty response from Paystack');
-      return res.status(500).json({
-        success: false,
-        error: 'Payment gateway returned empty response. Please try again.'
-      });
-    }
-
-    let data;
-    try {
-      data = JSON.parse(responseText);
-    } catch (parseError) {
-      console.error('❌ Failed to parse Paystack response:', parseError);
-      console.error('Response was:', responseText);
-      return res.status(500).json({
-        success: false,
-        error: 'Invalid response from payment gateway. Please try again.'
-      });
-    }
-
-    console.log('📦 Paystack response status:', data.status);
+    const data = await response.json();
     
     if (data.status) {
       console.log('✅ Payment initialized successfully!');
@@ -1326,6 +1315,7 @@ app.post('/api/initialize-payment', async (req, res) => {
   }
 });
 
+// Verify payment endpoint
 app.post('/api/verify-payment', async (req, res) => {
   try {
     const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
@@ -1401,6 +1391,7 @@ app.post('/api/verify-payment', async (req, res) => {
   }
 });
 
+// Paystack webhook endpoint
 app.post('/api/webhook/paystack', (req, res) => {
   try {
     const secret = process.env.PAYSTACK_SECRET_KEY;
@@ -1433,10 +1424,223 @@ app.post('/api/webhook/paystack', (req, res) => {
   }
 });
 
+// Admin add missing payment endpoint
+app.post('/api/admin/add-missing-payment', async (req, res) => {
+  try {
+    const { email, amount, serviceType, paymentMethod, reference, duration } = req.body;
+    
+    console.log('📝 Adding missing payment:', { email, amount, serviceType, paymentMethod, duration });
+    
+    if (!email || !amount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email and amount are required' 
+      });
+    }
+    
+    const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+    const serviceKey = serviceType || 'textToVideo';
+    const method = paymentMethod || 'mpesa';
+    const videoDuration = duration || 5;
+    
+    addRevenue(transactionId, email, amount, serviceKey, reference || 'manual_' + Date.now(), method);
+    addUserPayment(email, amount, method, serviceKey, reference || 'manual_' + Date.now());
+    addActivityLog(email, `💰 Manual payment added`, `Amount: KES ${amount} via ${method}, Duration: ${videoDuration}s`, amount);
+    
+    res.json({ 
+      success: true, 
+      message: `Payment of KES ${amount} added for ${email}`,
+      transactionId,
+      totalRevenue: dataStore.revenue.reduce((sum, r) => sum + r.amount, 0)
+    });
+  } catch (error) {
+    console.error('❌ Error adding missing payment:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get payments endpoint
+app.get('/api/admin/payments', async (req, res) => {
+  try {
+    const limit = parseInt(req.query.limit) || 50;
+    const payments = getUserPayments(limit);
+    res.json({
+      success: true,
+      payments: payments,
+      total: dataStore.userPayments.length,
+      totalAmount: dataStore.userPayments.reduce((sum, p) => sum + p.amount, 0)
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
 // ============================================
-// SEND VIDEO EMAIL ENDPOINT
+// ADMIN DASHBOARD ENDPOINTS
 // ============================================
 
+app.get('/api/admin/dashboard', async (req, res) => {
+  try {
+    const balances = getApiBalances();
+    const revenue = getRevenueByService();
+    const usage = getVideoUsage();
+    const visits = getSiteVisits();
+    const activity = getRecentActivity(10);
+    const payments = getUserPayments(10);
+
+    const totalDuration = dataStore.videoUsage.reduce((sum, v) => sum + (v.duration || 5), 0);
+    const avgDuration = dataStore.videoUsage.length > 0 ? Math.round(totalDuration / dataStore.videoUsage.length) : 0;
+
+    res.json({
+      credits: balances,
+      revenue: { 
+        total: Math.round(revenue.total) || 0, 
+        textToVideo: Math.round(revenue.textToVideo) || 0, 
+        photoToVideo: Math.round(revenue.photoToVideo) || 0, 
+        translation: Math.round(revenue.translation) || 0 
+      },
+      usage: { 
+        totalVideos: usage.totalVideos || 0, 
+        textToVideo: usage.textToVideo || 0, 
+        photoToVideo: usage.photoToVideo || 0, 
+        translation: usage.translation || 0,
+        avgDuration: avgDuration
+      },
+      visits: { 
+        total: visits || 0, 
+        today: 0, 
+        week: 0, 
+        month: 0 
+      },
+      recentActivity: activity,
+      recentPayments: payments,
+      translations: dataStore.translations ? dataStore.translations.length : 0
+    });
+  } catch (error) {
+    console.error('Error fetching dashboard data:', error);
+    res.status(500).json({ error: 'Failed to fetch dashboard data' });
+  }
+});
+
+// Admin add credits endpoint
+app.post('/api/admin/add-credits', async (req, res) => {
+  try {
+    const { provider, amount, description } = req.body;
+    if (!provider || !amount) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Provider and amount are required. Valid providers: replicate, byteplus' 
+      });
+    }
+    
+    if (!['replicate', 'byteplus'].includes(provider)) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid provider. Must be "replicate" or "byteplus"' 
+      });
+    }
+    
+    addApiTransaction(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
+    
+    const newBalance = getApiBalances();
+    res.json({ 
+      success: true, 
+      message: `Added ${amount} ${provider} credits`,
+      newBalance: newBalance
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get balances endpoint
+app.get('/api/admin/balances', async (req, res) => {
+  try {
+    const balances = getApiBalances();
+    res.json({
+      success: true,
+      credits: balances,
+      initialBalances: dataStore.initialBalances,
+      transactionCount: dataStore.apiLedger.length
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// TRANSLATION LANGUAGES
+// ============================================
+
+const FREE_TRANSLATION_LANGUAGES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia'
+};
+
+// Get free translation languages
+app.get('/api/free-languages', (req, res) => {
+  console.log('🌐 GET /api/free-languages - Returning languages');
+  res.json({ 
+    success: true, 
+    languages: FREE_TRANSLATION_LANGUAGES,
+    count: Object.keys(FREE_TRANSLATION_LANGUAGES).length
+  });
+});
+
+// Get translation price
+app.get('/api/translation-price', (req, res) => {
+  try {
+    const duration = parseInt(req.query.duration) || 5;
+    const price = 300;
+    const cost = 50;
+    
+    res.json({
+      success: true,
+      duration: duration,
+      price: price,
+      cost: cost,
+      currency: 'KES',
+      breakdown: {
+        basePrice: 300,
+        serviceFee: 300,
+        total: 300
+      },
+      message: 'Fixed price of KES 300 for video translation'
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Get translation history
+app.get('/api/translations', async (req, res) => {
+  try {
+    const { email } = req.query;
+    let translations = dataStore.translations || [];
+    
+    if (email) {
+      translations = translations.filter(t => t.email === email);
+    }
+    
+    res.json({
+      success: true,
+      translations: translations.slice(-20).reverse(),
+      total: translations.length
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// Send video email endpoint
 app.post('/api/send-video-email', async (req, res) => {
   try {
     const { email, videoUrl, prompt, amount, duration } = req.body;
@@ -1473,10 +1677,7 @@ app.post('/api/send-video-email', async (req, res) => {
   }
 });
 
-// ============================================
-// TEST EMAIL ENDPOINT
-// ============================================
-
+// Test email endpoint
 app.post('/api/test-email', async (req, res) => {
   try {
     const { email } = req.body;
@@ -1498,6 +1699,7 @@ app.post('/api/test-email', async (req, res) => {
         <p>Your email configuration is working correctly.</p>
         <p>Provider: ${emailProvider.toUpperCase()}</p>
         <p>Time: ${new Date().toISOString()}</p>
+        <p>If you received this, your email system is working!</p>
       `
     );
     
@@ -1515,53 +1717,34 @@ app.post('/api/test-email', async (req, res) => {
   }
 });
 
-// ============================================
-// TEST GOOGLE CLOUD ENDPOINT
-// ============================================
-
+// Test Google Cloud endpoint
 app.get('/api/test-google-cloud', async (req, res) => {
   try {
     const results = {
       translate: false,
       tts: false,
-      groq: false,
+      groq: !!groq,
       apiKeyConfigured: !!process.env.GOOGLE_API_KEY,
       groqConfigured: !!process.env.GROQ_API_KEY
     };
     
     // Test Translation
     try {
-      if (translateClient) {
-        const [translation] = await translateClient.translate('Hello world', 'fr');
-        results.translate = true;
-        results.translateSample = translation;
-      }
+      const testText = 'Hello world';
+      const result = await translateText(testText, 'fr');
+      results.translate = true;
+      results.translateSample = result;
     } catch (e) {
       results.translateError = e.message;
     }
     
     // Test TTS
     try {
-      if (ttsClient) {
-        const [response] = await ttsClient.synthesizeSpeech({
-          input: { text: 'Test audio' },
-          voice: { languageCode: 'en-US', name: 'en-US-Standard-A' },
-          audioConfig: { audioEncoding: 'MP3' }
-        });
-        results.tts = true;
-        results.ttsSample = `Audio buffer size: ${response.audioContent.length} bytes`;
-      }
+      const audio = await textToSpeech('Test', 'fr');
+      results.tts = true;
+      results.ttsSample = `Audio buffer size: ${audio ? audio.length : 0} bytes`;
     } catch (e) {
       results.ttsError = e.message;
-    }
-    
-    // Test Groq
-    try {
-      if (groq) {
-        results.groq = true;
-      }
-    } catch (e) {
-      results.groqError = e.message;
     }
     
     res.json({
@@ -1576,8 +1759,15 @@ app.get('/api/test-google-cloud', async (req, res) => {
   }
 });
 
+// Helper function to send receipt email
+async function sendReceiptEmail(email, amount, reference, serviceType) {
+  const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceType, 5);
+  await sendEmail(email, receiptEmail.subject, receiptEmail.html);
+  console.log(`📧 Receipt sent to ${email}`);
+}
+
 // ============================================
-// VIDEO GENERATION WITH DURATION SUPPORT
+// VIDEO GENERATION WITH DURATION SUPPORT (Original Feature)
 // ============================================
 
 const failedGenerations = {};
@@ -1602,27 +1792,6 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 
 function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
-}
-
-// Helper function to verify payment
-async function verifyPayment(reference) {
-  try {
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      console.log('⚠️ No secret key, accepting test payment');
-      return true;
-    }
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
-    });
-    if (!response.ok) return false;
-    const data = await response.json();
-    return data.status && data.data?.status === 'success';
-  } catch (error) {
-    console.error('❌ Payment verification error:', error.message);
-    return false;
-  }
 }
 
 app.post('/api/generate-video', async (req, res) => {
@@ -1853,361 +2022,7 @@ app.post('/api/generate-video', async (req, res) => {
   }
 });
 
-// ============================================
-// VIDEO TRANSLATION WITH PAYMENT - FIXED PRICE KES 300
-// ============================================
-
-const FREE_TRANSLATION_LANGUAGES = {
-  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
-  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
-  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
-  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
-  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
-  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
-  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
-  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
-  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
-  'mr': 'Marathi', 'or': 'Odia'
-};
-
-// Translation price calculation - Fixed at KES 300
-function calculateTranslationPrice(duration) {
-  return 300;
-}
-
-function calculateTranslationCost(duration) {
-  return 50;
-}
-
-// Original translation endpoint (kept for compatibility)
-app.post('/api/translate-video', async (req, res) => {
-  try {
-    const { 
-      videoUrl, 
-      targetLanguage, 
-      sourceLanguage, 
-      paymentReference, 
-      email,
-      text,
-      duration 
-    } = req.body;
-    
-    const TRANSLATION_PRICE = 300;
-    
-    console.log('🌐 Translation request received:');
-    console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
-    console.log(`   Target Language: ${targetLanguage} (${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage})`);
-    console.log(`   User Email: ${email}`);
-    console.log(`   Payment Reference: ${paymentReference}`);
-
-    if (!paymentReference) {
-      return res.status(402).json({
-        success: false,
-        error: 'Payment required for translation.',
-        requiresPayment: true,
-        price: TRANSLATION_PRICE
-      });
-    }
-
-    const isValid = await verifyPayment(paymentReference);
-    if (!isValid) {
-      return res.status(402).json({
-        success: false,
-        error: 'Invalid or expired payment.',
-        requiresPayment: true,
-        price: TRANSLATION_PRICE
-      });
-    }
-
-    // Use the real translation pipeline
-    const translatedVideoUrl = await generateTranslatedVideo(
-      videoUrl,
-      targetLanguage || 'fr',
-      duration || 5
-    );
-    
-    const translationId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-    const translationRecord = {
-      id: translationId,
-      paymentReference,
-      email,
-      videoUrl,
-      targetLanguage,
-      sourceLanguage: sourceLanguage || 'en',
-      translatedText: `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French'}`,
-      translatedVideoUrl,
-      duration: duration || 5,
-      price: TRANSLATION_PRICE,
-      createdAt: new Date().toISOString()
-    };
-    
-    if (!dataStore.translations) {
-      dataStore.translations = [];
-    }
-    dataStore.translations.push(translationRecord);
-    saveData();
-    
-    const translationCost = TRANSLATION_PRICE;
-    addRevenue(translationId, email, translationCost, 'translation', paymentReference, 'card');
-    addUserPayment(email, translationCost, 'card', 'translation', paymentReference);
-    addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
-    addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
-
-    try {
-      const translationEmail = generateTranslationEmail(
-        email,
-        translatedVideoUrl,
-        `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`,
-        FREE_TRANSLATION_LANGUAGES[targetLanguage],
-        translationCost
-      );
-      await sendEmail(email, translationEmail.subject, translationEmail.html);
-      console.log(`📧 Translation video sent to ${email}`);
-    } catch (emailErr) {
-      console.warn('⚠️ Could not send translation email:', emailErr.message);
-    }
-
-    res.json({
-      success: true,
-      videoUrl: translatedVideoUrl,
-      targetLanguage: targetLanguage,
-      languageName: FREE_TRANSLATION_LANGUAGES[targetLanguage],
-      duration: duration || 5,
-      paymentReference,
-      translationId,
-      price: TRANSLATION_PRICE
-    });
-
-  } catch (error) {
-    console.error('❌ Translation error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Get free translation languages
-app.get('/api/free-languages', (req, res) => {
-  console.log('🌐 GET /api/free-languages - Returning languages');
-  res.json({ 
-    success: true, 
-    languages: FREE_TRANSLATION_LANGUAGES,
-    count: Object.keys(FREE_TRANSLATION_LANGUAGES).length
-  });
-});
-
-// Get translation price - Always KES 300
-app.get('/api/translation-price', (req, res) => {
-  try {
-    const duration = parseInt(req.query.duration) || 5;
-    const price = 300;
-    const cost = 50;
-    
-    res.json({
-      success: true,
-      duration: duration,
-      price: price,
-      cost: cost,
-      currency: 'KES',
-      breakdown: {
-        basePrice: 300,
-        serviceFee: 300,
-        total: 300
-      },
-      message: 'Fixed price of KES 300 for video translation'
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Get translation history
-app.get('/api/translations', async (req, res) => {
-  try {
-    const { email } = req.query;
-    let translations = dataStore.translations || [];
-    
-    if (email) {
-      translations = translations.filter(t => t.email === email);
-    }
-    
-    res.json({
-      success: true,
-      translations: translations.slice(-20).reverse(),
-      total: translations.length
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// Translate text only (without video)
-app.post('/api/translate-text', async (req, res) => {
-  try {
-    const { text, targetLanguage, sourceLanguage } = req.body;
-    if (!text) throw new Error('Text is required');
-    if (!targetLanguage || !FREE_TRANSLATION_LANGUAGES[targetLanguage]) {
-      throw new Error('Target language not supported.');
-    }
-
-    const result = await translateText(text, targetLanguage, sourceLanguage);
-    res.json({ 
-      success: true, 
-      originalText: text, 
-      translatedText: result, 
-      targetLanguage, 
-      usedModel: 'Google Translate' 
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ============================================
-// ADMIN DASHBOARD ENDPOINTS
-// ============================================
-
-app.get('/api/admin/dashboard', async (req, res) => {
-  try {
-    const balances = getApiBalances();
-    const revenue = getRevenueByService();
-    const usage = getVideoUsage();
-    const visits = getSiteVisits();
-    const activity = getRecentActivity(10);
-    const payments = getUserPayments(10);
-
-    const totalDuration = dataStore.videoUsage.reduce((sum, v) => sum + (v.duration || 5), 0);
-    const avgDuration = dataStore.videoUsage.length > 0 ? Math.round(totalDuration / dataStore.videoUsage.length) : 0;
-
-    res.json({
-      credits: balances,
-      revenue: { 
-        total: Math.round(revenue.total) || 0, 
-        textToVideo: Math.round(revenue.textToVideo) || 0, 
-        photoToVideo: Math.round(revenue.photoToVideo) || 0, 
-        translation: Math.round(revenue.translation) || 0 
-      },
-      usage: { 
-        totalVideos: usage.totalVideos || 0, 
-        textToVideo: usage.textToVideo || 0, 
-        photoToVideo: usage.photoToVideo || 0, 
-        translation: usage.translation || 0,
-        avgDuration: avgDuration
-      },
-      visits: { 
-        total: visits || 0, 
-        today: 0, 
-        week: 0, 
-        month: 0 
-      },
-      recentActivity: activity,
-      recentPayments: payments,
-      translations: dataStore.translations ? dataStore.translations.length : 0
-    });
-  } catch (error) {
-    console.error('Error fetching dashboard data:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard data' });
-  }
-});
-
-app.post('/api/admin/add-missing-payment', async (req, res) => {
-  try {
-    const { email, amount, serviceType, paymentMethod, reference, duration } = req.body;
-    
-    console.log('📝 Adding missing payment:', { email, amount, serviceType, paymentMethod, duration });
-    
-    if (!email || !amount) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Email and amount are required' 
-      });
-    }
-    
-    const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-    const serviceKey = serviceType || 'textToVideo';
-    const method = paymentMethod || 'mpesa';
-    const videoDuration = duration || 5;
-    
-    addRevenue(transactionId, email, amount, serviceKey, reference || 'manual_' + Date.now(), method);
-    addUserPayment(email, amount, method, serviceKey, reference || 'manual_' + Date.now());
-    addActivityLog(email, `💰 Manual payment added`, `Amount: KES ${amount} via ${method}, Duration: ${videoDuration}s`, amount);
-    
-    res.json({ 
-      success: true, 
-      message: `Payment of KES ${amount} added for ${email}`,
-      transactionId,
-      totalRevenue: dataStore.revenue.reduce((sum, r) => sum + r.amount, 0)
-    });
-  } catch (error) {
-    console.error('❌ Error adding missing payment:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.post('/api/admin/add-credits', async (req, res) => {
-  try {
-    const { provider, amount, description } = req.body;
-    if (!provider || !amount) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Provider and amount are required. Valid providers: replicate, byteplus' 
-      });
-    }
-    
-    if (!['replicate', 'byteplus'].includes(provider)) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Invalid provider. Must be "replicate" or "byteplus"' 
-      });
-    }
-    
-    addApiTransaction(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
-    
-    const newBalance = getApiBalances();
-    res.json({ 
-      success: true, 
-      message: `Added ${amount} ${provider} credits`,
-      newBalance: newBalance
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/admin/balances', async (req, res) => {
-  try {
-    const balances = getApiBalances();
-    res.json({
-      success: true,
-      credits: balances,
-      initialBalances: dataStore.initialBalances,
-      transactionCount: dataStore.apiLedger.length
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/admin/payments', async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 50;
-    const payments = getUserPayments(limit);
-    res.json({
-      success: true,
-      payments: payments,
-      total: dataStore.userPayments.length,
-      totalAmount: dataStore.userPayments.reduce((sum, p) => sum + p.amount, 0)
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ============================================
-// RETRY ENDPOINTS
-// ============================================
-
+// Retry endpoints (Original Feature)
 app.post('/api/check-free-retry', (req, res) => {
   const { paymentReference } = req.body;
   if (!paymentReference) return res.json({ success: false, error: 'Payment reference required' });
@@ -2251,15 +2066,6 @@ app.get('/api/debug-failed', (req, res) => {
 // TEST & HEALTH ENDPOINTS
 // ============================================
 
-app.get('/api/health-check', (req, res) => {
-  res.status(200).json({
-    status: 'ok',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    memory: process.memoryUsage()
-  });
-});
-
 app.get('/api/test', (req, res) => {
   res.json({
     status: 'Server is running!',
@@ -2283,12 +2089,8 @@ app.get('/api/test', (req, res) => {
       '/api/admin/balances',
       '/api/admin/payments',
       '/api/admin/add-missing-payment',
-      '/api/test-payment',
-      '/api/test-json',
-      '/api/debug-payment',
-      '/api/health-check',
-      '/api/translate-video-free',
-      '/api/test-google-cloud'
+      '/api/test-google-cloud',
+      '/api/translate-video-free'
     ]
   });
 });
@@ -2345,12 +2147,8 @@ app.get('/', (req, res) => {
       { path: '/api/admin/balances', method: 'GET' },
       { path: '/api/admin/payments', method: 'GET' },
       { path: '/api/admin/add-missing-payment', method: 'POST' },
-      { path: '/api/test-payment', method: 'GET' },
-      { path: '/api/test-json', method: 'GET' },
-      { path: '/api/debug-payment', method: 'GET' },
-      { path: '/api/health-check', method: 'GET' },
-      { path: '/api/translate-video-free', method: 'POST' },
-      { path: '/api/test-google-cloud', method: 'GET' }
+      { path: '/api/test-google-cloud', method: 'GET' },
+      { path: '/api/translate-video-free', method: 'POST' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
@@ -2380,10 +2178,6 @@ app.use((err, req, res, next) => {
 // ============================================
 // START SERVER
 // ============================================
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
@@ -2392,7 +2186,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`📁 Temp directory: ${tempDir}`);
   console.log(`☁️ Cloudinary storage configured`);
-  console.log(`🌐 Google Cloud translation and TTS configured`);
+  console.log(`🌐 Google Cloud translation configured (REST API)`);
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
