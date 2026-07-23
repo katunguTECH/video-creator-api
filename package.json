@@ -32,6 +32,21 @@
     "recharts": "^3.10.0",
     "uuid": "^9.0.1"
   },
+  "devDependencies": {
+    "@testing-library/react": "^16.3.2"
+  },
+  "browserslist": {
+    "production": [
+      ">0.2%",
+      "not dead",
+      "not op_mini all"
+    ],
+    "development": [
+      "last 1 chrome version",
+      "last 1 firefox version",
+      "last 1 safari version"
+    ]
+  },
   "engines": {
     "node": ">=16.0.0"
   },
@@ -39,19 +54,10 @@
     "type": "git",
     "url": "git+https://github.com/katunguTECH/video-creator-api.git"
   },
-  "keywords": [
-    "video",
-    "ai",
-    "translation",
-    "generation"
-  ],
+  "keywords": ["video", "ai", "translation", "generation"],
   "author": "",
   "license": "ISC",
   "bugs": {
     "url": "https://github.com/katunguTECH/video-creator-api/issues"
-  },
-  "homepage": "https://github.com/katunguTECH/video-creator-api#readme",
-  "devDependencies": {
-    "@testing-library/react": "^16.3.2"
   }
 }
