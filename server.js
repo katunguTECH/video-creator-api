@@ -1002,10 +1002,21 @@ async function textToSpeech(text, targetLanguage) {
   }
 }
 
-// Combine audio with video using ffmpeg
+// Combine audio with video using ffmpeg - with validation
 async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
+  // Validate audio buffer
+  if (!audioBuffer || audioBuffer.length < 100) {
+    throw new Error(`Invalid audio buffer: ${audioBuffer ? audioBuffer.length : 'null'} bytes`);
+  }
+  
+  console.log(`🔊 Audio buffer size: ${audioBuffer.length} bytes`);
+  
   const tempAudioPath = path.join(tempDir, `${uuidv4()}.mp3`);
   fs.writeFileSync(tempAudioPath, audioBuffer);
+  
+  // Verify the file was written correctly
+  const stats = fs.statSync(tempAudioPath);
+  console.log(`📁 Audio file size: ${stats.size} bytes`);
   
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
@@ -1275,6 +1286,40 @@ app.post('/api/translate-video-free', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Translation failed. Please try again.'
+    });
+  }
+});
+
+// ============================================
+// DIRECT TTS TEST ENDPOINT
+// ============================================
+
+app.post('/api/test-tts', async (req, res) => {
+  try {
+    const { text, targetLanguage } = req.body;
+    
+    if (!text) {
+      return res.status(400).json({ error: 'Text is required' });
+    }
+    
+    console.log(`🔊 Testing TTS with text: "${text.substring(0, 50)}..."`);
+    console.log(`📝 Target language: ${targetLanguage || 'fr'}`);
+    
+    const audioBuffer = await textToSpeech(text, targetLanguage || 'fr');
+    
+    res.json({
+      success: true,
+      audioLength: audioBuffer.length,
+      audioBase64: audioBuffer.toString('base64').substring(0, 100) + '...',
+      textLength: text.length,
+      targetLanguage: targetLanguage || 'fr'
+    });
+  } catch (error) {
+    console.error('❌ TTS test error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
     });
   }
 });
@@ -2170,7 +2215,8 @@ app.get('/api/test', (req, res) => {
       '/api/admin/payments',
       '/api/admin/add-missing-payment',
       '/api/test-google-cloud',
-      '/api/translate-video-free'
+      '/api/translate-video-free',
+      '/api/test-tts'
     ]
   });
 });
@@ -2228,7 +2274,8 @@ app.get('/', (req, res) => {
       { path: '/api/admin/payments', method: 'GET' },
       { path: '/api/admin/add-missing-payment', method: 'POST' },
       { path: '/api/test-google-cloud', method: 'GET' },
-      { path: '/api/translate-video-free', method: 'POST' }
+      { path: '/api/translate-video-free', method: 'POST' },
+      { path: '/api/test-tts', method: 'POST' }
     ],
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
