@@ -85,37 +85,36 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// Text-to-Speech using REST API directly
+// Text-to-Speech using REST API directly - FIXED
 async function textToSpeech(text, targetLanguage) {
   try {
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
-      console.warn('⚠️ No Google API key found, using fallback');
-      return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+      throw new Error('No Google API key found');
     }
     
     const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
     
+    // Simplified voice mapping - just language code, let Google pick default voice
     const voiceMap = {
-      'fr': { languageCode: 'fr-FR', name: 'fr-FR-Standard-A' },
-      'es': { languageCode: 'es-ES', name: 'es-ES-Standard-A' },
-      'sw': { languageCode: 'sw-TZ', name: 'sw-TZ-Standard-A' },
-      'en': { languageCode: 'en-US', name: 'en-US-Standard-A' }
+      'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
+      'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
+      'zh': 'cmn-CN', 'ar': 'ar-XA', 'hi': 'hi-IN', 'sw': 'sw-KE',
+      'en': 'en-US'
     };
-    
-    const voice = voiceMap[targetLanguage] || voiceMap['en'];
-    
+    const languageCode = voiceMap[targetLanguage] || 'en-US';
+
     const requestBody = {
       input: { text: text },
-      voice: {
-        languageCode: voice.languageCode,
-        name: voice.name,
-        ssmlGender: 'NEUTRAL'
+      voice: { 
+        languageCode: languageCode, 
+        ssmlGender: 'NEUTRAL' 
       },
       audioConfig: { audioEncoding: 'MP3' }
     };
     
-    console.log(`🔊 Calling TTS API for language: ${targetLanguage}`);
+    console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode})`);
+    console.log(`📝 Text length: ${text.length} characters`);
     
     const response = await axios.post(url, requestBody, {
       headers: { 'Content-Type': 'application/json' },
@@ -123,7 +122,7 @@ async function textToSpeech(text, targetLanguage) {
     });
     
     if (response.data && response.data.audioContent) {
-      console.log('✅ TTS API call successful');
+      console.log(`✅ TTS API call successful (${response.data.audioContent.length} bytes)`);
       return Buffer.from(response.data.audioContent, 'base64');
     }
     throw new Error('No audio content returned');
@@ -133,8 +132,8 @@ async function textToSpeech(text, targetLanguage) {
       console.error('Status:', error.response.status);
       console.error('Data:', JSON.stringify(error.response.data, null, 2));
     }
-    // Return silent audio as fallback
-    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    // THROW the error instead of returning fake audio
+    throw new Error(`TTS failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
 
@@ -951,37 +950,36 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// Text-to-Speech using REST API directly
+// Text-to-Speech using REST API directly - FIXED
 async function textToSpeech(text, targetLanguage) {
   try {
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
-      console.warn('⚠️ No Google API key found, using fallback');
-      return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+      throw new Error('No Google API key found');
     }
     
     const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
     
+    // Simplified voice mapping - just language code, let Google pick default voice
     const voiceMap = {
-      'fr': { languageCode: 'fr-FR', name: 'fr-FR-Standard-A' },
-      'es': { languageCode: 'es-ES', name: 'es-ES-Standard-A' },
-      'sw': { languageCode: 'sw-TZ', name: 'sw-TZ-Standard-A' },
-      'en': { languageCode: 'en-US', name: 'en-US-Standard-A' }
+      'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
+      'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
+      'zh': 'cmn-CN', 'ar': 'ar-XA', 'hi': 'hi-IN', 'sw': 'sw-KE',
+      'en': 'en-US'
     };
-    
-    const voice = voiceMap[targetLanguage] || voiceMap['en'];
-    
+    const languageCode = voiceMap[targetLanguage] || 'en-US';
+
     const requestBody = {
       input: { text: text },
-      voice: {
-        languageCode: voice.languageCode,
-        name: voice.name,
-        ssmlGender: 'NEUTRAL'
+      voice: { 
+        languageCode: languageCode, 
+        ssmlGender: 'NEUTRAL' 
       },
       audioConfig: { audioEncoding: 'MP3' }
     };
     
-    console.log(`🔊 Calling TTS API for language: ${targetLanguage}`);
+    console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode})`);
+    console.log(`📝 Text length: ${text.length} characters`);
     
     const response = await axios.post(url, requestBody, {
       headers: { 'Content-Type': 'application/json' },
@@ -989,7 +987,7 @@ async function textToSpeech(text, targetLanguage) {
     });
     
     if (response.data && response.data.audioContent) {
-      console.log('✅ TTS API call successful');
+      console.log(`✅ TTS API call successful (${response.data.audioContent.length} bytes)`);
       return Buffer.from(response.data.audioContent, 'base64');
     }
     throw new Error('No audio content returned');
@@ -999,7 +997,8 @@ async function textToSpeech(text, targetLanguage) {
       console.error('Status:', error.response.status);
       console.error('Data:', JSON.stringify(error.response.data, null, 2));
     }
-    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    // THROW the error instead of returning fake audio
+    throw new Error(`TTS failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
 
