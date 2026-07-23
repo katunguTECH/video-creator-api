@@ -18,6 +18,7 @@ const Groq = require('groq-sdk');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const { v4: uuidv4 } = require('uuid');
+const { GoogleAuth } = require('google-auth-library');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -41,17 +42,16 @@ cloudinary.config({
 console.log('☁️ Cloudinary configured successfully!');
 
 // ============================================
-// GOOGLE CLOUD CONFIGURATION - REST API APPROACH
+// GOOGLE CLOUD CONFIGURATION - WORKLOAD IDENTITY FEDERATION
 // ============================================
 
-const googleApiKey = process.env.GOOGLE_API_KEY;
-
-console.log('🔑 Google API Key configured:', googleApiKey ? '✅' : '❌');
+console.log('🔑 Google Cloud configured with Workload Identity Federation');
 
 // Translation function using REST API
 async function translateText(text, targetLanguage) {
   try {
-    if (!googleApiKey) {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
       console.warn('⚠️ No Google API key found, using fallback');
       const languageMap = { 'fr': 'French', 'es': 'Spanish', 'sw': 'Swahili', 'en': 'English' };
       return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
@@ -65,7 +65,7 @@ async function translateText(text, targetLanguage) {
         params: {
           q: text,
           target: targetLanguage,
-          key: googleApiKey,
+          key: apiKey,
           format: 'text'
         },
         timeout: 10000
@@ -85,17 +85,20 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// Text-to-Speech using REST API directly - FIXED
+// Text-to-Speech using Workload Identity Federation
 async function textToSpeech(text, targetLanguage) {
   try {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-      throw new Error('No Google API key found');
-    }
+    // Use Workload Identity Federation
+    const auth = new GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+      projectId: 'katareel'
+    });
     
-    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+    const client = await auth.getClient();
+    const token = await client.getAccessToken();
     
-    // Simplified voice mapping - just language code, let Google pick default voice
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize`;
+    
     const voiceMap = {
       'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
       'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
@@ -117,7 +120,10 @@ async function textToSpeech(text, targetLanguage) {
     console.log(`📝 Text length: ${text.length} characters`);
     
     const response = await axios.post(url, requestBody, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.token}`
+      },
       timeout: 30000
     });
     
@@ -132,7 +138,6 @@ async function textToSpeech(text, targetLanguage) {
       console.error('Status:', error.response.status);
       console.error('Data:', JSON.stringify(error.response.data, null, 2));
     }
-    // THROW the error instead of returning fake audio
     throw new Error(`TTS failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
@@ -916,7 +921,8 @@ async function transcribeAudio(audioPath) {
 // Translate text using Google Translate REST API
 async function translateText(text, targetLanguage) {
   try {
-    if (!googleApiKey) {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
       console.warn('⚠️ No Google API key found, using fallback');
       const languageMap = { 'fr': 'French', 'es': 'Spanish', 'sw': 'Swahili', 'en': 'English' };
       return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
@@ -930,7 +936,7 @@ async function translateText(text, targetLanguage) {
         params: {
           q: text,
           target: targetLanguage,
-          key: googleApiKey,
+          key: apiKey,
           format: 'text'
         },
         timeout: 10000
@@ -950,17 +956,20 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// Text-to-Speech using REST API directly - FIXED
+// Text-to-Speech using Workload Identity Federation
 async function textToSpeech(text, targetLanguage) {
   try {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
-      throw new Error('No Google API key found');
-    }
+    // Use Workload Identity Federation
+    const auth = new GoogleAuth({
+      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
+      projectId: 'katareel'
+    });
     
-    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+    const client = await auth.getClient();
+    const token = await client.getAccessToken();
     
-    // Simplified voice mapping - just language code, let Google pick default voice
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize`;
+    
     const voiceMap = {
       'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
       'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
@@ -982,7 +991,10 @@ async function textToSpeech(text, targetLanguage) {
     console.log(`📝 Text length: ${text.length} characters`);
     
     const response = await axios.post(url, requestBody, {
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token.token}`
+      },
       timeout: 30000
     });
     
@@ -997,7 +1009,6 @@ async function textToSpeech(text, targetLanguage) {
       console.error('Status:', error.response.status);
       console.error('Data:', JSON.stringify(error.response.data, null, 2));
     }
-    // THROW the error instead of returning fake audio
     throw new Error(`TTS failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
@@ -2314,6 +2325,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📁 Temp directory: ${tempDir}`);
   console.log(`☁️ Cloudinary storage configured`);
   console.log(`🌐 Google Cloud translation configured (REST API)`);
+  console.log(`🔐 Google Cloud TTS using Workload Identity Federation`);
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
