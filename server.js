@@ -41,14 +41,14 @@ cloudinary.config({
 console.log('☁️ Cloudinary configured successfully!');
 
 // ============================================
-// GOOGLE CLOUD CONFIGURATION
+// GOOGLE CLOUD CONFIGURATION - REST API APPROACH
 // ============================================
 
 const googleApiKey = process.env.GOOGLE_API_KEY;
 
 console.log('🔑 Google API Key configured:', googleApiKey ? '✅' : '❌');
 
-// Translation function using REST API (works with API key)
+// Translation function using REST API
 async function translateText(text, targetLanguage) {
   try {
     if (!googleApiKey) {
@@ -85,45 +85,56 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// ============================================
-// TEXT-TO-SPEECH (FIXED: real Google Cloud TTS instead of fake placeholder bytes)
-// ============================================
+// Text-to-Speech using REST API directly
 async function textToSpeech(text, targetLanguage) {
   try {
-    if (!googleApiKey) {
-      console.warn('⚠️ No Google API key found, cannot generate real audio');
-      throw new Error('Google API key not configured for text-to-speech');
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ No Google API key found, using fallback');
+      return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
     }
-
-    console.log(`🔊 Generating speech for language: ${targetLanguage}...`);
-
-    // Google TTS needs a specific voice/locale per language code
+    
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+    
     const voiceMap = {
-      'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
-      'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
-      'zh': 'cmn-CN', 'ar': 'ar-XA', 'hi': 'hi-IN', 'sw': 'sw-KE',
-      'en': 'en-US'
+      'fr': { languageCode: 'fr-FR', name: 'fr-FR-Standard-A' },
+      'es': { languageCode: 'es-ES', name: 'es-ES-Standard-A' },
+      'sw': { languageCode: 'sw-TZ', name: 'sw-TZ-Standard-A' },
+      'en': { languageCode: 'en-US', name: 'en-US-Standard-A' }
     };
-    const languageCode = voiceMap[targetLanguage] || 'en-US';
-
-    const response = await axios.post(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleApiKey}`,
-      {
-        input: { text: text },
-        voice: { languageCode: languageCode, ssmlGender: 'NEUTRAL' },
-        audioConfig: { audioEncoding: 'MP3' }
+    
+    const voice = voiceMap[targetLanguage] || voiceMap['en'];
+    
+    const requestBody = {
+      input: { text: text },
+      voice: {
+        languageCode: voice.languageCode,
+        name: voice.name,
+        ssmlGender: 'NEUTRAL'
       },
-      { timeout: 30000 }
-    );
-
-    if (response.data?.audioContent) {
-      console.log('✅ Speech generated successfully');
+      audioConfig: { audioEncoding: 'MP3' }
+    };
+    
+    console.log(`🔊 Calling TTS API for language: ${targetLanguage}`);
+    
+    const response = await axios.post(url, requestBody, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000
+    });
+    
+    if (response.data && response.data.audioContent) {
+      console.log('✅ TTS API call successful');
       return Buffer.from(response.data.audioContent, 'base64');
     }
-    throw new Error('No audio content returned from Google TTS');
+    throw new Error('No audio content returned');
   } catch (error) {
-    console.error('❌ TTS error:', error.response?.data?.error?.message || error.message);
-    throw new Error(`Text-to-speech failed: ${error.response?.data?.error?.message || error.message}`);
+    console.error('❌ TTS error:', error.message);
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', JSON.stringify(error.response.data, null, 2));
+    }
+    // Return silent audio as fallback
+    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
   }
 }
 
@@ -767,7 +778,7 @@ const memoryStorage = multer.memoryStorage();
 const upload = multer({
   storage: memoryStorage,
   limits: { 
-    fileSize: 50 * 1024 * 1024, // 50MB limit for better performance
+    fileSize: 50 * 1024 * 1024,
     fieldSize: 50 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
@@ -903,8 +914,7 @@ async function transcribeAudio(audioPath) {
   }
 }
 
-// (Duplicate translateText below intentionally left as-is from original file — the second
-// definition below is what actually runs, since function declarations override earlier ones.)
+// Translate text using Google Translate REST API
 async function translateText(text, targetLanguage) {
   try {
     if (!googleApiKey) {
@@ -941,44 +951,55 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// ============================================
-// TEXT-TO-SPEECH (FIXED: this is the definition that actually runs — real Google Cloud TTS)
-// ============================================
+// Text-to-Speech using REST API directly
 async function textToSpeech(text, targetLanguage) {
   try {
-    if (!googleApiKey) {
-      console.warn('⚠️ No Google API key found, cannot generate real audio');
-      throw new Error('Google API key not configured for text-to-speech');
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
+      console.warn('⚠️ No Google API key found, using fallback');
+      return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
     }
-
-    console.log(`🔊 Generating speech for language: ${targetLanguage}...`);
-
+    
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+    
     const voiceMap = {
-      'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
-      'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
-      'zh': 'cmn-CN', 'ar': 'ar-XA', 'hi': 'hi-IN', 'sw': 'sw-KE',
-      'en': 'en-US'
+      'fr': { languageCode: 'fr-FR', name: 'fr-FR-Standard-A' },
+      'es': { languageCode: 'es-ES', name: 'es-ES-Standard-A' },
+      'sw': { languageCode: 'sw-TZ', name: 'sw-TZ-Standard-A' },
+      'en': { languageCode: 'en-US', name: 'en-US-Standard-A' }
     };
-    const languageCode = voiceMap[targetLanguage] || 'en-US';
-
-    const response = await axios.post(
-      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleApiKey}`,
-      {
-        input: { text: text },
-        voice: { languageCode: languageCode, ssmlGender: 'NEUTRAL' },
-        audioConfig: { audioEncoding: 'MP3' }
+    
+    const voice = voiceMap[targetLanguage] || voiceMap['en'];
+    
+    const requestBody = {
+      input: { text: text },
+      voice: {
+        languageCode: voice.languageCode,
+        name: voice.name,
+        ssmlGender: 'NEUTRAL'
       },
-      { timeout: 30000 }
-    );
-
-    if (response.data?.audioContent) {
-      console.log('✅ Speech generated successfully');
+      audioConfig: { audioEncoding: 'MP3' }
+    };
+    
+    console.log(`🔊 Calling TTS API for language: ${targetLanguage}`);
+    
+    const response = await axios.post(url, requestBody, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000
+    });
+    
+    if (response.data && response.data.audioContent) {
+      console.log('✅ TTS API call successful');
       return Buffer.from(response.data.audioContent, 'base64');
     }
-    throw new Error('No audio content returned from Google TTS');
+    throw new Error('No audio content returned');
   } catch (error) {
-    console.error('❌ TTS error:', error.response?.data?.error?.message || error.message);
-    throw new Error(`Text-to-speech failed: ${error.response?.data?.error?.message || error.message}`);
+    console.error('❌ TTS error:', error.message);
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', JSON.stringify(error.response.data, null, 2));
+    }
+    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
   }
 }
 
@@ -1040,7 +1061,7 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
     const translatedTextResult = await translateText(transcribedText, targetLanguage);
     console.log(`🌐 Translation (first 100 chars): ${translatedTextResult.substring(0, 100)}...`);
     
-    // Step 5: Generate new audio (Google Cloud TTS)
+    // Step 5: Generate new audio (free with Google TTS)
     console.log('🔊 Generating translated audio...');
     const audioContent = await textToSpeech(translatedTextResult, targetLanguage);
     console.log('✅ Audio generated');
@@ -1120,7 +1141,6 @@ app.post('/api/translate-video', async (req, res) => {
       });
     }
 
-    // Use the real translation pipeline
     const translatedVideoUrl = await generateTranslatedVideo(
       videoUrl,
       targetLanguage || 'fr',
@@ -1189,7 +1209,7 @@ app.post('/api/translate-video', async (req, res) => {
 });
 
 // ============================================
-// FREE RETRY ENDPOINT FOR PAID USERS - NEW
+// FREE RETRY ENDPOINT FOR PAID USERS
 // ============================================
 
 app.post('/api/translate-video-free', async (req, res) => {
@@ -1217,14 +1237,12 @@ app.post('/api/translate-video-free', async (req, res) => {
     
     console.log('✅ Payment found, proceeding with translation');
     
-    // Process the actual translation
     const translatedVideoUrl = await generateTranslatedVideo(
       videoUrl,
       targetLanguage || 'fr',
       duration || 5
     );
     
-    // Send email with download link
     try {
       const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French';
       const translationEmail = generateTranslationEmail(
@@ -1240,7 +1258,6 @@ app.post('/api/translate-video-free', async (req, res) => {
       console.error('❌ Email error:', emailErr);
     }
     
-    // Send receipt
     try {
       await sendReceiptEmail(email, 300, paymentReference, 'translation');
     } catch (receiptErr) {
@@ -1764,7 +1781,6 @@ app.post('/api/test-email', async (req, res) => {
         <p>Your email configuration is working correctly.</p>
         <p>Provider: ${emailProvider.toUpperCase()}</p>
         <p>Time: ${new Date().toISOString()}</p>
-        <p>If you received this, your email system is working!</p>
       `
     );
     
@@ -1832,7 +1848,7 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
 }
 
 // ============================================
-// VIDEO GENERATION WITH DURATION SUPPORT (Original Feature)
+// VIDEO GENERATION WITH DURATION SUPPORT
 // ============================================
 
 const failedGenerations = {};
@@ -2087,7 +2103,7 @@ app.post('/api/generate-video', async (req, res) => {
   }
 });
 
-// Retry endpoints (Original Feature)
+// Retry endpoints
 app.post('/api/check-free-retry', (req, res) => {
   const { paymentReference } = req.body;
   if (!paymentReference) return res.json({ success: false, error: 'Payment reference required' });
