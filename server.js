@@ -26,55 +26,70 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
-console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
+
+// ============================================
+// CHECK ENVIRONMENT VARIABLES
+// ============================================
+console.log('🔑 GROQ_API_KEY:', process.env.GROQ_API_KEY ? '✅ Set' : '❌ Not set');
+console.log('🔑 GOOGLE_API_KEY:', process.env.GOOGLE_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
+console.log('🔑 Mailgun API Key:', process.env.MAILGUN_API_KEY ? '✅ Set' : '❌ Not set');
 
 // ============================================
 // CLOUDINARY CONFIGURATION
 // ============================================
 
 cloudinary.config({
-  cloud_name: 'y7d1nk2i',
-  api_key: '289646568483629',
-  api_secret: 'XmlwCnuLWkO-xe3BQw-lpl-ELU0'
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'y7d1nk2i',
+  api_key: process.env.CLOUDINARY_API_KEY || '289646568483629',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'XmlwCnuLWkO-xe3BQw-lpl-ELU0'
 });
 
 console.log('☁️ Cloudinary configured successfully!');
-console.log(`   Cloud Name: y7d1nk2i`);
 
 // ============================================
 // GOOGLE CLOUD CONFIGURATION
 // ============================================
 
-// Google Cloud API Key
-const googleApiKey = 'AIzaSyB9EtvCvI29RNURQc4O9zWmfGAcLVWHI_A';
+const googleApiKey = process.env.GOOGLE_API_KEY;
 
-// Initialize Google Cloud clients
 let translateClient, ttsClient;
 
-try {
-  translateClient = new Translate({
-    key: googleApiKey
-  });
-  
-  ttsClient = new TextToSpeechClient({
-    key: googleApiKey
-  });
-  
-  console.log('✅ Google Cloud clients initialized with API key');
-} catch (error) {
-  console.warn('⚠️ Failed to initialize Google Cloud:', error.message);
+if (googleApiKey && googleApiKey !== 'your_google_api_key') {
+  try {
+    translateClient = new Translate({
+      key: googleApiKey
+    });
+    
+    ttsClient = new TextToSpeechClient({
+      key: googleApiKey
+    });
+    
+    console.log('✅ Google Cloud clients initialized with API key');
+  } catch (error) {
+    console.warn('⚠️ Failed to initialize Google Cloud:', error.message);
+  }
+} else {
+  console.warn('⚠️ GOOGLE_API_KEY not set. Translation will use fallback.');
 }
 
 // ============================================
 // GROQ CONFIGURATION
 // ============================================
 
-const groq = new Groq({ 
-  apiKey: process.env.GROQ_API_KEY || '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' 
-});
-
-console.log('✅ Groq client initialized');
+let groq = null;
+if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key') {
+  try {
+    groq = new Groq({ 
+      apiKey: process.env.GROQ_API_KEY
+    });
+    console.log('✅ Groq client initialized');
+  } catch (error) {
+    console.warn('⚠️ Failed to initialize Groq:', error.message);
+  }
+} else {
+  console.warn('⚠️ GROQ_API_KEY not set. Transcription will use fallback.');
+}
 
 // ============================================
 // FFMPEG CONFIGURATION
@@ -802,6 +817,11 @@ async function extractAudio(videoPath, audioPath) {
 
 // Transcription using Groq (free)
 async function transcribeAudio(audioPath) {
+  if (!groq) {
+    console.log('⚠️ Groq not available, using fallback transcription');
+    return "This is a sample transcription. The actual transcription service is not available.";
+  }
+  
   try {
     console.log('🎤 Transcribing with Groq...');
     const audioBuffer = fs.readFileSync(audioPath);
@@ -824,62 +844,68 @@ async function transcribeAudio(audioPath) {
 
 // Translation using Google Translate (free tier)
 async function translateText(text, targetLanguage) {
-  try {
-    if (translateClient) {
-      console.log(`🌐 Translating to ${targetLanguage}...`);
-      const [translation] = await translateClient.translate(text, targetLanguage);
-      console.log('✅ Translation complete');
-      return translation;
-    }
-  } catch (error) {
-    console.error('❌ Translation error:', error);
+  if (!translateClient) {
+    console.log('⚠️ Google Translate not available, using fallback');
+    const languageMap = {
+      'fr': 'French',
+      'es': 'Spanish',
+      'sw': 'Swahili',
+      'en': 'English'
+    };
+    return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
   }
   
-  // Fallback translation
-  console.log('⚠️ Using fallback translation');
-  const languageMap = {
-    'fr': 'French',
-    'es': 'Spanish',
-    'sw': 'Swahili',
-    'en': 'English'
-  };
-  return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
+  try {
+    console.log(`🌐 Translating to ${targetLanguage}...`);
+    const [translation] = await translateClient.translate(text, targetLanguage);
+    console.log('✅ Translation complete');
+    return translation;
+  } catch (error) {
+    console.error('❌ Translation error:', error);
+    const languageMap = {
+      'fr': 'French',
+      'es': 'Spanish',
+      'sw': 'Swahili',
+      'en': 'English'
+    };
+    return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
+  }
 }
 
 // Text-to-Speech using Google TTS (free tier)
 async function textToSpeech(text, targetLanguage) {
-  try {
-    if (ttsClient) {
-      const voiceMap = {
-        'fr': { languageCode: 'fr-FR', name: 'fr-FR-Standard-A' },
-        'es': { languageCode: 'es-ES', name: 'es-ES-Standard-A' },
-        'sw': { languageCode: 'sw-TZ', name: 'sw-TZ-Standard-A' },
-        'en': { languageCode: 'en-US', name: 'en-US-Standard-A' }
-      };
-      
-      const voice = voiceMap[targetLanguage] || voiceMap['en'];
-      
-      const request = {
-        input: { text: text },
-        voice: {
-          languageCode: voice.languageCode,
-          name: voice.name,
-          ssmlGender: 'NEUTRAL'
-        },
-        audioConfig: { audioEncoding: 'MP3' },
-      };
-      
-      const [response] = await ttsClient.synthesizeSpeech(request);
-      console.log('✅ TTS complete');
-      return response.audioContent;
-    }
-  } catch (error) {
-    console.error('❌ TTS error:', error);
+  if (!ttsClient) {
+    console.log('⚠️ Google TTS not available, using fallback');
+    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
   }
   
-  // Fallback: generate a silent audio file
-  console.log('⚠️ Using fallback TTS');
-  return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  try {
+    const voiceMap = {
+      'fr': { languageCode: 'fr-FR', name: 'fr-FR-Standard-A' },
+      'es': { languageCode: 'es-ES', name: 'es-ES-Standard-A' },
+      'sw': { languageCode: 'sw-TZ', name: 'sw-TZ-Standard-A' },
+      'en': { languageCode: 'en-US', name: 'en-US-Standard-A' }
+    };
+    
+    const voice = voiceMap[targetLanguage] || voiceMap['en'];
+    
+    const request = {
+      input: { text: text },
+      voice: {
+        languageCode: voice.languageCode,
+        name: voice.name,
+        ssmlGender: 'NEUTRAL'
+      },
+      audioConfig: { audioEncoding: 'MP3' },
+    };
+    
+    const [response] = await ttsClient.synthesizeSpeech(request);
+    console.log('✅ TTS complete');
+    return response.audioContent;
+  } catch (error) {
+    console.error('❌ TTS error:', error);
+    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+  }
 }
 
 // Combine audio with video using ffmpeg
@@ -1498,7 +1524,9 @@ app.get('/api/test-google-cloud', async (req, res) => {
     const results = {
       translate: false,
       tts: false,
-      apiKeyConfigured: !!googleApiKey
+      groq: false,
+      apiKeyConfigured: !!process.env.GOOGLE_API_KEY,
+      groqConfigured: !!process.env.GROQ_API_KEY
     };
     
     // Test Translation
@@ -1525,6 +1553,15 @@ app.get('/api/test-google-cloud', async (req, res) => {
       }
     } catch (e) {
       results.ttsError = e.message;
+    }
+    
+    // Test Groq
+    try {
+      if (groq) {
+        results.groq = true;
+      }
+    } catch (e) {
+      results.groqError = e.message;
     }
     
     res.json({
@@ -2353,6 +2390,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
   console.log(`📊 Data file: ${DATA_FILE}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
+  console.log(`📁 Temp directory: ${tempDir}`);
   console.log(`☁️ Cloudinary storage configured`);
   console.log(`🌐 Google Cloud translation and TTS configured`);
   console.log(`🎤 Groq transcription configured`);
