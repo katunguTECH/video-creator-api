@@ -1018,78 +1018,6 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
 // TRANSLATION ENDPOINTS
 // ============================================
 
-// Free retry endpoint for paid users
-app.post('/api/translate-video-free', async (req, res) => {
-  try {
-    const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = req.body;
-    
-    console.log('🔄 Free retry translation for:', email);
-    console.log('📝 Payment Reference:', paymentReference);
-    console.log('🎯 Target Language:', targetLanguage);
-    
-    // Check if payment exists
-    const payment = dataStore.userPayments.find(p => 
-      p.reference === paymentReference && 
-      p.email === email && 
-      p.status === 'completed'
-    );
-    
-    if (!payment) {
-      console.log('❌ Payment not found for reference:', paymentReference);
-      return res.status(404).json({
-        success: false,
-        error: 'Payment not found. Please verify your payment reference.'
-      });
-    }
-    
-    console.log('✅ Payment found, proceeding with translation');
-    
-    // Process the actual translation
-    const translatedVideoUrl = await generateTranslatedVideo(
-      videoUrl,
-      targetLanguage || 'fr',
-      duration || 5
-    );
-    
-    // Send email with download link
-    try {
-      const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French';
-      const translationEmail = generateTranslationEmail(
-        email,
-        translatedVideoUrl,
-        `Video translated to ${languageName}`,
-        languageName,
-        300
-      );
-      await sendEmail(email, translationEmail.subject, translationEmail.html);
-      console.log(`📧 Email sent to ${email}`);
-    } catch (emailErr) {
-      console.error('❌ Email error:', emailErr);
-    }
-    
-    // Send receipt
-    try {
-      await sendReceiptEmail(email, 300, paymentReference, 'translation');
-    } catch (receiptErr) {
-      console.error('❌ Receipt error:', receiptErr);
-    }
-    
-    res.json({
-      success: true,
-      message: '✅ Translation complete! Check your email for the download link.',
-      videoUrl: translatedVideoUrl,
-      paymentReference: paymentReference
-    });
-    
-  } catch (error) {
-    console.error('❌ Translation error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Translation failed. Please try again.'
-    });
-  }
-});
-
 // Regular translation endpoint
 app.post('/api/translate-video', async (req, res) => {
   try {
@@ -1194,6 +1122,81 @@ app.post('/api/translate-video', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// ============================================
+// FREE RETRY ENDPOINT FOR PAID USERS - NEW
+// ============================================
+
+app.post('/api/translate-video-free', async (req, res) => {
+  try {
+    const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = req.body;
+    
+    console.log('🔄 Free retry translation for:', email);
+    console.log('📝 Payment Reference:', paymentReference);
+    console.log('🎯 Target Language:', targetLanguage);
+    
+    // Check if payment exists
+    const payment = dataStore.userPayments.find(p => 
+      p.reference === paymentReference && 
+      p.email === email && 
+      p.status === 'completed'
+    );
+    
+    if (!payment) {
+      console.log('❌ Payment not found for reference:', paymentReference);
+      return res.status(404).json({
+        success: false,
+        error: 'Payment not found. Please verify your payment reference.'
+      });
+    }
+    
+    console.log('✅ Payment found, proceeding with translation');
+    
+    // Process the actual translation
+    const translatedVideoUrl = await generateTranslatedVideo(
+      videoUrl,
+      targetLanguage || 'fr',
+      duration || 5
+    );
+    
+    // Send email with download link
+    try {
+      const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French';
+      const translationEmail = generateTranslationEmail(
+        email,
+        translatedVideoUrl,
+        `Video translated to ${languageName}`,
+        languageName,
+        300
+      );
+      await sendEmail(email, translationEmail.subject, translationEmail.html);
+      console.log(`📧 Email sent to ${email}`);
+    } catch (emailErr) {
+      console.error('❌ Email error:', emailErr);
+    }
+    
+    // Send receipt
+    try {
+      await sendReceiptEmail(email, 300, paymentReference, 'translation');
+    } catch (receiptErr) {
+      console.error('❌ Receipt error:', receiptErr);
+    }
+    
+    res.json({
+      success: true,
+      message: '✅ Translation complete! Check your email for the download link.',
+      videoUrl: translatedVideoUrl,
+      paymentReference: paymentReference
+    });
+    
+  } catch (error) {
+    console.error('❌ Translation error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Translation failed. Please try again.'
     });
   }
 });
