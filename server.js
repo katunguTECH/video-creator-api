@@ -85,14 +85,45 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// Text-to-Speech function with fallback
+// ============================================
+// TEXT-TO-SPEECH (FIXED: real Google Cloud TTS instead of fake placeholder bytes)
+// ============================================
 async function textToSpeech(text, targetLanguage) {
   try {
-    console.log('🔊 Using fallback TTS (silent audio)');
-    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    if (!googleApiKey) {
+      console.warn('⚠️ No Google API key found, cannot generate real audio');
+      throw new Error('Google API key not configured for text-to-speech');
+    }
+
+    console.log(`🔊 Generating speech for language: ${targetLanguage}...`);
+
+    // Google TTS needs a specific voice/locale per language code
+    const voiceMap = {
+      'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
+      'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
+      'zh': 'cmn-CN', 'ar': 'ar-XA', 'hi': 'hi-IN', 'sw': 'sw-KE',
+      'en': 'en-US'
+    };
+    const languageCode = voiceMap[targetLanguage] || 'en-US';
+
+    const response = await axios.post(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleApiKey}`,
+      {
+        input: { text: text },
+        voice: { languageCode: languageCode, ssmlGender: 'NEUTRAL' },
+        audioConfig: { audioEncoding: 'MP3' }
+      },
+      { timeout: 30000 }
+    );
+
+    if (response.data?.audioContent) {
+      console.log('✅ Speech generated successfully');
+      return Buffer.from(response.data.audioContent, 'base64');
+    }
+    throw new Error('No audio content returned from Google TTS');
   } catch (error) {
-    console.error('❌ TTS error:', error);
-    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    console.error('❌ TTS error:', error.response?.data?.error?.message || error.message);
+    throw new Error(`Text-to-speech failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
 
@@ -872,7 +903,8 @@ async function transcribeAudio(audioPath) {
   }
 }
 
-// Translate text using Google Translate REST API
+// (Duplicate translateText below intentionally left as-is from original file — the second
+// definition below is what actually runs, since function declarations override earlier ones.)
 async function translateText(text, targetLanguage) {
   try {
     if (!googleApiKey) {
@@ -909,14 +941,44 @@ async function translateText(text, targetLanguage) {
   }
 }
 
-// Text-to-Speech function with fallback
+// ============================================
+// TEXT-TO-SPEECH (FIXED: this is the definition that actually runs — real Google Cloud TTS)
+// ============================================
 async function textToSpeech(text, targetLanguage) {
   try {
-    console.log('🔊 Using fallback TTS (silent audio)');
-    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    if (!googleApiKey) {
+      console.warn('⚠️ No Google API key found, cannot generate real audio');
+      throw new Error('Google API key not configured for text-to-speech');
+    }
+
+    console.log(`🔊 Generating speech for language: ${targetLanguage}...`);
+
+    const voiceMap = {
+      'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
+      'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
+      'zh': 'cmn-CN', 'ar': 'ar-XA', 'hi': 'hi-IN', 'sw': 'sw-KE',
+      'en': 'en-US'
+    };
+    const languageCode = voiceMap[targetLanguage] || 'en-US';
+
+    const response = await axios.post(
+      `https://texttospeech.googleapis.com/v1/text:synthesize?key=${googleApiKey}`,
+      {
+        input: { text: text },
+        voice: { languageCode: languageCode, ssmlGender: 'NEUTRAL' },
+        audioConfig: { audioEncoding: 'MP3' }
+      },
+      { timeout: 30000 }
+    );
+
+    if (response.data?.audioContent) {
+      console.log('✅ Speech generated successfully');
+      return Buffer.from(response.data.audioContent, 'base64');
+    }
+    throw new Error('No audio content returned from Google TTS');
   } catch (error) {
-    console.error('❌ TTS error:', error);
-    return Buffer.from([0x49, 0x44, 0x33, 0x03, 0x00, 0x00, 0x00, 0x00, 0x00]);
+    console.error('❌ TTS error:', error.response?.data?.error?.message || error.message);
+    throw new Error(`Text-to-speech failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
 
@@ -978,7 +1040,7 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
     const translatedTextResult = await translateText(transcribedText, targetLanguage);
     console.log(`🌐 Translation (first 100 chars): ${translatedTextResult.substring(0, 100)}...`);
     
-    // Step 5: Generate new audio (free with Google TTS)
+    // Step 5: Generate new audio (Google Cloud TTS)
     console.log('🔊 Generating translated audio...');
     const audioContent = await textToSpeech(translatedTextResult, targetLanguage);
     console.log('✅ Audio generated');
