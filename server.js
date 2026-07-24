@@ -27,6 +27,8 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
 console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
+console.log('📧 EMAIL_FROM raw value:', JSON.stringify(process.env.EMAIL_FROM));
+console.log('📧 MAILGUN_DOMAIN raw value:', JSON.stringify(process.env.MAILGUN_DOMAIN));
 
 // ============================================
 // CLOUDINARY CONFIGURATION
@@ -248,7 +250,23 @@ if (!mg) {
 
 // Email sending function with Mailgun + Gmail fallback
 async function sendEmail(to, subject, html, text) {
-  const fromEmail = process.env.EMAIL_FROM || `noreply@${MAILGUN_DOMAIN}`;
+  // Sanitize EMAIL_FROM: strip whitespace/quotes, and if it's already in
+  // "Name <email>" format or contains anything other than a bare address,
+  // extract just the email portion so we don't end up double-wrapping it
+  // (e.g. "VidAI Creator <VidAI Creator <noreply@domain.com>>"), which is
+  // what Mailgun's "from parameter is not a valid address" error indicates.
+  let fromEmail = (process.env.EMAIL_FROM || '').trim().replace(/^["']|["']$/g, '');
+  const emailMatch = fromEmail.match(/<([^>]+)>/);
+  if (emailMatch) {
+    fromEmail = emailMatch[1].trim();
+  }
+  const validEmailPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
+  if (!fromEmail || !validEmailPattern.test(fromEmail)) {
+    if (fromEmail) {
+      console.warn(`⚠️ EMAIL_FROM value "${fromEmail}" is not a valid bare email address, falling back to default`);
+    }
+    fromEmail = `noreply@${MAILGUN_DOMAIN}`;
+  }
   const fromName = 'VidAI Creator';
 
   console.log(`📧 Sending email to ${to} via ${emailProvider.toUpperCase()}`);
