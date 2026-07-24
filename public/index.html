@@ -10,14 +10,12 @@
       content="VidAI Creator - AI Video Translation and Generation. Translate videos to 37 languages with AI. Pay KES 300 per translation."
     />
     
-    <!-- Open Graph / Social Media Meta Tags -->
     <meta property="og:title" content="VidAI Creator - AI Video Translation" />
     <meta property="og:description" content="Translate your videos to 37 languages with AI. Pay KES 300 per translation." />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://www.katareel.com" />
     <meta property="og:image" content="%PUBLIC_URL%/og-image.png" />
     
-    <!-- Twitter Card Meta Tags -->
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content="VidAI Creator - AI Video Translation" />
     <meta name="twitter:description" content="Translate your videos to 37 languages with AI. Pay KES 300 per translation." />
@@ -28,10 +26,9 @@
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     
-    <!-- Paystack Script - Load with async and proper error handling -->
-    <script src="https://js.paystack.co/v1/inline.js" async></script>
+    <!-- Paystack Script -->
+    <script src="https://js.paystack.co/v1/inline.js"></script>
     
-    <!-- Fallback script to check if Paystack loaded -->
     <script>
       window.addEventListener('load', function() {
         if (typeof window.PaystackPop === 'undefined') {

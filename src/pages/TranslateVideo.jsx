@@ -92,8 +92,9 @@ function TranslateVideo() {
     const file = e.target.files[0];
     if (!file) return;
 
-    if (file.size > 100 * 1024 * 1024) {
-      setError('File size exceeds 100MB limit. Please compress your video.');
+    // Validate file size (max 50MB for better performance)
+    if (file.size > 50 * 1024 * 1024) {
+      setError('File size exceeds 50MB limit. Please compress your video or use a smaller file.');
       return;
     }
 
@@ -118,7 +119,7 @@ function TranslateVideo() {
       console.log('📤 Uploading video:', file.name, `(${(file.size / 1024 / 1024).toFixed(2)} MB)`);
 
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 60000);
+      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
 
       try {
         const response = await fetch('/api/upload-video', {
@@ -183,7 +184,7 @@ function TranslateVideo() {
       } catch (fetchError) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
-          throw new Error('Upload timed out. Please try again with a smaller file.');
+          throw new Error('Upload timed out. Please try again with a smaller file (under 50MB).');
         }
         throw fetchError;
       }
@@ -560,7 +561,7 @@ function TranslateVideo() {
                 <>
                   <div className="upload-icon">📹</div>
                   <p>Click or drag to upload a video</p>
-                  <small>Supported formats: MP4, AVI, MOV, WEBM (Max 100MB)</small>
+                  <small>Supported formats: MP4, AVI, MOV, WEBM (Max 50MB)</small>
                 </>
               ) : (
                 <div className="file-info">

@@ -1,0 +1,78 @@
+Connect to Cluster0
+1
+Set up connection security
+2
+Choose a connection method
+3
+Connect
+1. Connection IP address added
+Your current IP address (41.90.172.67) has been added for local connectivity. Only an IP address you add to your Access List will be able to connect you to your project's clusters. Add more later in Network Access.
+
+2. Database user created
+A database user was automatically created for this project. This user has Atlas Admin role access. You can add more users later in Database Access.
+
+3. Copy and save database user credentials
+Username
+henrymunyoki_db_user
+
+Password
+kTyEW9w4DPvAR1Lp
+
+Download .env file (Optional)
+Do not commit this file to version control. Store it securely.
+
+Identity & Access
+All Projects
+
+Users
+
+Applications
+
+Teams
+
+Federation
+
+AI Models
+Model API Keys
+
+Usage
+
+Rate Limits
+
+Billing
+Overview
+
+Invoices
+
+Cost Explorer
+
+Configurations
+Resource Policies
+
+Activity Feed
+
+Organization Settings
+
+
+Organization
+
+henry's Org - 2026-07-24
+
+
+
+
+
+
+Back to Model API Keys
+Create Model API Key
+Copy Model API Key
+Name
+Video Translation Api
+Project
+Project 0
+Model API Key
+al-YI5iqOyUlS7y4M1pfryAgH0jLnkjScv5bFGrJ_2lVqV
+
+Copy your model API key and store it in a secure location. After you leave this page, you won't be able to view it again. If you lose your API key, you'll need to generate a new one.
+Alert System StatusAll GoodLast Login41.90.172.67
+©2026 MongoDB, Inc.StatusTermsPrivacyAtlas BlogContact Sales

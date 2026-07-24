@@ -2,14 +2,12 @@
    TRANSLATE VIDEO PAGE - COMPLETE STYLES
    ============================================ */
 
-/* Page Container */
 .translate-page {
   min-height: 100vh;
   background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
   padding: 20px;
 }
 
-/* Header */
 .header {
   max-width: 1200px;
   margin: 0 auto 30px;
@@ -59,13 +57,6 @@
   letter-spacing: -0.5px;
 }
 
-.header h1 span {
-  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
-}
-
 .header p {
   margin: 10px 0 0;
   opacity: 0.9;
@@ -73,7 +64,6 @@
   font-weight: 400;
 }
 
-/* Main Content Grid */
 .main-content {
   max-width: 1200px;
   margin: 0 auto;
@@ -82,7 +72,6 @@
   gap: 30px;
 }
 
-/* Panels */
 .left-panel, .right-panel {
   background: rgba(255, 255, 255, 0.95);
   backdrop-filter: blur(20px);
@@ -98,7 +87,6 @@
   box-shadow: 0 25px 70px rgba(0, 0, 0, 0.2);
 }
 
-/* Email Section */
 .email-section {
   margin-bottom: 25px;
 }
@@ -136,7 +124,6 @@
   font-size: 13px;
 }
 
-/* Upload Section */
 .upload-section {
   margin-bottom: 25px;
 }
@@ -161,12 +148,6 @@
   border-color: #667eea;
   background: #f0f3ff;
   transform: scale(1.01);
-}
-
-.upload-area.dragging {
-  border-color: #667eea;
-  background: #e8edff;
-  transform: scale(1.02);
 }
 
 .upload-icon {
@@ -253,7 +234,6 @@
   100% { transform: rotate(360deg); }
 }
 
-/* Language Section */
 .language-section {
   margin-bottom: 25px;
 }
@@ -294,11 +274,6 @@
   background-color: white;
 }
 
-.language-group select:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
 .language-count {
   text-align: center;
   color: #6b7280;
@@ -310,7 +285,6 @@
   font-weight: 500;
 }
 
-/* Price Section */
 .price-section {
   margin: 25px 0;
   padding: 20px;
@@ -340,11 +314,6 @@
   text-align: center;
   margin-bottom: 15px;
   letter-spacing: -1px;
-}
-
-.price-amount span {
-  font-size: 20px;
-  font-weight: 600;
 }
 
 .price-details {
@@ -382,7 +351,6 @@
   color: #4b5563;
 }
 
-/* Retry Section */
 .retry-section {
   margin-top: 15px;
   padding: 16px 20px;
@@ -430,7 +398,6 @@
   transform: none;
 }
 
-/* Translate Button */
 .translate-btn {
   width: 100%;
   padding: 18px;
@@ -459,7 +426,6 @@
   box-shadow: none;
 }
 
-/* Messages */
 .error-message {
   margin-top: 15px;
   padding: 14px 18px;
@@ -480,7 +446,6 @@
   font-weight: 500;
 }
 
-/* Video Preview */
 .video-preview {
   margin-bottom: 25px;
 }
@@ -514,7 +479,6 @@
   font-size: 16px;
 }
 
-/* Translated Text */
 .translated-text {
   margin: 20px 0;
   padding: 18px 20px;
@@ -540,7 +504,6 @@
   color: #1a1a2e;
 }
 
-/* Translated Video */
 .translated-video {
   margin: 20px 0;
 }
@@ -574,7 +537,6 @@
   box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
 }
 
-/* How It Works */
 .how-it-works {
   margin-top: 25px;
   padding: 22px 25px;
@@ -619,7 +581,6 @@
   font-size: 13px;
 }
 
-/* Responsive Design */
 @media (max-width: 1024px) {
   .main-content {
     grid-template-columns: 1fr;

@@ -2,6 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './PhotosToVideo.css';
 
+// API Base URL from environment
+const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+
 // Fallback languages
 const FALLBACK_LANGUAGES = {
   'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
@@ -46,7 +49,7 @@ function PhotosToVideo() {
       console.log('💰 Calculating price for photos-to-video...');
       console.log(`📸 Photos: ${photos.length}, Duration: ${duration}s`);
 
-      const response = await fetch('/api/calculate-price', {
+      const response = await fetch(`${API_BASE_URL}/api/calculate-price`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -125,7 +128,7 @@ function PhotosToVideo() {
       const priceAmount = price?.finalPrice || 300;
       console.log('💰 Processing payment for:', priceAmount);
 
-      const paymentResponse = await fetch('/api/initialize-payment', {
+      const paymentResponse = await fetch(`${API_BASE_URL}/api/initialize-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -162,6 +165,10 @@ function PhotosToVideo() {
           }
         })
       });
+
+      if (!paymentResponse.ok) {
+        throw new Error(`Server error: ${paymentResponse.status}`);
+      }
 
       const paymentData = await paymentResponse.json();
       console.log('📦 Payment response:', paymentData);
@@ -228,7 +235,7 @@ function PhotosToVideo() {
       }
 
       // Generate video
-      const generateResponse = await fetch('/api/generate-photo-video', {
+      const generateResponse = await fetch(`${API_BASE_URL}/api/generate-photo-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -240,6 +247,10 @@ function PhotosToVideo() {
           email: email
         })
       });
+
+      if (!generateResponse.ok) {
+        throw new Error(`Server error: ${generateResponse.status}`);
+      }
 
       const data = await generateResponse.json();
       if (data.success) {
@@ -334,7 +345,7 @@ function PhotosToVideo() {
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Describe the scene, mood, and style you want"
-                rows={3}
+                rows={4}
                 disabled={loading}
               />
             </div>
