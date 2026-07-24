@@ -38,6 +38,8 @@ console.log('🔑 MongoDB Atlas configured');
 console.log('🔑 MongoDB API Key:', MONGODB_API_KEY ? '✅ Set' : '❌ Not set');
 
 mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
   serverSelectionTimeoutMS: 10000,
   socketTimeoutMS: 45000,
   family: 4
@@ -504,15 +506,39 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 console.log('✅ FFmpeg configured');
 
 // ============================================
-// MIDDLEWARE
+// CORS CONFIGURATION - FIXED FOR PRODUCTION
 // ============================================
+const allowedOrigins = [
+  'https://www.katareel.com',
+  'https://katareel.com',
+  'http://localhost:3000',
+  'http://localhost:5000',
+  'https://video-creator-api-kjzy.onrender.com'
+];
+
 app.use(cors({
-  origin: '*',
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.indexOf(origin) !== -1) {
+      callback(null, true);
+    } else {
+      console.warn(`❌ CORS blocked for origin: ${origin}`);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'Origin'],
+  credentials: true,
+  optionsSuccessStatus: 200
 }));
+
+// Handle preflight requests explicitly
 app.options('*', cors());
 
+// ============================================
+// MIDDLEWARE
+// ============================================
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
@@ -2518,4 +2544,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
   console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
   console.log(`💰 Translation Price: KES 300 (Fixed)`);
+  console.log(`🔒 CORS configured to allow: ${allowedOrigins.join(', ')}`);
 });
