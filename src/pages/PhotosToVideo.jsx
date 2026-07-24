@@ -1,512 +1,425 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useDropzone } from 'react-dropzone';
-import { PaystackButton } from 'react-paystack';
+import './PhotosToVideo.css';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Fallback languages
+const FALLBACK_LANGUAGES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia'
+};
 
 function PhotosToVideo() {
   const navigate = useNavigate();
-  
+  const [email, setEmail] = useState('katungu1@gmail.com');
   const [photos, setPhotos] = useState([]);
-  const [selectedPhoto, setSelectedPhoto] = useState(null);
   const [prompt, setPrompt] = useState('');
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [progress, setProgress] = useState(0);
-  const [statusMessage, setStatusMessage] = useState('');
+  const [duration, setDuration] = useState(5);
+  const [aspectRatio, setAspectRatio] = useState('16:9');
+  const [loading, setLoading] = useState(false);
+  const [price, setPrice] = useState(null);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
   const [videoUrl, setVideoUrl] = useState(null);
-  const [error, setError] = useState(null);
-  
-  // Payment states
-  const [email, setEmail] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
-  const [showPayment, setShowPayment] = useState(false);
-  const [amount, setAmount] = useState(0);
-  
-  // Video settings
-  const [settings, setSettings] = useState({
-    duration: 5,
-    aspectRatio: '16:9'
-  });
+  const [paymentReference, setPaymentReference] = useState('');
+  const fileInputRef = useRef(null);
 
-  const [isPlaying, setIsPlaying] = useState(false);
-  const [priceData, setPriceData] = useState(null);
-  const [isLoadingPrice, setIsLoadingPrice] = useState(false);
+  // Calculate price whenever photos, duration changes
+  useEffect(() => {
+    calculatePrice();
+  }, [photos.length, duration]);
 
-  const { getRootProps, getInputProps, isDragActive } = useDropzone({
-    accept: { 'image/*': [] },
-    onDrop: (acceptedFiles) => {
-      const previews = acceptedFiles.map(file =>
-        Object.assign(file, { preview: URL.createObjectURL(file) })
-      );
-      setPhotos(prev => [...prev, ...previews]);
-      if (previews.length > 0 && !selectedPhoto) {
-        setSelectedPhoto(previews[0].preview);
-      }
-      setVideoUrl(null);
-      setError(null);
-    }
-  });
-
-  // Calculate price for AI generation
   const calculatePrice = async () => {
+    if (photos.length === 0) {
+      setPrice(null);
+      return;
+    }
+
     try {
-      setIsLoadingPrice(true);
-      
-      const response = await fetch(`${API_URL}/api/calculate-price`, {
+      console.log('💰 Calculating price for photos-to-video...');
+      console.log(`📸 Photos: ${photos.length}, Duration: ${duration}s`);
+
+      const response = await fetch('/api/calculate-price', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          serviceType: 'image_to_video',
-          options: { duration: settings.duration }
+          serviceType: 'photos_to_video',
+          options: {
+            duration: duration,
+            photoCount: photos.length
+          }
         })
       });
-      
+
+      if (!response.ok) {
+        throw new Error(`Server error: ${response.status}`);
+      }
+
       const data = await response.json();
-      
+      console.log('📦 Price response:', data);
+
       if (data.success) {
-        setPriceData(data.price);
-        setAmount(data.price.finalPrice);
+        setPrice(data.price);
+      } else {
+        throw new Error(data.error || 'Price calculation failed');
       }
     } catch (error) {
       console.error('❌ Price calculation error:', error);
-      setAmount(500); // Fallback price
-    } finally {
-      setIsLoadingPrice(false);
+      // Set a default price if calculation fails
+      setPrice({
+        finalPrice: 300,
+        formatted: 'KES 300',
+        currency: 'KES'
+      });
     }
   };
 
-  useEffect(() => {
-    calculatePrice();
-  }, [settings.duration]);
+  const handleFileUpload = (e) => {
+    const files = Array.from(e.target.files);
+    if (files.length === 0) return;
 
-  // AI Video Generation
-  const generateAIVideo = async () => {
-    if (!selectedPhoto) {
-      setError('Please select a photo first');
+    const newPhotos = files.map(file => ({
+      id: Date.now() + Math.random().toString(36).substr(2, 6),
+      file: file,
+      preview: URL.createObjectURL(file)
+    }));
+
+    setPhotos([...photos, ...newPhotos]);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const removePhoto = (id) => {
+    setPhotos(photos.filter(p => p.id !== id));
+  };
+
+  const handlePayment = async () => {
+    if (photos.length === 0) {
+      setError('Please upload at least one photo');
       return;
     }
 
     if (!prompt.trim()) {
-      setError('Please enter a text prompt');
+      setError('Please describe what you want to generate');
       return;
     }
 
     if (!email) {
-      setError('Please enter your email for payment');
+      setError('Please enter your email address');
       return;
     }
 
-    // Show payment modal
-    setShowPayment(true);
-  };
+    setLoading(true);
+    setError('');
+    setSuccess('');
 
-  const handlePaymentSuccess = async (reference) => {
-    setShowPayment(false);
-    setIsProcessing(true);
-    setStatusMessage('🎬 Generating AI video...');
-    setError(null);
-    setProgress(10);
-    
     try {
-      const response = await fetch(`${API_URL}/api/generate-image-to-video`, {
+      const priceAmount = price?.finalPrice || 300;
+      console.log('💰 Processing payment for:', priceAmount);
+
+      const paymentResponse = await fetch('/api/initialize-payment', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          prompt: prompt,
-          imageUrl: selectedPhoto,
-          paymentReference: reference.reference || reference,
-          duration: settings.duration
+          email: email,
+          amount: priceAmount,
+          serviceType: 'photo-to-video',
+          metadata: {
+            photoCount: photos.length,
+            duration: duration,
+            prompt: prompt,
+            aspectRatio: aspectRatio,
+            custom_fields: [
+              {
+                display_name: "Video Type",
+                variable_name: "video_type",
+                value: "photo-to-video"
+              },
+              {
+                display_name: "Photos",
+                variable_name: "photos",
+                value: `${photos.length}`
+              },
+              {
+                display_name: "Duration",
+                variable_name: "duration",
+                value: `${duration}s`
+              },
+              {
+                display_name: "Amount",
+                variable_name: "amount",
+                value: `${priceAmount} KES`
+              }
+            ]
+          }
         })
       });
 
-      const data = await response.json();
-      console.log('📦 AI Video Response:', data);
+      const paymentData = await paymentResponse.json();
+      console.log('📦 Payment response:', paymentData);
 
-      if (data.success && data.videoUrl) {
-        setVideoUrl(data.videoUrl);
-        setProgress(100);
-        setIsGenerating(false);
-        setStatusMessage('✅ AI video generated successfully! 🎉');
-        setIsPlaying(true);
+      if (!paymentData.success) {
+        throw new Error(paymentData.error || 'Payment initialization failed');
+      }
+
+      setPaymentReference(paymentData.reference);
+
+      if (paymentData.testMode) {
+        await processPhotoVideo(paymentData.reference);
+        return;
+      }
+
+      if (window.PaystackPop) {
+        const popup = new window.PaystackPop();
+        popup.open({
+          key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
+          email: email,
+          amount: priceAmount * 100,
+          ref: paymentData.reference,
+          metadata: paymentData.metadata,
+          currency: 'KES',
+          callback: async (response) => {
+            console.log('✅ Payment successful:', response);
+            await processPhotoVideo(response.reference);
+          },
+          onClose: () => {
+            setLoading(false);
+            setError('Payment was cancelled');
+          }
+        });
       } else {
-        throw new Error(data.error || 'Failed to generate AI video');
+        await processPhotoVideo(paymentData.reference);
       }
     } catch (error) {
-      console.error('❌ AI Generation error:', error);
-      setError(error.message);
-      setStatusMessage('❌ AI Generation failed');
-    } finally {
-      setIsProcessing(false);
+      console.error('❌ Payment error:', error);
+      setError('Payment failed: ' + error.message);
+      setLoading(false);
     }
   };
 
-  const handlePaymentClose = () => {
-    setShowPayment(false);
-    console.log('Payment modal closed');
-  };
+  const processPhotoVideo = async (reference) => {
+    try {
+      setSuccess('🔄 Processing your video... This may take a few moments.');
 
-  const handleGenerate = () => {
-    generateAIVideo();
-  };
+      // Upload photos to Cloudinary
+      const photoUrls = [];
+      for (const photo of photos) {
+        const formData = new FormData();
+        formData.append('file', photo.file);
+        formData.append('upload_preset', 'ml_default');
 
-  const handleExportVideo = () => {
-    if (videoUrl) {
-      const link = document.createElement('a');
-      link.href = videoUrl;
-      link.download = 'ai-video.mp4';
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-    }
-  };
+        const uploadResponse = await fetch('https://api.cloudinary.com/v1_1/y7d1nk2i/image/upload', {
+          method: 'POST',
+          body: formData
+        });
 
-  const removePhoto = (index) => {
-    const newPhotos = photos.filter((_, i) => i !== index);
-    setPhotos(newPhotos);
-    if (selectedPhoto === photos[index].preview) {
-      setSelectedPhoto(newPhotos.length > 0 ? newPhotos[0].preview : null);
-    }
-    setVideoUrl(null);
-  };
-
-  const selectPhoto = (preview) => {
-    setSelectedPhoto(preview);
-    setVideoUrl(null);
-  };
-
-  // Paystack configuration
-  const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY || 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx';
-  const isLive = publicKey && publicKey.startsWith('pk_live_');
-
-  const paystackProps = {
-    email: email,
-    amount: Math.round(amount * 100),
-    publicKey: publicKey,
-    currency: 'KES',
-    text: `Pay KES ${amount?.toFixed(2) || '0.00'}`,
-    onSuccess: handlePaymentSuccess,
-    onClose: handlePaymentClose,
-    metadata: {
-      custom_fields: [
-        {
-          display_name: "Service",
-          variable_name: "service",
-          value: "AI Image-to-Video"
-        },
-        {
-          display_name: "Duration",
-          variable_name: "duration",
-          value: `${settings.duration}s`
+        const uploadData = await uploadResponse.json();
+        if (uploadData.secure_url) {
+          photoUrls.push(uploadData.secure_url);
         }
-      ]
+      }
+
+      // Generate video
+      const generateResponse = await fetch('/api/generate-photo-video', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          photoUrls: photoUrls,
+          prompt: prompt,
+          duration: duration,
+          aspectRatio: aspectRatio,
+          paymentReference: reference,
+          email: email
+        })
+      });
+
+      const data = await generateResponse.json();
+      if (data.success) {
+        setVideoUrl(data.videoUrl);
+        setSuccess('✅ Video generated successfully! Check your email for the download link.');
+        setLoading(false);
+      } else {
+        throw new Error(data.error || 'Video generation failed');
+      }
+    } catch (error) {
+      console.error('❌ Video generation error:', error);
+      setError('Video generation failed: ' + error.message);
+      setLoading(false);
     }
+  };
+
+  const getPriceDisplay = () => {
+    if (!price) return 'Calculating price...';
+    return `KES ${Math.round(price.finalPrice)}`;
+  };
+
+  const getPriceAmount = () => {
+    if (!price) return 300;
+    return Math.round(price.finalPrice);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white px-4 py-8">
-      <div className="max-w-4xl mx-auto">
-        
-        <div className="flex justify-between items-center mb-6">
-          <div>
-            <h2 className="text-3xl font-bold">🤖 AI Photo to Video</h2>
-            <p className="text-gray-400 text-sm mt-1">Upload a photo and generate an AI-powered video</p>
+    <div className="photos-to-video-page">
+      <div className="header">
+        <button className="back-btn" onClick={() => navigate('/')}>
+          ← Back to Home
+        </button>
+        <h1>🤖 AI Photo to Video</h1>
+        <p>Upload photos and generate an AI-powered video</p>
+      </div>
+
+      <div className="main-content">
+        <div className="left-panel">
+          {/* Email Input */}
+          <div className="email-section">
+            <label>📧 Your Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter your email"
+              disabled={loading}
+            />
+            <small>Your generated video will be sent to this email</small>
           </div>
-          <button
-            onClick={() => navigate('/')}
-            className="bg-white/10 hover:bg-white/20 px-5 py-2 rounded-full text-sm transition-all flex items-center gap-2"
-          >
-            <span>←</span> Back to Home
-          </button>
-        </div>
 
-        {/* Email Input */}
-        <div className="mb-4">
-          <label className="block text-gray-300 mb-2 font-semibold">📧 Your Email</label>
-          <input
-            type="email"
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            placeholder="Enter your email for payment confirmation"
-            className="w-full bg-white/10 border border-white/20 rounded-2xl p-4 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
-            required
-          />
-        </div>
-
-        {/* Upload Area */}
-        {photos.length === 0 && (
-          <div
-            {...getRootProps()}
-            className={`border-2 border-dashed rounded-2xl p-12 text-center cursor-pointer transition-all ${
-              isDragActive ? 'border-pink-500 bg-pink-500/10' : 'border-white/30 hover:border-pink-400'
-            }`}
-          >
-            <input {...getInputProps()} />
-            <div className="text-6xl mb-4">📸</div>
-            <p className="text-gray-300 text-lg">
-              {isDragActive ? 'Drop your photo here' : 'Drag & drop a photo here or click to browse'}
-            </p>
-            <p className="text-gray-500 text-sm mt-2">Supports JPG, PNG, WEBP</p>
-          </div>
-        )}
-
-        {/* Photo Grid */}
-        {photos.length > 0 && (
-          <div className="mb-6">
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-semibold text-lg">
-                {photos.length} Photo{photos.length > 1 ? 's' : ''} Uploaded
-              </h3>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => {
-                    setPhotos([]);
-                    setSelectedPhoto(null);
-                    setVideoUrl(null);
-                  }}
-                  className="bg-red-500/20 hover:bg-red-500/30 px-3 py-1 rounded-lg text-sm text-red-300 transition-all"
-                >
-                  Clear All
-                </button>
-                <button
-                  {...getRootProps()}
-                  className="bg-pink-500/20 hover:bg-pink-500/30 px-3 py-1 rounded-lg text-sm text-pink-300 transition-all"
-                >
+          {/* Photo Upload */}
+          <div className="upload-section">
+            <div className="upload-area" onClick={() => fileInputRef.current?.click()}>
+              <div className="upload-icon">🖼️</div>
+              <p>Click to upload photos</p>
+              <small>Supported formats: JPG, PNG, WEBP (Max 10MB each)</small>
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                disabled={loading}
+              />
+            </div>
+            {photos.length > 0 && (
+              <div className="photo-grid">
+                {photos.map(photo => (
+                  <div key={photo.id} className="photo-item">
+                    <img src={photo.preview} alt="Uploaded" />
+                    <button className="remove-photo" onClick={() => removePhoto(photo.id)}>✕</button>
+                  </div>
+                ))}
+                <button className="add-more-btn" onClick={() => fileInputRef.current?.click()}>
                   + Add More
-                </button>
-                <input {...getInputProps()} />
-              </div>
-            </div>
-            
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-3">
-              {photos.map((photo, index) => (
-                <div 
-                  key={index} 
-                  className={`relative group cursor-pointer ${selectedPhoto === photo.preview ? 'ring-2 ring-pink-500' : ''}`}
-                  onClick={() => selectPhoto(photo.preview)}
-                >
-                  <img 
-                    src={photo.preview} 
-                    alt={`Photo ${index + 1}`}
-                    className="w-full aspect-square object-cover rounded-lg border-2 border-white/10 group-hover:border-pink-500 transition-all"
-                  />
-                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-all rounded-lg flex items-center justify-center gap-1">
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        removePhoto(index);
-                      }}
-                      className="bg-red-500 hover:bg-red-600 rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="absolute top-1 right-1 bg-black/70 rounded-full px-2 py-0.5 text-xs">
-                    {index + 1}
-                  </div>
-                  {selectedPhoto === photo.preview && (
-                    <div className="absolute bottom-1 left-1/2 transform -translate-x-1/2 bg-pink-500 text-xs px-2 py-0.5 rounded-full">
-                      Selected
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-
-        {/* AI Settings */}
-        {selectedPhoto && (
-          <div className="bg-white/5 rounded-2xl p-6 mb-6">
-            <h3 className="font-bold text-lg mb-4">🤖 AI Video Settings</h3>
-            
-            <div className="mb-4">
-              <label className="block text-gray-300 text-sm mb-2">
-                Describe what you want to generate
-              </label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                placeholder="e.g. A cinematic shot of a person walking through a forest at sunset, dramatic lighting, 4K quality..."
-                className="w-full bg-white/10 border border-white/20 rounded-2xl p-4 text-white placeholder-gray-500 h-32 resize-none focus:outline-none focus:border-pink-500"
-              />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-gray-300 text-sm mb-2">
-                  Video Duration
-                </label>
-                <select
-                  value={settings.duration}
-                  onChange={(e) => setSettings({...settings, duration: parseInt(e.target.value)})}
-                  className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-white"
-                >
-                  <option value="3">3 seconds</option>
-                  <option value="5">5 seconds</option>
-                  <option value="8">8 seconds</option>
-                  <option value="10">10 seconds</option>
-                </select>
-              </div>
-              
-              <div>
-                <label className="block text-gray-300 text-sm mb-2">
-                  Aspect Ratio
-                </label>
-                <select
-                  value={settings.aspectRatio}
-                  onChange={(e) => setSettings({...settings, aspectRatio: e.target.value})}
-                  className="w-full bg-white/10 border border-white/20 rounded-xl p-3 text-white"
-                >
-                  <option value="16:9">16:9 (Widescreen)</option>
-                  <option value="9:16">9:16 (Vertical/Reels)</option>
-                </select>
-              </div>
-            </div>
-
-            {/* Price Display */}
-            <div className="bg-white/10 rounded-2xl p-4 mt-4">
-              <div className="flex justify-between items-center">
-                <div>
-                  <p className="text-gray-300">💰 Total Cost</p>
-                  {isLoadingPrice ? (
-                    <p className="text-gray-400 text-sm">Calculating...</p>
-                  ) : priceData ? (
-                    <div>
-                      <p className="text-2xl font-bold text-pink-400">
-                        KES {priceData.finalPrice.toFixed(2)}
-                      </p>
-                      <p className="text-xs text-gray-500">
-                        Base: KES {priceData.baseCost.toFixed(2)} × {priceData.markupMultiplier}x markup
-                      </p>
-                    </div>
-                  ) : (
-                    <p className="text-yellow-400 text-sm">Calculating price...</p>
-                  )}
-                </div>
-                <div className="text-right">
-                  <span className="text-xs text-gray-500">Includes:</span>
-                  <ul className="text-xs text-gray-400">
-                    <li>✅ AI video generation</li>
-                    <li>✅ HD quality</li>
-                    <li>✅ {settings.duration}-second video</li>
-                  </ul>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Progress & Status */}
-        {(isGenerating || isProcessing) && (
-          <div className="bg-white/5 rounded-2xl p-6 mb-6">
-            <p className="text-gray-300 mb-3">{statusMessage}</p>
-            <div className="w-full bg-white/10 rounded-full h-2 overflow-hidden">
-              <div 
-                className="bg-gradient-to-r from-pink-500 to-purple-500 h-2 transition-all duration-500 rounded-full"
-                style={{ width: `${progress}%` }}
-              />
-            </div>
-            <p className="text-xs text-gray-500 mt-2">{Math.round(progress)}% Complete</p>
-          </div>
-        )}
-
-        {/* Video Preview */}
-        {videoUrl && (
-          <div className="bg-white/5 rounded-2xl p-4 mb-6 border border-green-500/30">
-            <h3 className="font-bold text-green-400 mb-2">🎬 AI Video Preview</h3>
-            <div className="relative bg-black/50 rounded-xl overflow-hidden">
-              <video
-                src={videoUrl}
-                controls
-                autoPlay
-                className="w-full aspect-video object-cover"
-              />
-            </div>
-            <div className="mt-3 flex gap-3 flex-wrap">
-              <button
-                onClick={handleExportVideo}
-                className="bg-green-500 hover:bg-green-600 px-6 py-2 rounded-full text-sm font-bold transition-all"
-              >
-                📥 Download Video
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div className="bg-red-500/20 border border-red-500 rounded-2xl p-4 mb-6">
-            <p className="text-red-300">❌ {error}</p>
-          </div>
-        )}
-
-        {/* Payment Modal */}
-        {showPayment && (
-          <div className="bg-white/10 rounded-2xl p-6 mb-6">
-            <p className="text-center text-gray-300 mb-4">Complete your payment below</p>
-            <p className="text-center text-xs text-gray-400 mb-4">
-              💳 You'll be redirected to Paystack to complete payment
-            </p>
-            {publicKey && publicKey !== 'pk_test_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx' ? (
-              <PaystackButton 
-                className="w-full bg-green-500 hover:bg-green-600 text-white font-bold py-4 rounded-full text-xl transition-all transform hover:scale-105"
-                {...paystackProps} 
-              />
-            ) : (
-              <div className="bg-yellow-500/20 border border-yellow-500 rounded-2xl p-4 text-center">
-                <p className="text-yellow-400">⚠️ Payment keys not configured</p>
-                <button
-                  onClick={() => {
-                    setShowPayment(false);
-                    handlePaymentSuccess({ reference: 'test_ref_123' });
-                  }}
-                  className="mt-3 bg-pink-500 hover:bg-pink-600 px-6 py-2 rounded-full text-sm font-bold transition-all"
-                >
-                  🧪 Test Mode: Skip Payment
                 </button>
               </div>
             )}
-            <button
-              onClick={() => setShowPayment(false)}
-              className="w-full mt-3 text-gray-400 hover:text-gray-300 text-sm transition-all"
-            >
-              Cancel
-            </button>
+            <div className="photo-count">
+              {photos.length} Photo{photos.length !== 1 ? 's' : ''} Selected
+            </div>
           </div>
-        )}
 
-        {/* Generate Button */}
-        {selectedPhoto && (
+          {/* AI Settings */}
+          <div className="settings-section">
+            <h3>🤖 AI Video Settings</h3>
+            <div className="setting-group">
+              <label>Describe what you want to generate</label>
+              <textarea
+                value={prompt}
+                onChange={(e) => setPrompt(e.target.value)}
+                placeholder="Describe the scene, mood, and style you want"
+                rows={3}
+                disabled={loading}
+              />
+            </div>
+
+            <div className="setting-group">
+              <label>Video Duration</label>
+              <select value={duration} onChange={(e) => setDuration(parseInt(e.target.value))} disabled={loading}>
+                <option value={5}>5 seconds</option>
+                <option value={10}>10 seconds</option>
+                <option value={15}>15 seconds</option>
+              </select>
+            </div>
+
+            <div className="setting-group">
+              <label>Aspect Ratio</label>
+              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={loading}>
+                <option value="16:9">16:9 (Widescreen)</option>
+                <option value="1:1">1:1 (Square)</option>
+                <option value="9:16">9:16 (Vertical)</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Price Display */}
+          <div className="price-section">
+            <h3>💰 Total Cost</h3>
+            <div className="price-card">
+              <div className="price-amount">{getPriceDisplay()}</div>
+              <div className="price-details">
+                <p>✅ AI video generation</p>
+                <p>✅ HD quality</p>
+                <p>✅ {duration}-second video</p>
+                <p>✅ {photos.length} photo{photos.length !== 1 ? 's' : ''}</p>
+              </div>
+            </div>
+            <div className="price-note">
+              <small>Complete your payment below</small>
+            </div>
+          </div>
+
+          {/* Payment Button */}
           <button
-            onClick={handleGenerate}
-            disabled={isGenerating || isProcessing}
-            className={`w-full bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white font-bold py-4 px-6 rounded-full transition-all transform hover:scale-105 ${
-              (isGenerating || isProcessing) ? 'opacity-50 cursor-not-allowed hover:scale-100' : ''
-            }`}
+            className="generate-btn"
+            onClick={handlePayment}
+            disabled={loading || photos.length === 0 || !prompt.trim()}
           >
-            {isGenerating || isProcessing 
-              ? '⏳ Processing...' 
-              : `🤖 Generate AI Video (KES ${amount?.toFixed(2) || '0.00'})`}
+            {loading ? '⏳ Processing...' : `🤖 Generate AI Video (${getPriceDisplay()})`}
           </button>
-        )}
 
-        {/* Info */}
-        <div className="mt-6 p-4 bg-white/5 rounded-2xl">
-          <h4 className="font-semibold mb-2">ℹ️ How It Works</h4>
-          <ul className="text-sm text-gray-400 space-y-1">
-            <li>• Upload a photo (JPG, PNG, WEBP)</li>
-            <li>• Describe what you want the AI to generate</li>
-            <li>• Complete payment via Paystack</li>
-            <li>• Download your AI-generated video</li>
-            <li>• All AI generations are secure and private</li>
-          </ul>
+          {/* Messages */}
+          {error && <div className="error-message">❌ {error}</div>}
+          {success && <div className="success-message">✅ {success}</div>}
         </div>
 
+        <div className="right-panel">
+          {/* Video Preview */}
+          <div className="video-preview">
+            <h3>📹 Video Preview</h3>
+            {videoUrl ? (
+              <video controls className="video-player">
+                <source src={videoUrl} type="video/mp4" />
+                Your browser does not support the video tag.
+              </video>
+            ) : (
+              <div className="placeholder">
+                <p>Upload photos and generate a video</p>
+              </div>
+            )}
+          </div>
+
+          {/* How It Works */}
+          <div className="how-it-works">
+            <h4>ℹ️ How It Works</h4>
+            <ul>
+              <li>📤 Upload a photo (JPG, PNG, WEBP)</li>
+              <li>📝 Describe what you want the AI to generate</li>
+              <li>💰 Complete payment via Paystack</li>
+              <li>📥 Download your AI-generated video</li>
+              <li>🔒 All AI generations are secure and private</li>
+            </ul>
+            <div className="support-info">
+              <small>Need help? Contact us at support@katareel.com</small>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

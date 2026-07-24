@@ -2254,6 +2254,114 @@ app.get('/api/debug-failed', (req, res) => {
 });
 
 // ============================================
+// ============================================
+// 🔥 FIXED PRICE CALCULATION ENDPOINT
+// ============================================
+// ============================================
+
+app.post('/api/calculate-price', (req, res) => {
+  try {
+    console.log('💰 Price calculation request received');
+    console.log('📦 Request body:', req.body);
+
+    const { serviceType, options } = req.body;
+    const duration = options?.duration || 5;
+    const photoCount = options?.photoCount || 1;
+
+    console.log(`📊 Service: ${serviceType}, Duration: ${duration}s, Photos: ${photoCount}`);
+
+    const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
+    let baseCost = 0;
+    let breakdown = [];
+    let serviceName = '';
+
+    // PHOTO TO VIDEO - FIXED PRICING
+    if (serviceType === 'photos_to_video' || serviceType === 'photo-to-video' || serviceType === 'photo_to_video') {
+      // Base fee for photo-to-video service
+      const baseFee = 50 * durationMultiplier;
+      // Per photo fee
+      const perPhotoFee = 10 * durationMultiplier;
+      // Processing fee
+      const processingFee = 20 * durationMultiplier;
+      
+      baseCost = baseFee + (photoCount * perPhotoFee) + processingFee;
+      
+      breakdown = [
+        { item: 'AI Photo-to-Video Base', amount: baseFee },
+        { item: `${photoCount} photo(s) processing`, amount: photoCount * perPhotoFee },
+        { item: 'AI video generation & rendering', amount: processingFee }
+      ];
+      
+      serviceName = `AI Photo-to-Video (${duration}s, ${photoCount} photo${photoCount > 1 ? 's' : ''})`;
+    }
+    // IMAGE TO VIDEO
+    else if (serviceType === 'image_to_video') {
+      const baseFee = 60 * durationMultiplier;
+      const processingFee = 30 * durationMultiplier;
+      
+      baseCost = baseFee + processingFee;
+      
+      breakdown = [
+        { item: 'AI Image-to-Video Base', amount: baseFee },
+        { item: 'AI video generation & rendering', amount: processingFee }
+      ];
+      
+      serviceName = `AI Image-to-Video (${duration}s)`;
+    }
+    // TEXT TO VIDEO
+    else {
+      const baseFee = 40 * durationMultiplier;
+      const processingFee = 20 * durationMultiplier;
+      
+      baseCost = baseFee + processingFee;
+      
+      breakdown = [
+        { item: 'AI Video Generation', amount: baseFee },
+        { item: `${duration}s video processing`, amount: processingFee },
+        { item: 'HD Quality', amount: 0 }
+      ];
+      
+      serviceName = `AI Text-to-Video (${duration}s)`;
+    }
+
+    // Markup multiplier (profit margin)
+    const markupMultiplier = 10;
+    const finalPrice = baseCost * markupMultiplier;
+    const markupAmount = baseCost * (markupMultiplier - 1);
+
+    console.log(`✅ Price calculated: KES ${finalPrice}`);
+    console.log(`   Base Cost: ${baseCost}, Markup: ${markupAmount}`);
+
+    const priceData = {
+      serviceType: serviceType || 'photo_to_video',
+      serviceName: serviceName,
+      baseCost: baseCost,
+      markupMultiplier: markupMultiplier,
+      markupAmount: markupAmount,
+      finalPrice: Math.round(finalPrice),
+      breakdown: breakdown,
+      currency: 'KES',
+      duration: duration,
+      photoCount: photoCount
+    };
+
+    res.json({
+      success: true,
+      price: priceData,
+      formatted: `KES ${Math.round(finalPrice)}`
+    });
+
+  } catch (error) {
+    console.error('❌ Price calculation error:', error.message);
+    console.error('Stack:', error.stack);
+    res.status(400).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
 // TEST & HEALTH ENDPOINTS
 // ============================================
 
@@ -2408,9 +2516,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
   console.log(`📊 MongoDB Atlas: ${mongoose.connection.db?.databaseName || 'connecting...'}`);
-  console.log(`📊 Total Revenue: KES 0`);
-  console.log(`📊 Total Videos: 0`);
-  console.log(`🌐 Total Translations: 0`);
+  console.log(`💰 Price calculation endpoint: /api/calculate-price FIXED ✅`);
   console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
   console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
   console.log(`💰 Translation Price: KES 300 (Fixed)`);
