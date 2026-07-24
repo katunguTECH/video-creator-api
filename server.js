@@ -27,37 +27,84 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// MONGODB ATLAS CONNECTION
+// MONGODB ATLAS CONNECTION - FIXED WITH YOUR CREDENTIALS
 // ============================================
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://katungu:2zT1Q8EPdRRRfnxr@cluster0.2ykyi.mongodb.net/video-creator?retryWrites=true&w=majority';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://henrymunyoki_db_user:YOUR_PASSWORD@cluster0.2ykyi.mongodb.net/video-creator?retryWrites=true&w=majority&appName=Cluster0';
+const DATABASE_NAME = process.env.DATABASE_NAME || 'video-creator';
 const MONGODB_API_KEY = process.env.MONGODB_API_KEY || 'al-YI5iqOyUlS7y4M1pfryAgH0jLnkjScv5bFGrJ_2lVqV';
 
 console.log('🔑 MongoDB Atlas configured');
-console.log('🔑 MongoDB API Key:', MONGODB_API_KEY ? '✅ Set' : '❌ Not set');
+console.log(`📊 Database: ${DATABASE_NAME}`);
+console.log(`👤 User: henrymunyoki_db_user`);
 
-mongoose.connect(MONGODB_URI, {
+// Connection options for better reliability
+const mongooseOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 10000,
+  serverSelectionTimeoutMS: 30000, // Increased for slower connections
   socketTimeoutMS: 45000,
-  family: 4
+  family: 4,
+  dbName: DATABASE_NAME // Explicitly set database name
+};
+
+// Connect with retry logic
+let isMongoConnected = false;
+
+async function connectToMongo() {
+  let retries = 5;
+  while (retries > 0) {
+    try {
+      console.log(`🔄 Connecting to MongoDB Atlas... (${retries} attempts left)`);
+      await mongoose.connect(MONGODB_URI, mongooseOptions);
+      console.log('✅ MongoDB Atlas connected successfully!');
+      console.log(`   Database: ${mongoose.connection.db.databaseName}`);
+      console.log(`   Host: ${mongoose.connection.host}`);
+      isMongoConnected = true;
+      return true;
+    } catch (error) {
+      console.error(`❌ MongoDB connection attempt failed: ${error.message}`);
+      retries--;
+      if (retries > 0) {
+        console.log(`⏳ Waiting 5 seconds before retry...`);
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+    }
+  }
+  console.error('❌ All MongoDB connection attempts failed');
+  isMongoConnected = false;
+  return false;
+}
+
+// Start connection
+connectToMongo().then(connected => {
+  isMongoConnected = connected;
+  if (!connected) {
+    console.warn('⚠️ Running without MongoDB - some features will be limited');
+  }
 });
 
 const db = mongoose.connection;
 
 db.on('error', (error) => {
   console.error('❌ MongoDB connection error:', error);
-  console.error('Please check your MONGODB_URI and network connectivity');
-});
-
-db.once('open', () => {
-  console.log('✅ MongoDB Atlas connected successfully!');
-  console.log(`   Database: ${mongoose.connection.db.databaseName}`);
+  isMongoConnected = false;
 });
 
 db.on('disconnected', () => {
   console.warn('⚠️ MongoDB disconnected. Attempting to reconnect...');
+  isMongoConnected = false;
+  // Auto-reconnect after 5 seconds
+  setTimeout(() => {
+    connectToMongo().then(connected => {
+      isMongoConnected = connected;
+    });
+  }, 5000);
+});
+
+db.on('reconnected', () => {
+  console.log('✅ MongoDB reconnected!');
+  isMongoConnected = true;
 });
 
 // ============================================
@@ -152,6 +199,11 @@ const SiteVisit = mongoose.model('SiteVisit', siteVisitSchema);
 // ============================================
 
 async function initializeBalances() {
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, skipping balance initialization');
+    return;
+  }
+  
   try {
     const defaultBalances = [
       { provider: 'replicate', balance: parseFloat(process.env.REPLICATE_BALANCE) || 10.00 },
@@ -171,28 +223,51 @@ async function initializeBalances() {
   }
 }
 
-setTimeout(initializeBalances, 1000);
+// Initialize balances after MongoDB connects
+db.once('open', () => {
+  setTimeout(initializeBalances, 1000);
+});
 
 async function addApiTransaction(provider, amount, type, description) {
-  const entry = new ApiLedger({
-    provider,
-    amount: parseFloat(amount),
-    type,
-    description: description || ''
-  });
-  await entry.save();
-  return entry.id;
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, skipping API transaction');
+    return null;
+  }
+  
+  try {
+    const entry = new ApiLedger({
+      provider,
+      amount: parseFloat(amount),
+      type,
+      description: description || ''
+    });
+    await entry.save();
+    return entry.id;
+  } catch (error) {
+    console.error('❌ Error adding API transaction:', error.message);
+    return null;
+  }
 }
 
 async function getApiBalance(provider) {
-  const initialBalance = await InitialBalance.findOne({ provider });
-  const initial = initialBalance ? initialBalance.balance : 0;
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, returning default balance');
+    return 0;
+  }
+  
+  try {
+    const initialBalance = await InitialBalance.findOne({ provider });
+    const initial = initialBalance ? initialBalance.balance : 0;
 
-  const transactions = await ApiLedger.find({ provider });
-  const totalPurchases = transactions.filter(t => t.type === 'purchase').reduce((sum, t) => sum + t.amount, 0);
-  const totalUsage = transactions.filter(t => t.type === 'usage').reduce((sum, t) => sum + t.amount, 0);
+    const transactions = await ApiLedger.find({ provider });
+    const totalPurchases = transactions.filter(t => t.type === 'purchase').reduce((sum, t) => sum + t.amount, 0);
+    const totalUsage = transactions.filter(t => t.type === 'usage').reduce((sum, t) => sum + t.amount, 0);
 
-  return Math.round((initial + totalPurchases - totalUsage) * 100) / 100;
+    return Math.round((initial + totalPurchases - totalUsage) * 100) / 100;
+  } catch (error) {
+    console.error('❌ Error getting API balance:', error.message);
+    return 0;
+  }
 }
 
 async function getApiBalances() {
@@ -206,170 +281,281 @@ async function getApiBalances() {
 }
 
 async function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
-  const entry = new UserPayment({
-    email,
-    amount: parseFloat(amount),
-    paymentMethod,
-    serviceType,
-    reference
-  });
-  await entry.save();
-  return entry.id;
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, skipping user payment');
+    return null;
+  }
+  
+  try {
+    const entry = new UserPayment({
+      email,
+      amount: parseFloat(amount),
+      paymentMethod,
+      serviceType,
+      reference
+    });
+    await entry.save();
+    return entry.id;
+  } catch (error) {
+    console.error('❌ Error adding user payment:', error.message);
+    return null;
+  }
 }
 
 async function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
-  const entry = new Revenue({
-    transactionId,
-    email,
-    amount: parseFloat(amount),
-    serviceType,
-    paymentReference,
-    paymentMethod: paymentMethod || 'card'
-  });
-  await entry.save();
-  return entry.id;
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, skipping revenue');
+    return null;
+  }
+  
+  try {
+    const entry = new Revenue({
+      transactionId,
+      email,
+      amount: parseFloat(amount),
+      serviceType,
+      paymentReference,
+      paymentMethod: paymentMethod || 'card'
+    });
+    await entry.save();
+    return entry.id;
+  } catch (error) {
+    console.error('❌ Error adding revenue:', error.message);
+    return null;
+  }
 }
 
 async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
-  const entry = new VideoUsage({
-    transactionId,
-    userEmail: userEmail || 'anonymous',
-    videoType,
-    prompt: prompt ? prompt.substring(0, 200) : '',
-    cost: cost || 0,
-    modelUsed: modelUsed || 'unknown',
-    provider: provider || 'unknown',
-    duration: duration || 5
-  });
-  await entry.save();
-  return entry.id;
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, skipping video usage');
+    return null;
+  }
+  
+  try {
+    const entry = new VideoUsage({
+      transactionId,
+      userEmail: userEmail || 'anonymous',
+      videoType,
+      prompt: prompt ? prompt.substring(0, 200) : '',
+      cost: cost || 0,
+      modelUsed: modelUsed || 'unknown',
+      provider: provider || 'unknown',
+      duration: duration || 5
+    });
+    await entry.save();
+    return entry.id;
+  } catch (error) {
+    console.error('❌ Error adding video usage:', error.message);
+    return null;
+  }
 }
 
 async function addActivityLog(userEmail, action, details, amount) {
-  const entry = new ActivityLog({
-    userEmail: userEmail || 'anonymous',
-    action,
-    details: details || '',
-    amount: amount || 0
-  });
-  await entry.save();
-
-  const count = await ActivityLog.countDocuments();
-  if (count > 1000) {
-    const oldest = await ActivityLog.findOne().sort({ createdAt: 1 });
-    if (oldest) await ActivityLog.deleteOne({ _id: oldest._id });
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, skipping activity log');
+    return null;
   }
+  
+  try {
+    const entry = new ActivityLog({
+      userEmail: userEmail || 'anonymous',
+      action,
+      details: details || '',
+      amount: amount || 0
+    });
+    await entry.save();
 
-  return entry.id;
+    const count = await ActivityLog.countDocuments();
+    if (count > 1000) {
+      const oldest = await ActivityLog.findOne().sort({ createdAt: 1 });
+      if (oldest) await ActivityLog.deleteOne({ _id: oldest._id });
+    }
+
+    return entry.id;
+  } catch (error) {
+    console.error('❌ Error adding activity log:', error.message);
+    return null;
+  }
 }
 
 async function recordSiteVisit(page, ip, userAgent) {
-  const entry = new SiteVisit({
-    page,
-    ip: ip || 'unknown',
-    userAgent: userAgent || 'unknown'
-  });
-  await entry.save();
-
-  const count = await SiteVisit.countDocuments();
-  if (count > 5000) {
-    const oldest = await SiteVisit.findOne().sort({ createdAt: 1 });
-    if (oldest) await SiteVisit.deleteOne({ _id: oldest._id });
+  if (!isMongoConnected) {
+    // Silently skip if MongoDB is not connected
+    return null;
   }
+  
+  try {
+    const entry = new SiteVisit({
+      page,
+      ip: ip || 'unknown',
+      userAgent: userAgent || 'unknown'
+    });
+    await entry.save();
 
-  return entry.id;
+    const count = await SiteVisit.countDocuments();
+    if (count > 5000) {
+      const oldest = await SiteVisit.findOne().sort({ createdAt: 1 });
+      if (oldest) await SiteVisit.deleteOne({ _id: oldest._id });
+    }
+
+    return entry.id;
+  } catch (error) {
+    // Silently fail for site visits - not critical
+    return null;
+  }
 }
 
 async function getRevenueByService() {
-  const textToVideo = await Revenue.aggregate([
-    { $match: { serviceType: 'textToVideo' } },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
-  ]);
-  const photoToVideo = await Revenue.aggregate([
-    { $match: { serviceType: 'photoToVideo' } },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
-  ]);
-  const translation = await Revenue.aggregate([
-    { $match: { serviceType: 'translation' } },
-    { $group: { _id: null, total: { $sum: '$amount' } } }
-  ]);
+  if (!isMongoConnected) {
+    return { total: 0, textToVideo: 0, photoToVideo: 0, translation: 0 };
+  }
+  
+  try {
+    const textToVideo = await Revenue.aggregate([
+      { $match: { serviceType: 'textToVideo' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const photoToVideo = await Revenue.aggregate([
+      { $match: { serviceType: 'photoToVideo' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const translation = await Revenue.aggregate([
+      { $match: { serviceType: 'translation' } },
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
 
-  const textTotal = textToVideo[0]?.total || 0;
-  const photoTotal = photoToVideo[0]?.total || 0;
-  const translationTotal = translation[0]?.total || 0;
+    const textTotal = textToVideo[0]?.total || 0;
+    const photoTotal = photoToVideo[0]?.total || 0;
+    const translationTotal = translation[0]?.total || 0;
 
-  return {
-    total: textTotal + photoTotal + translationTotal,
-    textToVideo: textTotal,
-    photoToVideo: photoTotal,
-    translation: translationTotal
-  };
+    return {
+      total: textTotal + photoTotal + translationTotal,
+      textToVideo: textTotal,
+      photoToVideo: photoTotal,
+      translation: translationTotal
+    };
+  } catch (error) {
+    console.error('❌ Error getting revenue by service:', error.message);
+    return { total: 0, textToVideo: 0, photoToVideo: 0, translation: 0 };
+  }
 }
 
 async function getVideoUsage() {
-  const textToVideo = await VideoUsage.countDocuments({ videoType: 'text-to-video' });
-  const photoToVideo = await VideoUsage.countDocuments({ videoType: 'photo-to-video' });
-  const translation = await VideoUsage.countDocuments({ videoType: 'translation' });
+  if (!isMongoConnected) {
+    return { totalVideos: 0, textToVideo: 0, photoToVideo: 0, translation: 0 };
+  }
+  
+  try {
+    const textToVideo = await VideoUsage.countDocuments({ videoType: 'text-to-video' });
+    const photoToVideo = await VideoUsage.countDocuments({ videoType: 'photo-to-video' });
+    const translation = await VideoUsage.countDocuments({ videoType: 'translation' });
 
-  return {
-    totalVideos: textToVideo + photoToVideo + translation,
-    textToVideo,
-    photoToVideo,
-    translation
-  };
+    return {
+      totalVideos: textToVideo + photoToVideo + translation,
+      textToVideo,
+      photoToVideo,
+      translation
+    };
+  } catch (error) {
+    console.error('❌ Error getting video usage:', error.message);
+    return { totalVideos: 0, textToVideo: 0, photoToVideo: 0, translation: 0 };
+  }
 }
 
 async function getSiteVisits() {
-  return await SiteVisit.countDocuments();
+  if (!isMongoConnected) return 0;
+  try {
+    return await SiteVisit.countDocuments();
+  } catch (error) {
+    return 0;
+  }
 }
 
 async function getRecentActivity(limit = 10) {
-  const logs = await ActivityLog.find()
-    .sort({ createdAt: -1 })
-    .limit(limit);
+  if (!isMongoConnected) return [];
+  
+  try {
+    const logs = await ActivityLog.find()
+      .sort({ createdAt: -1 })
+      .limit(limit);
 
-  return logs.map(log => ({
-    id: log._id,
-    user: log.userEmail || 'Anonymous',
-    action: log.action,
-    details: log.details || '',
-    amount: log.amount || 0,
-    time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
-  }));
+    return logs.map(log => ({
+      id: log._id,
+      user: log.userEmail || 'Anonymous',
+      action: log.action,
+      details: log.details || '',
+      amount: log.amount || 0,
+      time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
+    }));
+  } catch (error) {
+    console.error('❌ Error getting recent activity:', error.message);
+    return [];
+  }
 }
 
 async function getUserPayments(limit = 20) {
-  const payments = await UserPayment.find()
-    .sort({ createdAt: -1 })
-    .limit(limit);
+  if (!isMongoConnected) return [];
+  
+  try {
+    const payments = await UserPayment.find()
+      .sort({ createdAt: -1 })
+      .limit(limit);
 
-  return payments.map(payment => ({
-    id: payment._id,
-    email: payment.email,
-    amount: payment.amount,
-    paymentMethod: payment.paymentMethod,
-    serviceType: payment.serviceType,
-    reference: payment.reference,
-    status: payment.status,
-    createdAt: payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'Just now'
-  }));
+    return payments.map(payment => ({
+      id: payment._id,
+      email: payment.email,
+      amount: payment.amount,
+      paymentMethod: payment.paymentMethod,
+      serviceType: payment.serviceType,
+      reference: payment.reference,
+      status: payment.status,
+      createdAt: payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'Just now'
+    }));
+  } catch (error) {
+    console.error('❌ Error getting user payments:', error.message);
+    return [];
+  }
 }
 
 async function findPaymentByReference(reference) {
-  return await UserPayment.findOne({ reference });
+  if (!isMongoConnected) return null;
+  
+  try {
+    return await UserPayment.findOne({ reference });
+  } catch (error) {
+    console.error('❌ Error finding payment by reference:', error.message);
+    return null;
+  }
 }
 
 async function getTranslations(email) {
-  const query = email ? { email } : {};
-  return await Translation.find(query)
-    .sort({ createdAt: -1 })
-    .limit(20);
+  if (!isMongoConnected) return [];
+  
+  try {
+    const query = email ? { email } : {};
+    return await Translation.find(query)
+      .sort({ createdAt: -1 })
+      .limit(20);
+  } catch (error) {
+    console.error('❌ Error getting translations:', error.message);
+    return [];
+  }
 }
 
 async function saveTranslation(translationData) {
-  const entry = new Translation(translationData);
-  await entry.save();
-  return entry;
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, skipping translation save');
+    return null;
+  }
+  
+  try {
+    const entry = new Translation(translationData);
+    await entry.save();
+    return entry;
+  } catch (error) {
+    console.error('❌ Error saving translation:', error.message);
+    return null;
+  }
 }
 
 // ============================================
@@ -1737,8 +1923,8 @@ app.get('/api/admin/dashboard', async (req, res) => {
       recentPayments: payments,
       translations: translations || 0,
       mongodb: {
-        connected: mongoose.connection.readyState === 1,
-        database: mongoose.connection.db?.databaseName || 'unknown'
+        connected: isMongoConnected,
+        database: DATABASE_NAME
       }
     });
   } catch (error) {
@@ -2608,8 +2794,8 @@ app.get('/api/health', async (req, res) => {
       byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
       paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
       email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
-      mongodb_connected: mongoose.connection.readyState === 1,
-      mongodb_database: mongoose.connection.db?.databaseName || 'unknown',
+      mongodb_connected: isMongoConnected,
+      mongodb_database: DATABASE_NAME || 'unknown',
       replicate_balance: replicateBalance,
       byteplus_balance: byteplusBalance,
       total_revenue: totalRevenueResult[0]?.total || 0,
@@ -2621,7 +2807,7 @@ app.get('/api/health', async (req, res) => {
     res.status(500).json({
       status: 'unhealthy',
       error: error.message,
-      mongodb_connected: mongoose.connection.readyState === 1
+      mongodb_connected: isMongoConnected
     });
   }
 });
@@ -2666,8 +2852,8 @@ app.get('/', (req, res) => {
       { path: '/api/test-tts', method: 'POST' }
     ],
     mongodb: {
-      connected: mongoose.connection.readyState === 1,
-      database: mongoose.connection.db?.databaseName || 'not connected'
+      connected: isMongoConnected,
+      database: DATABASE_NAME || 'not connected'
     },
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
@@ -2710,7 +2896,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
-  console.log(`📊 MongoDB Atlas: ${mongoose.connection.db?.databaseName || 'connecting...'}`);
+  console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected'}`);
+  console.log(`📊 Database: ${DATABASE_NAME}`);
   console.log(`💰 Price calculation endpoint: /api/calculate-price FIXED ✅`);
   console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
   console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
