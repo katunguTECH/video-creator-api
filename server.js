@@ -38,8 +38,6 @@ console.log('🔑 MongoDB Atlas configured');
 console.log('🔑 MongoDB API Key:', MONGODB_API_KEY ? '✅ Set' : '❌ Not set');
 
 mongoose.connect(MONGODB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
   serverSelectionTimeoutMS: 10000,
   socketTimeoutMS: 45000,
   family: 4
