@@ -166,13 +166,19 @@ function PhotosToVideo() {
     setPhotos(photos.filter(p => p.id !== id));
   };
 
+  // ============================================
+  // ✅ FIXED: Paystack v1 inline.js uses PaystackPop.setup(...).openIframe(),
+  // NOT `new PaystackPop()`. PaystackPop is a plain object with a static
+  // setup() method, not a constructor — calling `new` on it threw
+  // "window.PaystackPop is not a constructor".
+  // ============================================
   const openPaystackPopup = (paymentData) => {
     // Check if Paystack is available
     if (!paystackReady && typeof window.PaystackPop === 'undefined') {
       console.error('❌ Paystack not ready, retrying...');
       setError('Payment system is loading. Please try again in a moment.');
       setLoading(false);
-      
+
       // Try reloading the script
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
@@ -187,23 +193,23 @@ function PhotosToVideo() {
     }
 
     try {
-      const popup = new window.PaystackPop();
-      popup.open({
+      const handler = window.PaystackPop.setup({
         key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
         email: email,
         amount: paymentData.amount * 100,
         ref: paymentData.reference,
         metadata: paymentData.metadata,
         currency: 'KES',
-        callback: async (response) => {
+        callback: (response) => {
           console.log('✅ Payment successful:', response);
-          await processPhotoVideo(response.reference);
+          processPhotoVideo(response.reference);
         },
         onClose: () => {
           setLoading(false);
           setError('Payment was cancelled');
         }
       });
+      handler.openIframe();
     } catch (error) {
       console.error('❌ Paystack error:', error);
       setError('Payment system error. Please try again.');
