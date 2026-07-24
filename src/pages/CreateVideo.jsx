@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
-import { PaystackButton } from 'react-paystack';
+
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
 

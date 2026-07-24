@@ -1,6 +1,6 @@
 // src/components/PayButton.jsx
 import React from "react";
-import { PaystackButton } from "react-paystack";
+
 
 const PayButton = ({ email, amount, onSuccess, onClose }) => {
   const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
