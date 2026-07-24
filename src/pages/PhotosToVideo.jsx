@@ -2,10 +2,9 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './PhotosToVideo.css';
 
-// API Base URL from environment
 const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
-// Helper function with retry logic for cold starts
+// Helper function with retry logic
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -13,11 +12,9 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
       console.log(`🔄 Fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
       const response = await fetch(url, options);
       if (response.ok) return response;
-      // If it's a 404 or 400, don't retry
       if (response.status === 404 || response.status === 400) {
         return response;
       }
-      // For other errors, wait and retry
       if (attempt < maxRetries) {
         const delay = (attempt + 1) * 1000;
         console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
@@ -36,20 +33,6 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
   throw lastError || new Error('Max retries exceeded');
 };
 
-// Fallback languages
-const FALLBACK_LANGUAGES = {
-  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
-  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
-  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
-  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
-  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
-  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
-  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
-  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
-  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
-  'mr': 'Marathi', 'or': 'Odia'
-};
-
 function PhotosToVideo() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('katungu1@gmail.com');
@@ -63,9 +46,58 @@ function PhotosToVideo() {
   const [success, setSuccess] = useState('');
   const [videoUrl, setVideoUrl] = useState(null);
   const [paymentReference, setPaymentReference] = useState('');
+  const [paystackReady, setPaystackReady] = useState(false);
   const fileInputRef = useRef(null);
 
-  // Calculate price whenever photos, duration changes
+  // ✅ Load Paystack script on component mount
+  useEffect(() => {
+    // Function to load Paystack script
+    const loadPaystack = () => {
+      // Check if already loaded
+      if (typeof window.PaystackPop !== 'undefined') {
+        console.log('✅ Paystack already loaded');
+        setPaystackReady(true);
+        return;
+      }
+
+      // Check if script tag already exists
+      const existingScript = document.querySelector('script[src*="paystack"]');
+      if (existingScript) {
+        console.log('📦 Paystack script already in DOM, waiting for it to load...');
+        // Wait for it to load
+        existingScript.onload = () => {
+          console.log('✅ Paystack script loaded from existing tag!');
+          setPaystackReady(true);
+        };
+        return;
+      }
+
+      // Create and load script
+      console.log('📦 Loading Paystack script...');
+      const script = document.createElement('script');
+      script.src = 'https://js.paystack.co/v1/inline.js';
+      script.async = true;
+      script.onload = () => {
+        console.log('✅ Paystack script loaded successfully!');
+        setPaystackReady(true);
+      };
+      script.onerror = () => {
+        console.error('❌ Failed to load Paystack script');
+        // Retry after 2 seconds
+        setTimeout(loadPaystack, 2000);
+      };
+      document.head.appendChild(script);
+    };
+
+    loadPaystack();
+
+    // Cleanup
+    return () => {
+      // Don't remove the script on unmount, it should stay
+    };
+  }, []);
+
+  // Calculate price whenever photos or duration changes
   useEffect(() => {
     calculatePrice();
   }, [photos.length, duration]);
@@ -106,7 +138,6 @@ function PhotosToVideo() {
       }
     } catch (error) {
       console.error('❌ Price calculation error:', error);
-      // Set a default price if calculation fails
       setPrice({
         finalPrice: 300,
         formatted: 'KES 300',
@@ -135,6 +166,51 @@ function PhotosToVideo() {
     setPhotos(photos.filter(p => p.id !== id));
   };
 
+  const openPaystackPopup = (paymentData) => {
+    // Check if Paystack is available
+    if (!paystackReady && typeof window.PaystackPop === 'undefined') {
+      console.error('❌ Paystack not ready, retrying...');
+      setError('Payment system is loading. Please try again in a moment.');
+      setLoading(false);
+      
+      // Try reloading the script
+      const script = document.createElement('script');
+      script.src = 'https://js.paystack.co/v1/inline.js';
+      script.async = true;
+      script.onload = () => {
+        setPaystackReady(true);
+        console.log('✅ Paystack reloaded, please try payment again');
+        setError('Paystack loaded. Please click "Generate AI Video" again.');
+      };
+      document.head.appendChild(script);
+      return;
+    }
+
+    try {
+      const popup = new window.PaystackPop();
+      popup.open({
+        key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
+        email: email,
+        amount: paymentData.amount * 100,
+        ref: paymentData.reference,
+        metadata: paymentData.metadata,
+        currency: 'KES',
+        callback: async (response) => {
+          console.log('✅ Payment successful:', response);
+          await processPhotoVideo(response.reference);
+        },
+        onClose: () => {
+          setLoading(false);
+          setError('Payment was cancelled');
+        }
+      });
+    } catch (error) {
+      console.error('❌ Paystack error:', error);
+      setError('Payment system error. Please try again.');
+      setLoading(false);
+    }
+  };
+
   const handlePayment = async () => {
     if (photos.length === 0) {
       setError('Please upload at least one photo');
@@ -148,6 +224,13 @@ function PhotosToVideo() {
 
     if (!email) {
       setError('Please enter your email address');
+      return;
+    }
+
+    // Check if Paystack is ready
+    if (!paystackReady && typeof window.PaystackPop === 'undefined') {
+      setError('Payment system is loading. Please wait a moment and try again.');
+      setLoading(false);
       return;
     }
 
@@ -215,27 +298,13 @@ function PhotosToVideo() {
         return;
       }
 
-      if (window.PaystackPop) {
-        const popup = new window.PaystackPop();
-        popup.open({
-          key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
-          email: email,
-          amount: priceAmount * 100,
-          ref: paymentData.reference,
-          metadata: paymentData.metadata,
-          currency: 'KES',
-          callback: async (response) => {
-            console.log('✅ Payment successful:', response);
-            await processPhotoVideo(response.reference);
-          },
-          onClose: () => {
-            setLoading(false);
-            setError('Payment was cancelled');
-          }
-        });
-      } else {
-        await processPhotoVideo(paymentData.reference);
-      }
+      // ✅ Open Paystack popup
+      openPaystackPopup({
+        amount: priceAmount,
+        reference: paymentData.reference,
+        metadata: paymentData.metadata
+      });
+
     } catch (error) {
       console.error('❌ Payment error:', error);
       setError('Payment failed: ' + error.message);
@@ -305,6 +374,7 @@ function PhotosToVideo() {
 
   return (
     <div className="photos-to-video-page">
+      {/* ... your existing JSX ... */}
       <div className="header">
         <button className="back-btn" onClick={() => navigate('/')}>
           ← Back to Home
