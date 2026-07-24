@@ -8,7 +8,7 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto'); // ✅ Added for UUID generation
+const crypto = require('crypto');
 const nodemailer = require('nodemailer');
 const mailgun = require('mailgun-js');
 const cloudinary = require('cloudinary').v2;
@@ -17,7 +17,6 @@ const axios = require('axios');
 const Groq = require('groq-sdk');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-
 const mongoose = require('mongoose');
 
 const app = express();
@@ -535,6 +534,21 @@ app.use(cors({
 
 // Handle preflight requests explicitly
 app.options('*', cors());
+
+// ============================================
+// FALLBACK CORS MIDDLEWARE
+// ============================================
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', 'https://www.katareel.com');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  res.header('Access-Control-Allow-Credentials', 'true');
+  
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
+  }
+  next();
+});
 
 // ============================================
 // MIDDLEWARE
@@ -1080,7 +1094,6 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
 
   console.log(`🔊 Audio buffer size: ${audioBuffer.length} bytes`);
 
-  // ✅ REPLACED uuidv4() with crypto.randomUUID()
   const tempAudioPath = path.join(tempDir, `${crypto.randomUUID()}.mp3`);
   fs.writeFileSync(tempAudioPath, audioBuffer);
 
@@ -1091,10 +1104,7 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
   const audioDuration = await getDuration(tempAudioPath);
   console.log(`📏 Video: ${videoDuration.toFixed(2)}s | New audio: ${audioDuration.toFixed(2)}s`);
 
-  // Ratio > 1 means the new audio is longer than the video and needs to speed up.
-  // Ratio < 1 means the new audio is shorter and needs to slow down.
   let tempoRatio = audioDuration / videoDuration;
-  // Clamp to keep speech intelligible (max ~40% speed change in either direction)
   tempoRatio = Math.min(Math.max(tempoRatio, 0.7), 1.4);
   const atempoFilter = buildAtempoFilter(tempoRatio);
   console.log(`🎚️ Applying tempo adjustment: ${tempoRatio.toFixed(3)}x (${atempoFilter})`);
@@ -1102,9 +1112,9 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
       .input(tempAudioPath)
-      .audioFilters([atempoFilter, 'apad']) // apad fills any remaining gap with silence
+      .audioFilters([atempoFilter, 'apad'])
       .audioCodec('aac')
-      .videoCodec('libx264') // re-encode video so -t can cut at an exact frame, not just the nearest keyframe
+      .videoCodec('libx264')
       .outputOptions([
         '-map', '0:v:0',
         '-map', '1:a:0',
@@ -1129,14 +1139,12 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
   console.log(`🎬 Starting translation pipeline for ${targetLanguage}`);
   console.log(`📹 Original video: ${originalVideoUrl.substring(0, 100)}...`);
 
-  // ✅ REPLACED uuidv4() with crypto.randomUUID()
   const videoId = crypto.randomUUID();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
   const audioPath = path.join(tempDir, `${videoId}.wav`);
   const outputPath = path.join(tempDir, `${videoId}_translated.mp4`);
 
   try {
-    // Step 1: Download the video
     console.log('📥 Downloading video...');
     const response = await fetch(originalVideoUrl);
     if (!response.ok) throw new Error(`Failed to download video: ${response.status}`);
@@ -1144,26 +1152,19 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
     fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
     console.log('✅ Video downloaded');
 
-    // Step 2: Extract audio
     console.log('🎵 Extracting audio...');
     await extractAudio(videoPath, audioPath);
     console.log('✅ Audio extracted');
 
-    // Step 3: Transcribe audio
     console.log('📝 Transcribing audio...');
     const transcribedText = await transcribeAudio(audioPath);
     console.log(`📝 Transcription (first 100 chars): ${transcribedText.substring(0, 100)}...`);
 
-    // Step 4: Translate text
     console.log(`🌐 Translating to ${targetLanguage}...`);
     const translatedTextResult = await translateText(transcribedText, targetLanguage);
     console.log(`🌐 Translation (first 100 chars): ${translatedTextResult.substring(0, 100)}...`);
 
-    // Step 5: Get original video duration up front so we can request a closer
-    // speaking rate from TTS before ffmpeg even has to stretch the result
     const originalVideoDuration = await getDuration(videoPath);
-    // Rough heuristic: assume ~2.5 words/sec average speech rate to estimate
-    // how much faster/slower the TTS needs to speak to roughly fit
     const estimatedWordCount = translatedTextResult.split(/\s+/).filter(Boolean).length;
     const estimatedNaturalDuration = estimatedWordCount / 2.5;
     let requestedRate = estimatedNaturalDuration > 0
@@ -1171,17 +1172,14 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
       : 1.0;
     requestedRate = Math.min(Math.max(requestedRate, 0.8), 1.3);
 
-    // Step 6: Generate new audio at the estimated speaking rate
     console.log('🔊 Generating translated audio...');
     const audioContent = await textToSpeech(translatedTextResult, targetLanguage, requestedRate);
     console.log('✅ Audio generated');
 
-    // Step 7: Combine audio with video (final tempo correction + hard duration cap happens here)
     console.log('🎬 Combining audio with video...');
     await combineAudioWithVideo(videoPath, audioContent, outputPath);
     console.log('✅ Video combined');
 
-    // Step 8: Upload to Cloudinary
     console.log('☁️ Uploading to Cloudinary...');
     const uploadResult = await cloudinary.uploader.upload(outputPath, {
       resource_type: 'video',
@@ -1190,7 +1188,6 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
     });
     console.log('✅ Uploaded to Cloudinary');
 
-    // Clean up temp files
     [videoPath, audioPath, outputPath].forEach(file => {
       if (fs.existsSync(file)) fs.unlinkSync(file);
     });
@@ -1256,7 +1253,6 @@ app.post('/api/translate-video', async (req, res) => {
       duration || 5
     );
 
-    // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
     const translationId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
     const translationRecord = {
       id: translationId,
@@ -1539,7 +1535,6 @@ app.post('/api/verify-payment', async (req, res) => {
 
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
-      // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
@@ -1574,7 +1569,6 @@ app.post('/api/verify-payment', async (req, res) => {
     if (data.status && data.data.status === 'success') {
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
-      // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
 
       await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
@@ -1652,7 +1646,6 @@ app.post('/api/admin/add-missing-payment', async (req, res) => {
       });
     }
 
-    // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
     const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
     const serviceKey = serviceType || 'textToVideo';
     const method = paymentMethod || 'mpesa';
@@ -2016,6 +2009,10 @@ function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 }
 
+// ============================================
+// TEXT TO VIDEO GENERATION ENDPOINT
+// ============================================
+
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, retry, duration } = req.body;
@@ -2244,6 +2241,178 @@ app.post('/api/generate-video', async (req, res) => {
   }
 });
 
+// ============================================
+// PHOTO TO VIDEO GENERATION ENDPOINT
+// ============================================
+
+app.post('/api/generate-photo-video', async (req, res) => {
+  try {
+    const { photoUrls, prompt, duration, aspectRatio, paymentReference, email } = req.body;
+    const videoDuration = duration || 5;
+
+    console.log('🖼️ Generating photo-to-video...');
+    console.log('📸 Photos:', photoUrls?.length || 0);
+    console.log('📝 Prompt:', prompt ? prompt.substring(0, 100) : 'No prompt');
+    console.log('⏱️ Duration:', videoDuration, 's');
+    console.log('👤 User Email:', email);
+    console.log('💳 Payment Reference:', paymentReference);
+
+    if (!photoUrls || photoUrls.length === 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: 'At least one photo URL is required' 
+      });
+    }
+
+    if (!paymentReference) {
+      return res.status(402).json({ 
+        success: false, 
+        error: 'Payment required.', 
+        requiresPayment: true 
+      });
+    }
+
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      return res.status(402).json({ 
+        success: false, 
+        error: 'Invalid or expired payment.', 
+        requiresPayment: true 
+      });
+    }
+
+    console.log('✅ Payment verified:', paymentReference);
+
+    const durationMultiplier = videoDuration === 5 ? 1 : videoDuration === 10 ? 2 : videoDuration === 15 ? 3 : 1;
+    let videoUrl = null;
+    let usedModel = null;
+    let provider = null;
+    let cost = 0.15 * durationMultiplier;
+
+    const token = process.env.MODELARK_API_KEY;
+    if (token) {
+      const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
+      const modelIds = ['dreamina-seedance-2-0-mini', 'dreamina-seedance-2-0'];
+
+      for (const modelId of modelIds) {
+        try {
+          console.log(`🔄 Trying BytePlus model: ${modelId}`);
+          
+          const content = [
+            { type: 'text', text: prompt || 'Create a video from these photos' },
+            ...photoUrls.map(url => ({ 
+              type: 'image_url', 
+              image_url: { url } 
+            }))
+          ];
+
+          const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+            method: 'POST',
+            headers: { 
+              'Content-Type': 'application/json', 
+              'Authorization': `Bearer ${token}` 
+            },
+            body: JSON.stringify({
+              model: modelId,
+              content,
+              parameters: {
+                duration: videoDuration,
+                resolution: '720p',
+                ratio: aspectRatio || '16:9',
+                fps: 24,
+                output_sound: 'close',
+                watermark: false
+              }
+            })
+          });
+
+          if (!createResponse.ok) {
+            console.warn(`⚠️ BytePlus ${modelId} failed:`, createResponse.status);
+            continue;
+          }
+
+          const taskData = await createResponse.json();
+          console.log(`✅ BytePlus task created:`, taskData.id);
+          
+          const result = await pollDreaminaTask(taskData.id, token, endpoint);
+          videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+
+          if (videoUrl) {
+            usedModel = modelId;
+            provider = 'byteplus';
+            cost = 0.15 * durationMultiplier;
+            console.log(`✅ BytePlus video generated with ${modelId}!`);
+            break;
+          }
+        } catch (err) {
+          console.warn(`❌ BytePlus ${modelId} error:`, err.message);
+        }
+      }
+    }
+
+    if (!videoUrl) {
+      console.log('🔄 Photo-to-video generation failed, returning fallback');
+      return res.json({
+        success: true,
+        videoUrl: createFallbackVideo(prompt, paymentReference),
+        usedModel: 'Preview (Fallback)',
+        isFallback: true,
+        canRetry: true,
+        note: 'Photo-to-video generation failed. You can retry for free.',
+        paymentReference
+      });
+    }
+
+    await addApiTransaction('byteplus', cost, 'usage', `Photo-to-video with ${usedModel} (${videoDuration}s)`);
+    await addVideoUsage(
+      paymentReference, 
+      email || 'anonymous', 
+      'photo-to-video', 
+      prompt, 
+      cost, 
+      usedModel, 
+      provider, 
+      videoDuration
+    );
+    await addActivityLog(
+      email || 'anonymous', 
+      `🖼️ Generated ${videoDuration}s photo-to-video`, 
+      `Model: ${usedModel}, Photos: ${photoUrls.length}`, 
+      0
+    );
+
+    try {
+      const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, 0, videoDuration);
+      await sendEmail(email, videoEmail.subject, videoEmail.html);
+      console.log(`📧 Video email sent to ${email}`);
+    } catch (emailErr) {
+      console.warn('⚠️ Could not send video email:', emailErr.message);
+    }
+
+    res.json({ 
+      success: true, 
+      videoUrl, 
+      usedModel, 
+      provider, 
+      cost, 
+      duration: videoDuration, 
+      paymentReference, 
+      userEmail: email 
+    });
+
+  } catch (error) {
+    console.error('❌ Photo-to-video error:', error.message);
+    res.json({
+      success: true,
+      videoUrl: createFallbackVideo(req.body.prompt, req.body.paymentReference),
+      usedModel: 'Preview (Fallback)',
+      isFallback: true,
+      canRetry: true,
+      note: 'Photo-to-video generation failed. You can retry for free.'
+    });
+  }
+});
+
 app.post('/api/check-free-retry', (req, res) => {
   const { paymentReference } = req.body;
   if (!paymentReference) return res.json({ success: false, error: 'Payment reference required' });
@@ -2307,11 +2476,8 @@ app.post('/api/calculate-price', (req, res) => {
 
     // PHOTO TO VIDEO - FIXED PRICING
     if (serviceType === 'photos_to_video' || serviceType === 'photo-to-video' || serviceType === 'photo_to_video') {
-      // Base fee for photo-to-video service
       const baseFee = 50 * durationMultiplier;
-      // Per photo fee
       const perPhotoFee = 10 * durationMultiplier;
-      // Processing fee
       const processingFee = 20 * durationMultiplier;
       
       baseCost = baseFee + (photoCount * perPhotoFee) + processingFee;
@@ -2354,7 +2520,6 @@ app.post('/api/calculate-price', (req, res) => {
       serviceName = `AI Text-to-Video (${duration}s)`;
     }
 
-    // Markup multiplier (profit margin)
     const markupMultiplier = 10;
     const finalPrice = baseCost * markupMultiplier;
     const markupAmount = baseCost * (markupMultiplier - 1);
@@ -2552,4 +2717,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`💰 Translation Price: KES 300 (Fixed)`);
   console.log(`🔒 CORS configured to allow: ${allowedOrigins.join(', ')}`);
   console.log(`🔑 Using crypto.randomUUID() instead of uuid package ✅`);
+  console.log(`🖼️ Photo-to-video endpoint: /api/generate-photo-video ✅`);
 });

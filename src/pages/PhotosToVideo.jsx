@@ -5,6 +5,37 @@ import './PhotosToVideo.css';
 // API Base URL from environment
 const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
+// Helper function with retry logic for cold starts
+const fetchWithRetry = async (url, options, maxRetries = 2) => {
+  let lastError;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔄 Fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+      // If it's a 404 or 400, don't retry
+      if (response.status === 404 || response.status === 400) {
+        return response;
+      }
+      // For other errors, wait and retry
+      if (attempt < maxRetries) {
+        const delay = (attempt + 1) * 1000;
+        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    } catch (error) {
+      lastError = error;
+      console.log(`❌ Attempt ${attempt + 1} failed:`, error.message);
+      if (attempt < maxRetries) {
+        const delay = (attempt + 1) * 1000;
+        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      }
+    }
+  }
+  throw lastError || new Error('Max retries exceeded');
+};
+
 // Fallback languages
 const FALLBACK_LANGUAGES = {
   'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
@@ -49,7 +80,7 @@ function PhotosToVideo() {
       console.log('💰 Calculating price for photos-to-video...');
       console.log(`📸 Photos: ${photos.length}, Duration: ${duration}s`);
 
-      const response = await fetch(`${API_BASE_URL}/api/calculate-price`, {
+      const response = await fetchWithRetry(`${API_BASE_URL}/api/calculate-price`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -128,7 +159,7 @@ function PhotosToVideo() {
       const priceAmount = price?.finalPrice || 300;
       console.log('💰 Processing payment for:', priceAmount);
 
-      const paymentResponse = await fetch(`${API_BASE_URL}/api/initialize-payment`, {
+      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -235,7 +266,7 @@ function PhotosToVideo() {
       }
 
       // Generate video
-      const generateResponse = await fetch(`${API_BASE_URL}/api/generate-photo-video`, {
+      const generateResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-photo-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -270,11 +301,6 @@ function PhotosToVideo() {
   const getPriceDisplay = () => {
     if (!price) return 'Calculating price...';
     return `KES ${Math.round(price.finalPrice)}`;
-  };
-
-  const getPriceAmount = () => {
-    if (!price) return 300;
-    return Math.round(price.finalPrice);
   };
 
   return (
