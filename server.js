@@ -18,6 +18,7 @@ const Groq = require('groq-sdk');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const { v4: uuidv4 } = require('uuid');
+const mongoose = require('mongoose');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -25,10 +26,371 @@ const isProduction = process.env.NODE_ENV === 'production';
 
 console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
-console.log('🔑 BytePlus Token:', process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set');
-console.log('🔑 Paystack Secret:', process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set');
-console.log('📧 EMAIL_FROM raw value:', JSON.stringify(process.env.EMAIL_FROM));
-console.log('📧 MAILGUN_DOMAIN raw value:', JSON.stringify(process.env.MAILGUN_DOMAIN));
+
+// ============================================
+// MONGODB ATLAS CONNECTION
+// ============================================
+
+// Use the MongoDB Atlas connection string
+// Format: mongodb+srv://<username>:<password>@<cluster>.mongodb.net/<database>?retryWrites=true&w=majority
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://katungu:2zT1Q8EPdRRRfnxr@cluster0.2ykyi.mongodb.net/video-creator?retryWrites=true&w=majority';
+
+// MongoDB Atlas API Key for authentication
+const MONGODB_API_KEY = process.env.MONGODB_API_KEY || 'al-YI5iqOyUlS7y4M1pfryAgH0jLnkjScv5bFGrJ_2lVqV';
+
+console.log('🔑 MongoDB Atlas configured');
+console.log('🔑 MongoDB API Key:', MONGODB_API_KEY ? '✅ Set' : '❌ Not set');
+
+// Connect to MongoDB Atlas
+mongoose.connect(MONGODB_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+  serverSelectionTimeoutMS: 10000,
+  socketTimeoutMS: 45000,
+  family: 4 // Use IPv4, skip trying IPv6
+});
+
+const db = mongoose.connection;
+
+db.on('error', (error) => {
+  console.error('❌ MongoDB connection error:', error);
+  console.error('Please check your MONGODB_URI and network connectivity');
+});
+
+db.once('open', () => {
+  console.log('✅ MongoDB Atlas connected successfully!');
+  console.log(`   Database: ${mongoose.connection.db.databaseName}`);
+});
+
+// Handle MongoDB disconnection
+db.on('disconnected', () => {
+  console.warn('⚠️ MongoDB disconnected. Attempting to reconnect...');
+});
+
+// ============================================
+// MONGODB SCHEMAS AND MODELS
+// ============================================
+
+// Initial Balances Schema
+const initialBalanceSchema = new mongoose.Schema({
+  provider: { type: String, required: true, unique: true },
+  balance: { type: Number, required: true, default: 0 }
+});
+
+// API Ledger Schema
+const apiLedgerSchema = new mongoose.Schema({
+  provider: { type: String, required: true },
+  amount: { type: Number, required: true },
+  type: { type: String, enum: ['purchase', 'usage'], required: true },
+  description: { type: String, default: '' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// Revenue Schema
+const revenueSchema = new mongoose.Schema({
+  transactionId: { type: String, required: true },
+  email: { type: String, required: true },
+  amount: { type: Number, required: true },
+  serviceType: { type: String, required: true },
+  paymentReference: { type: String },
+  paymentMethod: { type: String, default: 'card' },
+  duration: { type: Number, default: 5 },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// Video Usage Schema
+const videoUsageSchema = new mongoose.Schema({
+  transactionId: { type: String, required: true },
+  userEmail: { type: String, default: 'anonymous' },
+  videoType: { type: String, required: true },
+  prompt: { type: String, default: '' },
+  cost: { type: Number, default: 0 },
+  modelUsed: { type: String, default: 'unknown' },
+  provider: { type: String, default: 'unknown' },
+  duration: { type: Number, default: 5 },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// User Payments Schema
+const userPaymentSchema = new mongoose.Schema({
+  email: { type: String, required: true },
+  amount: { type: Number, required: true },
+  paymentMethod: { type: String, required: true },
+  serviceType: { type: String, required: true },
+  reference: { type: String, required: true, unique: true },
+  status: { type: String, default: 'completed' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// Translations Schema
+const translationSchema = new mongoose.Schema({
+  paymentReference: { type: String, required: true },
+  email: { type: String, required: true },
+  videoUrl: { type: String, required: true },
+  targetLanguage: { type: String, required: true },
+  sourceLanguage: { type: String, default: 'en' },
+  translatedText: { type: String },
+  translatedVideoUrl: { type: String },
+  duration: { type: Number, default: 5 },
+  price: { type: Number, default: 300 },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// Activity Log Schema
+const activityLogSchema = new mongoose.Schema({
+  userEmail: { type: String, default: 'anonymous' },
+  action: { type: String, required: true },
+  details: { type: String, default: '' },
+  amount: { type: Number, default: 0 },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// Site Visit Schema
+const siteVisitSchema = new mongoose.Schema({
+  page: { type: String, required: true },
+  ip: { type: String, default: 'unknown' },
+  userAgent: { type: String, default: 'unknown' },
+  createdAt: { type: Date, default: Date.now }
+});
+
+// Create Models
+const InitialBalance = mongoose.model('InitialBalance', initialBalanceSchema);
+const ApiLedger = mongoose.model('ApiLedger', apiLedgerSchema);
+const Revenue = mongoose.model('Revenue', revenueSchema);
+const VideoUsage = mongoose.model('VideoUsage', videoUsageSchema);
+const UserPayment = mongoose.model('UserPayment', userPaymentSchema);
+const Translation = mongoose.model('Translation', translationSchema);
+const ActivityLog = mongoose.model('ActivityLog', activityLogSchema);
+const SiteVisit = mongoose.model('SiteVisit', siteVisitSchema);
+
+// ============================================
+// DATA ACCESS FUNCTIONS - MONGODB VERSION
+// ============================================
+
+// Initialize default balances
+async function initializeBalances() {
+  try {
+    const defaultBalances = [
+      { provider: 'replicate', balance: parseFloat(process.env.REPLICATE_BALANCE) || 10.00 },
+      { provider: 'byteplus', balance: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40 }
+    ];
+
+    for (const balance of defaultBalances) {
+      await InitialBalance.findOneAndUpdate(
+        { provider: balance.provider },
+        { balance: balance.balance },
+        { upsert: true, new: true }
+      );
+    }
+    console.log('✅ Initial balances initialized');
+  } catch (error) {
+    console.error('❌ Error initializing balances:', error.message);
+  }
+}
+
+// Call on startup
+setTimeout(initializeBalances, 1000);
+
+async function addApiTransaction(provider, amount, type, description) {
+  const entry = new ApiLedger({
+    provider,
+    amount: parseFloat(amount),
+    type,
+    description: description || ''
+  });
+  await entry.save();
+  return entry.id;
+}
+
+async function getApiBalance(provider) {
+  const initialBalance = await InitialBalance.findOne({ provider });
+  const initial = initialBalance ? initialBalance.balance : 0;
+  
+  const transactions = await ApiLedger.find({ provider });
+  const totalPurchases = transactions.filter(t => t.type === 'purchase').reduce((sum, t) => sum + t.amount, 0);
+  const totalUsage = transactions.filter(t => t.type === 'usage').reduce((sum, t) => sum + t.amount, 0);
+  
+  return Math.round((initial + totalPurchases - totalUsage) * 100) / 100;
+}
+
+async function getApiBalances() {
+  const replicate = await getApiBalance('replicate');
+  const byteplus = await getApiBalance('byteplus');
+  return {
+    replicate: replicate,
+    byteplus: byteplus,
+    total: Math.round((replicate + byteplus) * 100) / 100
+  };
+}
+
+async function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
+  const entry = new UserPayment({
+    email,
+    amount: parseFloat(amount),
+    paymentMethod,
+    serviceType,
+    reference
+  });
+  await entry.save();
+  return entry.id;
+}
+
+async function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
+  const entry = new Revenue({
+    transactionId,
+    email,
+    amount: parseFloat(amount),
+    serviceType,
+    paymentReference,
+    paymentMethod: paymentMethod || 'card'
+  });
+  await entry.save();
+  return entry.id;
+}
+
+async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
+  const entry = new VideoUsage({
+    transactionId,
+    userEmail: userEmail || 'anonymous',
+    videoType,
+    prompt: prompt ? prompt.substring(0, 200) : '',
+    cost: cost || 0,
+    modelUsed: modelUsed || 'unknown',
+    provider: provider || 'unknown',
+    duration: duration || 5
+  });
+  await entry.save();
+  return entry.id;
+}
+
+async function addActivityLog(userEmail, action, details, amount) {
+  const entry = new ActivityLog({
+    userEmail: userEmail || 'anonymous',
+    action,
+    details: details || '',
+    amount: amount || 0
+  });
+  await entry.save();
+  
+  // Keep only last 1000 logs
+  const count = await ActivityLog.countDocuments();
+  if (count > 1000) {
+    const oldest = await ActivityLog.findOne().sort({ createdAt: 1 });
+    if (oldest) await ActivityLog.deleteOne({ _id: oldest._id });
+  }
+  
+  return entry.id;
+}
+
+async function recordSiteVisit(page, ip, userAgent) {
+  const entry = new SiteVisit({
+    page,
+    ip: ip || 'unknown',
+    userAgent: userAgent || 'unknown'
+  });
+  await entry.save();
+  
+  // Keep only last 5000 visits
+  const count = await SiteVisit.countDocuments();
+  if (count > 5000) {
+    const oldest = await SiteVisit.findOne().sort({ createdAt: 1 });
+    if (oldest) await SiteVisit.deleteOne({ _id: oldest._id });
+  }
+  
+  return entry.id;
+}
+
+async function getRevenueByService() {
+  const textToVideo = await Revenue.aggregate([
+    { $match: { serviceType: 'textToVideo' } },
+    { $group: { _id: null, total: { $sum: '$amount' } } }
+  ]);
+  const photoToVideo = await Revenue.aggregate([
+    { $match: { serviceType: 'photoToVideo' } },
+    { $group: { _id: null, total: { $sum: '$amount' } } }
+  ]);
+  const translation = await Revenue.aggregate([
+    { $match: { serviceType: 'translation' } },
+    { $group: { _id: null, total: { $sum: '$amount' } } }
+  ]);
+
+  const textTotal = textToVideo[0]?.total || 0;
+  const photoTotal = photoToVideo[0]?.total || 0;
+  const translationTotal = translation[0]?.total || 0;
+
+  return {
+    total: textTotal + photoTotal + translationTotal,
+    textToVideo: textTotal,
+    photoToVideo: photoTotal,
+    translation: translationTotal
+  };
+}
+
+async function getVideoUsage() {
+  const textToVideo = await VideoUsage.countDocuments({ videoType: 'text-to-video' });
+  const photoToVideo = await VideoUsage.countDocuments({ videoType: 'photo-to-video' });
+  const translation = await VideoUsage.countDocuments({ videoType: 'translation' });
+  
+  return {
+    totalVideos: textToVideo + photoToVideo + translation,
+    textToVideo,
+    photoToVideo,
+    translation
+  };
+}
+
+async function getSiteVisits() {
+  return await SiteVisit.countDocuments();
+}
+
+async function getRecentActivity(limit = 10) {
+  const logs = await ActivityLog.find()
+    .sort({ createdAt: -1 })
+    .limit(limit);
+  
+  return logs.map(log => ({
+    id: log._id,
+    user: log.userEmail || 'Anonymous',
+    action: log.action,
+    details: log.details || '',
+    amount: log.amount || 0,
+    time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
+  }));
+}
+
+async function getUserPayments(limit = 20) {
+  const payments = await UserPayment.find()
+    .sort({ createdAt: -1 })
+    .limit(limit);
+  
+  return payments.map(payment => ({
+    id: payment._id,
+    email: payment.email,
+    amount: payment.amount,
+    paymentMethod: payment.paymentMethod,
+    serviceType: payment.serviceType,
+    reference: payment.reference,
+    status: payment.status,
+    createdAt: payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'Just now'
+  }));
+}
+
+async function findPaymentByReference(reference) {
+  return await UserPayment.findOne({ reference });
+}
+
+async function getTranslations(email) {
+  const query = email ? { email } : {};
+  return await Translation.find(query)
+    .sort({ createdAt: -1 })
+    .limit(20);
+}
+
+async function saveTranslation(translationData) {
+  const entry = new Translation(translationData);
+  await entry.save();
+  return entry;
+}
 
 // ============================================
 // CLOUDINARY CONFIGURATION
@@ -43,21 +405,21 @@ cloudinary.config({
 console.log('☁️ Cloudinary configured successfully!');
 
 // ============================================
-// GOOGLE CLOUD CONFIGURATION - API KEY
+// GOOGLE CLOUD CONFIGURATION
 // ============================================
 
-console.log('🔑 Google Cloud configured with API key');
+const googleApiKey = process.env.GOOGLE_API_KEY;
+console.log('🔑 Google API Key configured:', googleApiKey ? '✅' : '❌');
 
 // Translation function using REST API
 async function translateText(text, targetLanguage) {
   try {
-    const apiKey = process.env.GOOGLE_API_KEY;
-    if (!apiKey) {
+    if (!googleApiKey) {
       console.warn('⚠️ No Google API key found, using fallback');
       const languageMap = { 'fr': 'French', 'es': 'Spanish', 'sw': 'Swahili', 'en': 'English' };
       return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
     }
-
+    
     console.log(`🌐 Translating to ${targetLanguage}...`);
     const response = await axios.post(
       `https://translation.googleapis.com/language/translate/v2`,
@@ -66,13 +428,13 @@ async function translateText(text, targetLanguage) {
         params: {
           q: text,
           target: targetLanguage,
-          key: apiKey,
+          key: googleApiKey,
           format: 'text'
         },
         timeout: 10000
       }
     );
-
+    
     if (response.data?.data?.translations?.length > 0) {
       const translation = response.data.data.translations[0].translatedText;
       console.log('✅ Translation complete');
@@ -125,6 +487,10 @@ async function textToSpeech(text, targetLanguage) {
     throw new Error('No audio content returned');
   } catch (error) {
     console.error('❌ TTS error:', error.response?.data?.error?.message || error.message);
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', JSON.stringify(error.response.data, null, 2));
+    }
     throw new Error(`TTS failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
@@ -136,7 +502,7 @@ async function textToSpeech(text, targetLanguage) {
 let groq = null;
 if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key') {
   try {
-    groq = new Groq({
+    groq = new Groq({ 
       apiKey: process.env.GROQ_API_KEY
     });
     console.log('✅ Groq client initialized');
@@ -169,11 +535,11 @@ app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-app.use((req, res, next) => {
+app.use(async (req, res, next) => {
   console.log(`${req.method} ${req.url}`);
   if (!req.path.startsWith('/api')) {
     const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress;
-    recordSiteVisit(req.path, ip, req.headers['user-agent']);
+    await recordSiteVisit(req.path, ip, req.headers['user-agent']);
   }
   next();
 });
@@ -230,7 +596,7 @@ let transporter = null;
 if (!mg) {
   const EMAIL_USER = process.env.EMAIL_USER;
   const EMAIL_PASSWORD = process.env.EMAIL_PASSWORD;
-
+  
   if (EMAIL_USER && EMAIL_PASSWORD && EMAIL_USER !== 'your-email@gmail.com') {
     transporter = nodemailer.createTransport({
       host: process.env.EMAIL_HOST || 'smtp.gmail.com',
@@ -248,29 +614,13 @@ if (!mg) {
   }
 }
 
-// Email sending function with Mailgun + Gmail fallback
+// Email sending function
 async function sendEmail(to, subject, html, text) {
-  // Sanitize EMAIL_FROM: strip whitespace/quotes, and if it's already in
-  // "Name <email>" format or contains anything other than a bare address,
-  // extract just the email portion so we don't end up double-wrapping it
-  // (e.g. "VidAI Creator <VidAI Creator <noreply@domain.com>>"), which is
-  // what Mailgun's "from parameter is not a valid address" error indicates.
-  let fromEmail = (process.env.EMAIL_FROM || '').trim().replace(/^["']|["']$/g, '');
-  const emailMatch = fromEmail.match(/<([^>]+)>/);
-  if (emailMatch) {
-    fromEmail = emailMatch[1].trim();
-  }
-  const validEmailPattern = /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/;
-  if (!fromEmail || !validEmailPattern.test(fromEmail)) {
-    if (fromEmail) {
-      console.warn(`⚠️ EMAIL_FROM value "${fromEmail}" is not a valid bare email address, falling back to default`);
-    }
-    fromEmail = `noreply@${MAILGUN_DOMAIN}`;
-  }
+  const fromEmail = process.env.EMAIL_FROM || `noreply@${MAILGUN_DOMAIN}`;
   const fromName = 'VidAI Creator';
-
+  
   console.log(`📧 Sending email to ${to} via ${emailProvider.toUpperCase()}`);
-
+  
   if (emailProvider === 'mailgun' && mg) {
     try {
       const data = {
@@ -280,14 +630,14 @@ async function sendEmail(to, subject, html, text) {
         html: html,
         text: text || html.replace(/<[^>]*>/g, '')
       };
-
+      
       const result = await new Promise((resolve, reject) => {
         mg.messages().send(data, (error, body) => {
           if (error) reject(error);
           else resolve(body);
         });
       });
-
+      
       console.log(`✅ Email sent via Mailgun to ${to}`);
       console.log(`   Message ID: ${result.id}`);
       return { success: true, provider: 'mailgun', id: result.id };
@@ -305,7 +655,7 @@ async function sendEmail(to, subject, html, text) {
         html: html,
         text: text || html.replace(/<[^>]*>/g, '')
       };
-
+      
       const info = await transporter.sendMail(mailOptions);
       console.log(`✅ Email sent via Gmail to ${to}`);
       console.log(`   Message ID: ${info.messageId}`);
@@ -329,7 +679,7 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
     'photoToVideo': 'Photos to Video',
     'translation': 'Video Translation'
   };
-
+  
   return {
     subject: '🧾 Payment Confirmation - VidAI Creator',
     html: `
@@ -356,7 +706,7 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
         <div class="content">
           <p>Hi there,</p>
           <p>Thank you for your payment! Your transaction has been completed successfully. 🎉</p>
-
+          
           <div class="receipt-box">
             <h3 style="margin-top: 0;">Payment Details</h3>
             <div class="receipt-row">
@@ -380,7 +730,7 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
               <span class="total">KES ${amount}</span>
             </div>
           </div>
-
+          
           <p style="margin-top: 20px;">Your video is being generated and will be sent to you shortly.</p>
           <p>If you have any questions, please reply to this email.</p>
           <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
@@ -420,29 +770,29 @@ function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
         <div class="content">
           <p>Hi there,</p>
           <p>Your AI-generated video has been created successfully! 🎉</p>
-
+          
           <div class="details">
             <p><strong>📝 Prompt:</strong> ${prompt}</p>
             <p><strong>⏱️ Duration:</strong> ${duration || 5}s</p>
             <p><strong>💰 Amount Paid:</strong> KES ${amount}</p>
           </div>
-
+          
           <div class="video-container">
             <video controls>
               <source src="${videoUrl}" type="video/mp4">
               Your browser does not support the video tag.
             </video>
           </div>
-
+          
           <p style="text-align: center;">
             <a href="${videoUrl}" class="button" download>📥 Download Video</a>
           </p>
-
+          
           <p style="text-align: center; font-size: 14px; color: #666;">
             Or copy this link to share: <br>
             <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
           </p>
-
+          
           <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
           <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
         </div>
@@ -490,19 +840,19 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
         <div class="content">
           <p>Hi there,</p>
           <p>Your video has been successfully translated to <span class="language-badge">${language}</span> 🎉</p>
-
+          
           <div class="translation-box">
             <h4 style="margin-top: 0;">📝 Translated Content:</h4>
             <p style="font-size: 14px; color: #666;">"${translatedText}"</p>
           </div>
-
+          
           <div class="video-container">
             <video controls>
               <source src="${videoUrl}" type="video/mp4">
               Your browser does not support the video tag.
             </video>
           </div>
-
+          
           <div class="download-section">
             <h3>📥 Download Your Translated Video</h3>
             <p style="font-size: 16px; margin: 10px 0;">
@@ -516,7 +866,7 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
               <a href="${videoUrl}" style="word-break: break-all; font-size: 12px;">${videoUrl}</a>
             </p>
           </div>
-
+          
           <div class="receipt-box">
             <h3>🧾 Payment Receipt</h3>
             <p><strong>Service:</strong> Video Translation</p>
@@ -525,7 +875,7 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
             <p><strong>Date:</strong> ${new Date().toLocaleString()}</p>
             <p><strong>Status:</strong> ✅ Completed</p>
           </div>
-
+          
           <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
           <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
         </div>
@@ -539,263 +889,25 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
 }
 
 // ============================================
-// FILE-BASED DATA STORE
+// FILE UPLOAD CONFIGURATION
 // ============================================
 
-const DATA_FILE = path.join(__dirname, 'data.json');
-
-let dataStore = {
-  apiLedger: [],
-  revenue: [],
-  videoUsage: [],
-  activityLog: [],
-  siteVisits: [],
-  userPayments: [],
-  translations: [],
-  initialBalances: {
-    replicate: parseFloat(process.env.REPLICATE_BALANCE) || 10.00,
-    byteplus: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40
-  }
-};
-
-function loadData() {
-  try {
-    if (fs.existsSync(DATA_FILE)) {
-      const rawData = fs.readFileSync(DATA_FILE, 'utf8');
-      const parsed = JSON.parse(rawData);
-      dataStore = {
-        ...dataStore,
-        ...parsed,
-        initialBalances: {
-          ...dataStore.initialBalances,
-          ...(parsed.initialBalances || {})
-        }
-      };
-      console.log('✅ Data loaded from file');
-      console.log(`📊 Revenue records: ${dataStore.revenue.length}`);
-      console.log(`📊 Video usage records: ${dataStore.videoUsage.length}`);
-      console.log(`📊 User payments: ${dataStore.userPayments.length}`);
-      console.log(`📊 Translations: ${dataStore.translations.length}`);
-      return true;
-    }
-    console.log('ℹ️ No existing data file found, starting fresh');
-    return false;
-  } catch (error) {
-    console.error('❌ Error loading data:', error.message);
-    return false;
-  }
-}
-
-function saveData() {
-  try {
-    fs.writeFileSync(DATA_FILE, JSON.stringify(dataStore, null, 2));
-    console.log('✅ Data saved to file');
-    return true;
-  } catch (error) {
-    console.error('❌ Error saving data:', error.message);
-    return false;
-  }
-}
-
-loadData();
-
-// ============================================
-// DATA ACCESS FUNCTIONS
-// ============================================
-
-function addApiTransaction(provider, amount, type, description) {
-  const entry = {
-    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
-    provider,
-    amount: parseFloat(amount),
-    type,
-    description: description || '',
-    createdAt: new Date().toISOString()
-  };
-  dataStore.apiLedger.push(entry);
-  saveData();
-  return entry.id;
-}
-
-function getApiBalance(provider) {
-  const initialBalance = dataStore.initialBalances[provider] || 0;
-  const transactions = dataStore.apiLedger.filter(t => t.provider === provider);
-  let totalPurchases = transactions.filter(t => t.type === 'purchase').reduce((sum, t) => sum + t.amount, 0);
-  let totalUsage = transactions.filter(t => t.type === 'usage').reduce((sum, t) => sum + t.amount, 0);
-  return initialBalance + totalPurchases - totalUsage;
-}
-
-function getApiBalances() {
-  const replicate = getApiBalance('replicate');
-  const byteplus = getApiBalance('byteplus');
-  return {
-    replicate: Math.round(replicate * 100) / 100,
-    byteplus: Math.round(byteplus * 100) / 100,
-    total: Math.round((replicate + byteplus) * 100) / 100
-  };
-}
-
-function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
-  const entry = {
-    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
-    email,
-    amount: parseFloat(amount),
-    paymentMethod,
-    serviceType,
-    reference,
-    status: 'completed',
-    createdAt: new Date().toISOString()
-  };
-  dataStore.userPayments.push(entry);
-  saveData();
-  return entry.id;
-}
-
-function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
-  const entry = {
-    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
-    transactionId,
-    email,
-    amount: parseFloat(amount),
-    serviceType,
-    paymentReference,
-    paymentMethod: paymentMethod || 'card',
-    duration: 5,
-    createdAt: new Date().toISOString()
-  };
-  dataStore.revenue.push(entry);
-  saveData();
-  return entry.id;
-}
-
-function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
-  const entry = {
-    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
-    transactionId,
-    userEmail: userEmail || 'anonymous',
-    videoType,
-    prompt: prompt ? prompt.substring(0, 200) : '',
-    cost: cost || 0,
-    modelUsed: modelUsed || 'unknown',
-    provider: provider || 'unknown',
-    duration: duration || 5,
-    createdAt: new Date().toISOString()
-  };
-  dataStore.videoUsage.push(entry);
-  saveData();
-  return entry.id;
-}
-
-function addActivityLog(userEmail, action, details, amount) {
-  const entry = {
-    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
-    userEmail: userEmail || 'anonymous',
-    action,
-    details: details || '',
-    amount: amount || 0,
-    createdAt: new Date().toISOString()
-  };
-  dataStore.activityLog.push(entry);
-  if (dataStore.activityLog.length > 1000) {
-    dataStore.activityLog = dataStore.activityLog.slice(-1000);
-  }
-  saveData();
-  return entry.id;
-}
-
-function recordSiteVisit(page, ip, userAgent) {
-  const entry = {
-    id: Date.now().toString() + '-' + Math.random().toString(36).substr(2, 6),
-    page,
-    ip: ip || 'unknown',
-    userAgent: userAgent || 'unknown',
-    createdAt: new Date().toISOString()
-  };
-  dataStore.siteVisits.push(entry);
-  if (dataStore.siteVisits.length > 5000) {
-    dataStore.siteVisits = dataStore.siteVisits.slice(-5000);
-  }
-  saveData();
-  return entry.id;
-}
-
-// ============================================
-// CALCULATION FUNCTIONS FOR DASHBOARD
-// ============================================
-
-function getRevenueByService() {
-  const textToVideo = dataStore.revenue.filter(r => r.serviceType === 'textToVideo').reduce((sum, r) => sum + r.amount, 0);
-  const photoToVideo = dataStore.revenue.filter(r => r.serviceType === 'photoToVideo').reduce((sum, r) => sum + r.amount, 0);
-  const translation = dataStore.revenue.filter(r => r.serviceType === 'translation').reduce((sum, r) => sum + r.amount, 0);
-  return {
-    total: textToVideo + photoToVideo + translation,
-    textToVideo,
-    photoToVideo,
-    translation
-  };
-}
-
-function getVideoUsage() {
-  const textToVideo = dataStore.videoUsage.filter(v => v.videoType === 'text-to-video').length;
-  const photoToVideo = dataStore.videoUsage.filter(v => v.videoType === 'photo-to-video').length;
-  const translation = dataStore.videoUsage.filter(v => v.videoType === 'translation').length;
-  return {
-    totalVideos: textToVideo + photoToVideo + translation,
-    textToVideo,
-    photoToVideo,
-    translation
-  };
-}
-
-function getSiteVisits() {
-  return dataStore.siteVisits.length;
-}
-
-function getRecentActivity(limit = 10) {
-  return dataStore.activityLog.slice(-limit).reverse().map(log => ({
-    id: log.id,
-    user: log.userEmail || 'Anonymous',
-    action: log.action,
-    details: log.details || '',
-    amount: log.amount || 0,
-    time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
-  }));
-}
-
-function getUserPayments(limit = 20) {
-  return dataStore.userPayments.slice(-limit).reverse().map(payment => ({
-    id: payment.id,
-    email: payment.email,
-    amount: payment.amount,
-    paymentMethod: payment.paymentMethod,
-    serviceType: payment.serviceType,
-    reference: payment.reference,
-    status: payment.status,
-    createdAt: payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'Just now'
-  }));
-}
-
-// ============================================
-// FILE UPLOAD CONFIGURATION - OPTIMIZED
-// ============================================
-
-// Use memory storage for faster uploads
 const memoryStorage = multer.memoryStorage();
 
 const upload = multer({
   storage: memoryStorage,
-  limits: {
+  limits: { 
     fileSize: 50 * 1024 * 1024,
     fieldSize: 50 * 1024 * 1024
   },
   fileFilter: (req, file, cb) => {
     const allowedTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
     const allowedExtensions = ['.mp4', '.avi', '.mov', '.webm'];
-
+    
     const fileExt = path.extname(file.originalname).toLowerCase();
     const isValidType = allowedTypes.includes(file.mimetype);
     const isValidExt = allowedExtensions.includes(fileExt);
-
+    
     if (isValidType || isValidExt) {
       cb(null, true);
     } else {
@@ -814,13 +926,13 @@ app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
   console.log('📤 Content-Type:', req.headers['content-type']);
   console.log('📤 Content-Length:', req.headers['content-length']);
-
+  
   req.setTimeout(300000);
   res.setTimeout(300000);
-
+  
   upload.single('video')(req, res, async function(err) {
     res.setTimeout(0);
-
+    
     if (err) {
       console.error('❌ Multer error:', err.message);
       return res.status(400).json({
@@ -828,7 +940,7 @@ app.post('/api/upload-video', (req, res) => {
         error: err.message || 'File upload failed'
       });
     }
-
+    
     if (!req.file) {
       console.error('❌ No file in request');
       return res.status(400).json({
@@ -840,7 +952,7 @@ app.post('/api/upload-video', (req, res) => {
     try {
       const fileSizeMB = (req.file.size / 1024 / 1024).toFixed(2);
       console.log('✅ Video received, uploading to Cloudinary...');
-
+      
       const result = await new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream({
           resource_type: 'video',
@@ -850,13 +962,13 @@ app.post('/api/upload-video', (req, res) => {
           if (error) reject(error);
           else resolve(result);
         });
-
+        
         uploadStream.end(req.file.buffer);
       });
-
+      
       console.log('✅ Video uploaded to Cloudinary successfully:');
       console.log(`   URL: ${result.secure_url}`);
-
+      
       return res.status(200).json({
         success: true,
         videoUrl: result.secure_url,
@@ -894,25 +1006,25 @@ async function extractAudio(videoPath, audioPath) {
   });
 }
 
-// Transcription using Groq (free)
+// Transcription using Groq
 async function transcribeAudio(audioPath) {
   if (!groq) {
     console.log('⚠️ Groq not available, using fallback transcription');
     return "This is a sample transcription. The actual transcription service is not available.";
   }
-
+  
   try {
     console.log('🎤 Transcribing with Groq...');
     const audioBuffer = fs.readFileSync(audioPath);
     const file = new File([audioBuffer], 'audio.wav', { type: 'audio/wav' });
-
+    
     const transcription = await groq.audio.transcriptions.create({
       file: file,
       model: 'whisper-large-v3-turbo',
       language: 'en',
       response_format: 'json'
     });
-
+    
     console.log('✅ Transcription complete');
     return transcription.text;
   } catch (error) {
@@ -921,22 +1033,67 @@ async function transcribeAudio(audioPath) {
   }
 }
 
-// Combine audio with video using ffmpeg - with validation
+// Text-to-Speech using Google Cloud TTS REST API with API key
+async function textToSpeech(text, targetLanguage) {
+  try {
+    const apiKey = process.env.GOOGLE_API_KEY;
+    if (!apiKey) {
+      throw new Error('Google API key not configured for text-to-speech');
+    }
+
+    const url = `https://texttospeech.googleapis.com/v1/text:synthesize?key=${apiKey}`;
+
+    const voiceMap = {
+      'fr': 'fr-FR', 'es': 'es-ES', 'de': 'de-DE', 'it': 'it-IT',
+      'pt': 'pt-PT', 'ru': 'ru-RU', 'ja': 'ja-JP', 'ko': 'ko-KR',
+      'zh': 'cmn-CN', 'ar': 'ar-XA', 'hi': 'hi-IN', 'sw': 'sw-KE',
+      'en': 'en-US'
+    };
+    const languageCode = voiceMap[targetLanguage] || 'en-US';
+
+    const requestBody = {
+      input: { text: text },
+      voice: { languageCode: languageCode, ssmlGender: 'NEUTRAL' },
+      audioConfig: { audioEncoding: 'MP3' }
+    };
+
+    console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode})`);
+    console.log(`📝 Text length: ${text.length} characters`);
+
+    const response = await axios.post(url, requestBody, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: 30000
+    });
+
+    if (response.data && response.data.audioContent) {
+      console.log(`✅ TTS API call successful (${response.data.audioContent.length} bytes)`);
+      return Buffer.from(response.data.audioContent, 'base64');
+    }
+    throw new Error('No audio content returned');
+  } catch (error) {
+    console.error('❌ TTS error:', error.response?.data?.error?.message || error.message);
+    if (error.response) {
+      console.error('Status:', error.response.status);
+      console.error('Data:', JSON.stringify(error.response.data, null, 2));
+    }
+    throw new Error(`TTS failed: ${error.response?.data?.error?.message || error.message}`);
+  }
+}
+
+// Combine audio with video using ffmpeg
 async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
-  // Validate audio buffer
   if (!audioBuffer || audioBuffer.length < 100) {
     throw new Error(`Invalid audio buffer: ${audioBuffer ? audioBuffer.length : 'null'} bytes`);
   }
-
+  
   console.log(`🔊 Audio buffer size: ${audioBuffer.length} bytes`);
-
+  
   const tempAudioPath = path.join(tempDir, `${uuidv4()}.mp3`);
   fs.writeFileSync(tempAudioPath, audioBuffer);
-
-  // Verify the file was written correctly
+  
   const stats = fs.statSync(tempAudioPath);
   console.log(`📁 Audio file size: ${stats.size} bytes`);
-
+  
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
       .input(tempAudioPath)
@@ -956,16 +1113,16 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
   });
 }
 
-// Main translation function - REAL pipeline
+// Main translation function
 async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duration) {
   console.log(`🎬 Starting translation pipeline for ${targetLanguage}`);
   console.log(`📹 Original video: ${originalVideoUrl.substring(0, 100)}...`);
-
+  
   const videoId = uuidv4();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
   const audioPath = path.join(tempDir, `${videoId}.wav`);
   const outputPath = path.join(tempDir, `${videoId}_translated.mp4`);
-
+  
   try {
     // Step 1: Download the video
     console.log('📥 Downloading video...');
@@ -974,32 +1131,32 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
     const videoBuffer = await response.arrayBuffer();
     fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
     console.log('✅ Video downloaded');
-
+    
     // Step 2: Extract audio
     console.log('🎵 Extracting audio...');
     await extractAudio(videoPath, audioPath);
     console.log('✅ Audio extracted');
-
-    // Step 3: Transcribe audio (free with Groq)
+    
+    // Step 3: Transcribe audio
     console.log('📝 Transcribing audio...');
     const transcribedText = await transcribeAudio(audioPath);
     console.log(`📝 Transcription (first 100 chars): ${transcribedText.substring(0, 100)}...`);
-
-    // Step 4: Translate text (free with Google Translate)
+    
+    // Step 4: Translate text
     console.log(`🌐 Translating to ${targetLanguage}...`);
     const translatedTextResult = await translateText(transcribedText, targetLanguage);
     console.log(`🌐 Translation (first 100 chars): ${translatedTextResult.substring(0, 100)}...`);
-
-    // Step 5: Generate new audio (free with Google TTS)
+    
+    // Step 5: Generate new audio
     console.log('🔊 Generating translated audio...');
     const audioContent = await textToSpeech(translatedTextResult, targetLanguage);
     console.log('✅ Audio generated');
-
+    
     // Step 6: Combine audio with video
     console.log('🎬 Combining audio with video...');
     await combineAudioWithVideo(videoPath, audioContent, outputPath);
     console.log('✅ Video combined');
-
+    
     // Step 7: Upload to Cloudinary
     console.log('☁️ Uploading to Cloudinary...');
     const uploadResult = await cloudinary.uploader.upload(outputPath, {
@@ -1008,15 +1165,15 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
       public_id: `${videoId}_translated_${targetLanguage}`
     });
     console.log('✅ Uploaded to Cloudinary');
-
+    
     // Clean up temp files
     [videoPath, audioPath, outputPath].forEach(file => {
       if (fs.existsSync(file)) fs.unlinkSync(file);
     });
-
+    
     console.log('✅ Translation pipeline complete!');
     return uploadResult.secure_url;
-
+    
   } catch (error) {
     console.error('❌ Translation pipeline error:', error);
     [videoPath, audioPath, outputPath].forEach(file => {
@@ -1033,18 +1190,18 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
 // Regular translation endpoint
 app.post('/api/translate-video', async (req, res) => {
   try {
-    const {
-      videoUrl,
-      targetLanguage,
-      sourceLanguage,
-      paymentReference,
+    const { 
+      videoUrl, 
+      targetLanguage, 
+      sourceLanguage, 
+      paymentReference, 
       email,
       text,
-      duration
+      duration 
     } = req.body;
-
+    
     const TRANSLATION_PRICE = 300;
-
+    
     console.log('🌐 Translation request received:');
     console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
     console.log(`   Target Language: ${targetLanguage} (${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage})`);
@@ -1075,7 +1232,7 @@ app.post('/api/translate-video', async (req, res) => {
       targetLanguage || 'fr',
       duration || 5
     );
-
+    
     const translationId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
     const translationRecord = {
       id: translationId,
@@ -1090,18 +1247,14 @@ app.post('/api/translate-video', async (req, res) => {
       price: TRANSLATION_PRICE,
       createdAt: new Date().toISOString()
     };
-
-    if (!dataStore.translations) {
-      dataStore.translations = [];
-    }
-    dataStore.translations.push(translationRecord);
-    saveData();
-
+    
+    await saveTranslation(translationRecord);
+    
     const translationCost = TRANSLATION_PRICE;
-    addRevenue(translationId, email, translationCost, 'translation', paymentReference, 'card');
-    addUserPayment(email, translationCost, 'card', 'translation', paymentReference);
-    addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
-    addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
+    await addRevenue(translationId, email, translationCost, 'translation', paymentReference, 'card');
+    await addUserPayment(email, translationCost, 'card', 'translation', paymentReference);
+    await addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
+    await addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
 
     try {
       const translationEmail = generateTranslationEmail(
@@ -1144,18 +1297,13 @@ app.post('/api/translate-video', async (req, res) => {
 app.post('/api/translate-video-free', async (req, res) => {
   try {
     const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = req.body;
-
+    
     console.log('🔄 Free retry translation for:', email);
     console.log('📝 Payment Reference:', paymentReference);
     console.log('🎯 Target Language:', targetLanguage);
-
-    // Check if payment exists
-    const payment = dataStore.userPayments.find(p =>
-      p.reference === paymentReference &&
-      p.email === email &&
-      p.status === 'completed'
-    );
-
+    
+    const payment = await findPaymentByReference(paymentReference);
+    
     if (!payment) {
       console.log('❌ Payment not found for reference:', paymentReference);
       return res.status(404).json({
@@ -1163,15 +1311,15 @@ app.post('/api/translate-video-free', async (req, res) => {
         error: 'Payment not found. Please verify your payment reference.'
       });
     }
-
+    
     console.log('✅ Payment found, proceeding with translation');
-
+    
     const translatedVideoUrl = await generateTranslatedVideo(
       videoUrl,
       targetLanguage || 'fr',
       duration || 5
     );
-
+    
     try {
       const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French';
       const translationEmail = generateTranslationEmail(
@@ -1186,20 +1334,20 @@ app.post('/api/translate-video-free', async (req, res) => {
     } catch (emailErr) {
       console.error('❌ Email error:', emailErr);
     }
-
+    
     try {
       await sendReceiptEmail(email, 300, paymentReference, 'translation');
     } catch (receiptErr) {
       console.error('❌ Receipt error:', receiptErr);
     }
-
+    
     res.json({
       success: true,
       message: '✅ Translation complete! Check your email for the download link.',
       videoUrl: translatedVideoUrl,
       paymentReference: paymentReference
     });
-
+    
   } catch (error) {
     console.error('❌ Translation error:', error);
     res.status(500).json({
@@ -1216,16 +1364,16 @@ app.post('/api/translate-video-free', async (req, res) => {
 app.post('/api/test-tts', async (req, res) => {
   try {
     const { text, targetLanguage } = req.body;
-
+    
     if (!text) {
       return res.status(400).json({ error: 'Text is required' });
     }
-
+    
     console.log(`🔊 Testing TTS with text: "${text.substring(0, 50)}..."`);
     console.log(`📝 Target language: ${targetLanguage || 'fr'}`);
-
+    
     const audioBuffer = await textToSpeech(text, targetLanguage || 'fr');
-
+    
     res.json({
       success: true,
       audioLength: audioBuffer.length,
@@ -1273,25 +1421,25 @@ app.post('/api/initialize-payment', async (req, res) => {
   try {
     const { email, amount, serviceType, metadata } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
-
+    
     console.log('💰 Initializing payment...');
     console.log('📧 Email:', email);
     console.log('💰 Amount:', amount);
-
+    
     if (!email) {
       return res.status(400).json({
         success: false,
         error: 'Email is required'
       });
     }
-
+    
     if (!amount || amount <= 0) {
       return res.status(400).json({
         success: false,
         error: 'Valid amount is required'
       });
     }
-
+    
     if (!secretKey || secretKey === 'your_paystack_secret_key' || secretKey.length < 10) {
       console.error('❌ Invalid Paystack secret key.');
       return res.status(500).json({
@@ -1333,11 +1481,11 @@ app.post('/api/initialize-payment', async (req, res) => {
     });
 
     const data = await response.json();
-
+    
     if (data.status) {
       console.log('✅ Payment initialized successfully!');
       console.log('📝 Reference:', data.data.reference);
-
+      
       return res.status(200).json({
         success: true,
         reference: data.data.reference,
@@ -1365,31 +1513,31 @@ app.post('/api/verify-payment', async (req, res) => {
   try {
     const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
-
+    
     console.log(`🔍 Verifying payment: ${reference}`, { email, amount, serviceType, paymentMethod, duration });
-
+    
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
-
-      addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
-      addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
-      addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
-
+      
+      await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
+      await addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
+      await addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
+      
       try {
         const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
         await sendEmail(email, receiptEmail.subject, receiptEmail.html);
       } catch (emailErr) {
         console.warn('⚠️ Could not send receipt email:', emailErr.message);
       }
-
-      return res.json({
-        success: true,
-        data: { reference, status: 'success' },
+      
+      return res.json({ 
+        success: true, 
+        data: { reference, status: 'success' }, 
         message: 'Payment verified successfully (test mode)',
-        transactionId
+        transactionId 
       });
     }
 
@@ -1405,10 +1553,10 @@ app.post('/api/verify-payment', async (req, res) => {
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-
-      addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
-      addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
-      addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
+      
+      await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
+      await addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
+      await addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
 
       try {
         const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
@@ -1418,16 +1566,16 @@ app.post('/api/verify-payment', async (req, res) => {
         console.warn('⚠️ Could not send receipt email:', emailErr.message);
       }
 
-      res.json({
-        success: true,
-        data: data.data,
+      res.json({ 
+        success: true, 
+        data: data.data, 
         message: 'Payment verified successfully',
-        transactionId
+        transactionId 
       });
     } else {
-      res.json({
-        success: false,
-        error: data.message || 'Payment verification failed'
+      res.json({ 
+        success: false, 
+        error: data.message || 'Payment verification failed' 
       });
     }
   } catch (error) {
@@ -1452,13 +1600,13 @@ app.post('/api/webhook/paystack', (req, res) => {
       console.log(`   Reference: ${transaction.reference}`);
       console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
       console.log(`   Customer: ${transaction.customer.email}`);
-
+      
       const amount = transaction.amount / 100;
       const email = transaction.customer.email;
       const reference = transaction.reference;
       const serviceType = transaction.metadata?.custom_fields?.find(f => f.display_name === "Video Type")?.value || 'text-to-video';
       const duration = parseInt(transaction.metadata?.custom_fields?.find(f => f.display_name === "Duration")?.value) || 5;
-
+      
       addUserPayment(email, amount, 'card', serviceType, reference);
       addActivityLog(email, `💰 Payment received via webhook`, `Amount: KES ${amount}, Ref: ${reference}, Duration: ${duration}s`, amount);
     }
@@ -1473,30 +1621,34 @@ app.post('/api/webhook/paystack', (req, res) => {
 app.post('/api/admin/add-missing-payment', async (req, res) => {
   try {
     const { email, amount, serviceType, paymentMethod, reference, duration } = req.body;
-
+    
     console.log('📝 Adding missing payment:', { email, amount, serviceType, paymentMethod, duration });
-
+    
     if (!email || !amount) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email and amount are required'
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email and amount are required' 
       });
     }
-
+    
     const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
     const serviceKey = serviceType || 'textToVideo';
     const method = paymentMethod || 'mpesa';
     const videoDuration = duration || 5;
-
-    addRevenue(transactionId, email, amount, serviceKey, reference || 'manual_' + Date.now(), method);
-    addUserPayment(email, amount, method, serviceKey, reference || 'manual_' + Date.now());
-    addActivityLog(email, `💰 Manual payment added`, `Amount: KES ${amount} via ${method}, Duration: ${videoDuration}s`, amount);
-
-    res.json({
-      success: true,
+    
+    await addRevenue(transactionId, email, amount, serviceKey, reference || 'manual_' + Date.now(), method);
+    await addUserPayment(email, amount, method, serviceKey, reference || 'manual_' + Date.now());
+    await addActivityLog(email, `💰 Manual payment added`, `Amount: KES ${amount} via ${method}, Duration: ${videoDuration}s`, amount);
+    
+    const totalRevenueResult = await Revenue.aggregate([
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    
+    res.json({ 
+      success: true, 
       message: `Payment of KES ${amount} added for ${email}`,
       transactionId,
-      totalRevenue: dataStore.revenue.reduce((sum, r) => sum + r.amount, 0)
+      totalRevenue: totalRevenueResult[0]?.total || 0
     });
   } catch (error) {
     console.error('❌ Error adding missing payment:', error);
@@ -1508,12 +1660,17 @@ app.post('/api/admin/add-missing-payment', async (req, res) => {
 app.get('/api/admin/payments', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
-    const payments = getUserPayments(limit);
+    const payments = await getUserPayments(limit);
+    const total = await UserPayment.countDocuments();
+    const totalAmountResult = await UserPayment.aggregate([
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    
     res.json({
       success: true,
       payments: payments,
-      total: dataStore.userPayments.length,
-      totalAmount: dataStore.userPayments.reduce((sum, p) => sum + p.amount, 0)
+      total: total,
+      totalAmount: totalAmountResult[0]?.total || 0
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1526,40 +1683,49 @@ app.get('/api/admin/payments', async (req, res) => {
 
 app.get('/api/admin/dashboard', async (req, res) => {
   try {
-    const balances = getApiBalances();
-    const revenue = getRevenueByService();
-    const usage = getVideoUsage();
-    const visits = getSiteVisits();
-    const activity = getRecentActivity(10);
-    const payments = getUserPayments(10);
+    const balances = await getApiBalances();
+    const revenue = await getRevenueByService();
+    const usage = await getVideoUsage();
+    const visits = await getSiteVisits();
+    const activity = await getRecentActivity(10);
+    const payments = await getUserPayments(10);
+    const translations = await Translation.countDocuments();
 
-    const totalDuration = dataStore.videoUsage.reduce((sum, v) => sum + (v.duration || 5), 0);
-    const avgDuration = dataStore.videoUsage.length > 0 ? Math.round(totalDuration / dataStore.videoUsage.length) : 0;
+    const totalDurationResult = await VideoUsage.aggregate([
+      { $group: { _id: null, totalDuration: { $sum: '$duration' } } }
+    ]);
+    const totalDuration = totalDurationResult[0]?.totalDuration || 0;
+    const totalVideos = await VideoUsage.countDocuments();
+    const avgDuration = totalVideos > 0 ? Math.round(totalDuration / totalVideos) : 0;
 
     res.json({
       credits: balances,
-      revenue: {
-        total: Math.round(revenue.total) || 0,
-        textToVideo: Math.round(revenue.textToVideo) || 0,
-        photoToVideo: Math.round(revenue.photoToVideo) || 0,
-        translation: Math.round(revenue.translation) || 0
+      revenue: { 
+        total: Math.round(revenue.total) || 0, 
+        textToVideo: Math.round(revenue.textToVideo) || 0, 
+        photoToVideo: Math.round(revenue.photoToVideo) || 0, 
+        translation: Math.round(revenue.translation) || 0 
       },
-      usage: {
-        totalVideos: usage.totalVideos || 0,
-        textToVideo: usage.textToVideo || 0,
-        photoToVideo: usage.photoToVideo || 0,
+      usage: { 
+        totalVideos: usage.totalVideos || 0, 
+        textToVideo: usage.textToVideo || 0, 
+        photoToVideo: usage.photoToVideo || 0, 
         translation: usage.translation || 0,
         avgDuration: avgDuration
       },
-      visits: {
-        total: visits || 0,
-        today: 0,
-        week: 0,
-        month: 0
+      visits: { 
+        total: visits || 0, 
+        today: 0, 
+        week: 0, 
+        month: 0 
       },
       recentActivity: activity,
       recentPayments: payments,
-      translations: dataStore.translations ? dataStore.translations.length : 0
+      translations: translations || 0,
+      mongodb: {
+        connected: mongoose.connection.readyState === 1,
+        database: mongoose.connection.db?.databaseName || 'unknown'
+      }
     });
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
@@ -1572,24 +1738,24 @@ app.post('/api/admin/add-credits', async (req, res) => {
   try {
     const { provider, amount, description } = req.body;
     if (!provider || !amount) {
-      return res.status(400).json({
-        success: false,
-        error: 'Provider and amount are required. Valid providers: replicate, byteplus'
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Provider and amount are required. Valid providers: replicate, byteplus' 
       });
     }
-
+    
     if (!['replicate', 'byteplus'].includes(provider)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid provider. Must be "replicate" or "byteplus"'
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Invalid provider. Must be "replicate" or "byteplus"' 
       });
     }
-
-    addApiTransaction(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
-
-    const newBalance = getApiBalances();
-    res.json({
-      success: true,
+    
+    await addApiTransaction(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
+    
+    const newBalance = await getApiBalances();
+    res.json({ 
+      success: true, 
       message: `Added ${amount} ${provider} credits`,
       newBalance: newBalance
     });
@@ -1601,12 +1767,18 @@ app.post('/api/admin/add-credits', async (req, res) => {
 // Get balances endpoint
 app.get('/api/admin/balances', async (req, res) => {
   try {
-    const balances = getApiBalances();
+    const balances = await getApiBalances();
+    const initialBalances = await InitialBalance.find();
+    const transactionCount = await ApiLedger.countDocuments();
+    
     res.json({
       success: true,
       credits: balances,
-      initialBalances: dataStore.initialBalances,
-      transactionCount: dataStore.apiLedger.length
+      initialBalances: initialBalances.reduce((acc, b) => {
+        acc[b.provider] = b.balance;
+        return acc;
+      }, {}),
+      transactionCount: transactionCount
     });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
@@ -1633,8 +1805,8 @@ const FREE_TRANSLATION_LANGUAGES = {
 // Get free translation languages
 app.get('/api/free-languages', (req, res) => {
   console.log('🌐 GET /api/free-languages - Returning languages');
-  res.json({
-    success: true,
+  res.json({ 
+    success: true, 
     languages: FREE_TRANSLATION_LANGUAGES,
     count: Object.keys(FREE_TRANSLATION_LANGUAGES).length
   });
@@ -1646,7 +1818,7 @@ app.get('/api/translation-price', (req, res) => {
     const duration = parseInt(req.query.duration) || 5;
     const price = 300;
     const cost = 50;
-
+    
     res.json({
       success: true,
       duration: duration,
@@ -1669,15 +1841,11 @@ app.get('/api/translation-price', (req, res) => {
 app.get('/api/translations', async (req, res) => {
   try {
     const { email } = req.query;
-    let translations = dataStore.translations || [];
-
-    if (email) {
-      translations = translations.filter(t => t.email === email);
-    }
-
+    const translations = await getTranslations(email);
+    
     res.json({
       success: true,
-      translations: translations.slice(-20).reverse(),
+      translations: translations,
       total: translations.length
     });
   } catch (error) {
@@ -1689,11 +1857,11 @@ app.get('/api/translations', async (req, res) => {
 app.post('/api/send-video-email', async (req, res) => {
   try {
     const { email, videoUrl, prompt, amount, duration } = req.body;
-
+    
     if (!email || !videoUrl) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email and video URL are required'
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email and video URL are required' 
       });
     }
 
@@ -1701,12 +1869,12 @@ app.post('/api/send-video-email', async (req, res) => {
     console.log(`📹 Video URL: ${videoUrl.substring(0, 100)}...`);
 
     const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration || 5);
-
+    
     const result = await sendEmail(email, videoEmail.subject, videoEmail.html);
-
+    
     if (result.success) {
-      res.json({
-        success: true,
+      res.json({ 
+        success: true, 
         message: 'Video sent to your email',
         provider: result.provider
       });
@@ -1715,9 +1883,9 @@ app.post('/api/send-video-email', async (req, res) => {
     }
   } catch (error) {
     console.error('❌ Email error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
     });
   }
 });
@@ -1726,16 +1894,16 @@ app.post('/api/send-video-email', async (req, res) => {
 app.post('/api/test-email', async (req, res) => {
   try {
     const { email } = req.body;
-
+    
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email is required'
+      return res.status(400).json({ 
+        success: false, 
+        error: 'Email is required' 
       });
     }
 
     console.log(`📧 Testing email to ${email}`);
-
+    
     const result = await sendEmail(
       email,
       '✅ Test Email from VidAI Creator',
@@ -1746,7 +1914,7 @@ app.post('/api/test-email', async (req, res) => {
         <p>Time: ${new Date().toISOString()}</p>
       `
     );
-
+    
     res.json({
       success: result.success,
       provider: result.provider,
@@ -1754,9 +1922,9 @@ app.post('/api/test-email', async (req, res) => {
     });
   } catch (error) {
     console.error('❌ Test email error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message
+    res.status(500).json({ 
+      success: false, 
+      error: error.message 
     });
   }
 });
@@ -1771,8 +1939,7 @@ app.get('/api/test-google-cloud', async (req, res) => {
       apiKeyConfigured: !!process.env.GOOGLE_API_KEY,
       groqConfigured: !!process.env.GROQ_API_KEY
     };
-
-    // Test Translation
+    
     try {
       const testText = 'Hello world';
       const result = await translateText(testText, 'fr');
@@ -1781,8 +1948,7 @@ app.get('/api/test-google-cloud', async (req, res) => {
     } catch (e) {
       results.translateError = e.message;
     }
-
-    // Test TTS
+    
     try {
       const audio = await textToSpeech('Test', 'fr');
       results.tts = true;
@@ -1790,7 +1956,7 @@ app.get('/api/test-google-cloud', async (req, res) => {
     } catch (e) {
       results.ttsError = e.message;
     }
-
+    
     res.json({
       success: true,
       results: results
@@ -1842,7 +2008,7 @@ app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, retry, duration } = req.body;
     const videoDuration = duration || 5;
-
+    
     console.log('🎬 Generating video...');
     console.log('📝 Prompt:', prompt ? prompt.substring(0, 100) : 'No prompt');
     console.log('⏱️ Duration:', videoDuration, 's');
@@ -1852,18 +2018,18 @@ app.post('/api/generate-video', async (req, res) => {
     if (retry && paymentReference && failedGenerations[paymentReference]) {
       console.log(`✅ Free retry allowed for payment: ${paymentReference}`);
     } else if (!paymentReference) {
-      return res.status(402).json({
-        success: false,
-        error: 'Payment required.',
-        requiresPayment: true
+      return res.status(402).json({ 
+        success: false, 
+        error: 'Payment required.', 
+        requiresPayment: true 
       });
     } else {
       const isValid = await verifyPayment(paymentReference);
       if (!isValid) {
-        return res.status(402).json({
-          success: false,
-          error: 'Invalid or expired payment.',
-          requiresPayment: true
+        return res.status(402).json({ 
+          success: false, 
+          error: 'Invalid or expired payment.', 
+          requiresPayment: true 
         });
       }
       console.log('✅ Payment verified:', paymentReference);
@@ -1903,7 +2069,7 @@ app.post('/api/generate-video', async (req, res) => {
         if (response.ok) {
           const data = await response.json();
           console.log('✅ Replicate prediction created:', data.id);
-
+          
           let prediction = data;
           let attempts = 0;
           while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < 60) {
@@ -1915,7 +2081,7 @@ app.post('/api/generate-video', async (req, res) => {
             attempts++;
             console.log(`⏳ Replicate poll ${attempts}: ${prediction.status}`);
           }
-
+          
           if (prediction.status === 'succeeded') {
             videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
             usedModel = 'HappyHorse';
@@ -1935,7 +2101,7 @@ app.post('/api/generate-video', async (req, res) => {
         if (token) {
           const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
           const modelIds = ['dreamina-seedance-2-0-mini', 'dreamina-seedance-2-0', 'seedance-2-0'];
-
+          
           for (const modelId of modelIds) {
             try {
               console.log(`🔄 Trying BytePlus model: ${modelId}`);
@@ -1945,17 +2111,17 @@ app.post('/api/generate-video', async (req, res) => {
                 body: JSON.stringify({
                   model: modelId,
                   content: [{ type: "text", text: prompt }],
-                  parameters: {
-                    duration: videoDuration,
-                    resolution: "720p",
-                    ratio: "16:9",
-                    fps: 24,
-                    output_sound: "close",
-                    watermark: false
+                  parameters: { 
+                    duration: videoDuration, 
+                    resolution: "720p", 
+                    ratio: "16:9", 
+                    fps: 24, 
+                    output_sound: "close", 
+                    watermark: false 
                   }
                 })
               });
-
+              
               if (!createResponse.ok) {
                 console.warn(`⚠️ BytePlus ${modelId} failed:`, createResponse.status);
                 continue;
@@ -1965,7 +2131,7 @@ app.post('/api/generate-video', async (req, res) => {
               console.log(`✅ BytePlus task created:`, taskData.id);
               const result = await pollDreaminaTask(taskData.id, token, endpoint);
               videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
-
+              
               if (videoUrl) {
                 usedModel = modelId;
                 provider = 'byteplus';
@@ -2007,12 +2173,12 @@ app.post('/api/generate-video', async (req, res) => {
     }
 
     if (provider === 'replicate') {
-      addApiTransaction('replicate', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
+      await addApiTransaction('replicate', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
     } else if (provider === 'byteplus') {
-      addApiTransaction('byteplus', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
+      await addApiTransaction('byteplus', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
     }
-
-    addVideoUsage(
+    
+    await addVideoUsage(
       paymentReference || 'test_' + Date.now(),
       email || 'anonymous',
       'text-to-video',
@@ -2022,8 +2188,8 @@ app.post('/api/generate-video', async (req, res) => {
       provider,
       videoDuration
     );
-
-    addActivityLog(
+    
+    await addActivityLog(
       email || 'anonymous',
       `🎬 Generated ${videoDuration}s video with ${provider}`,
       `Model: ${usedModel}, Cost: $${cost.toFixed(2)}`,
@@ -2055,13 +2221,13 @@ app.post('/api/generate-video', async (req, res) => {
   } catch (error) {
     console.error('❌ Error:', error.message);
     const fallbackUrl = createFallbackVideo(req.body.prompt, req.body.paymentReference);
-    res.json({
-      success: true,
-      videoUrl: fallbackUrl,
-      usedModel: 'Preview (Fallback)',
-      isFallback: true,
-      canRetry: true,
-      note: 'Video generation failed. You can retry for free.'
+    res.json({ 
+      success: true, 
+      videoUrl: fallbackUrl, 
+      usedModel: 'Preview (Fallback)', 
+      isFallback: true, 
+      canRetry: true, 
+      note: 'Video generation failed. You can retry for free.' 
     });
   }
 });
@@ -2140,22 +2306,40 @@ app.get('/api/test', (req, res) => {
   });
 });
 
-app.get('/api/health', (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    environment: isProduction ? 'production' : 'development',
-    uptime: process.uptime(),
-    byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
-    paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
-    email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
-    data_file_exists: fs.existsSync(DATA_FILE),
-    replicate_balance: getApiBalance('replicate'),
-    byteplus_balance: getApiBalance('byteplus'),
-    total_revenue: dataStore.revenue.reduce((sum, r) => sum + r.amount, 0),
-    total_videos: dataStore.videoUsage.length,
-    total_translations: dataStore.translations ? dataStore.translations.length : 0
-  });
+app.get('/api/health', async (req, res) => {
+  try {
+    const replicateBalance = await getApiBalance('replicate');
+    const byteplusBalance = await getApiBalance('byteplus');
+    const totalRevenueResult = await Revenue.aggregate([
+      { $group: { _id: null, total: { $sum: '$amount' } } }
+    ]);
+    const totalVideos = await VideoUsage.countDocuments();
+    const totalTranslations = await Translation.countDocuments();
+    
+    res.json({
+      status: 'healthy',
+      timestamp: new Date().toISOString(),
+      environment: isProduction ? 'production' : 'development',
+      uptime: process.uptime(),
+      byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
+      paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
+      email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
+      mongodb_connected: mongoose.connection.readyState === 1,
+      mongodb_database: mongoose.connection.db?.databaseName || 'unknown',
+      replicate_balance: replicateBalance,
+      byteplus_balance: byteplusBalance,
+      total_revenue: totalRevenueResult[0]?.total || 0,
+      total_videos: totalVideos,
+      total_translations: totalTranslations
+    });
+  } catch (error) {
+    console.error('Health check error:', error);
+    res.status(500).json({ 
+      status: 'unhealthy',
+      error: error.message,
+      mongodb_connected: mongoose.connection.readyState === 1
+    });
+  }
 });
 
 app.get('/', (req, res) => {
@@ -2170,7 +2354,8 @@ app.get('/', (req, res) => {
       'Email Delivery',
       'Payment Integration (Paystack)',
       'Admin Dashboard',
-      'Multi-language Support'
+      'Multi-language Support',
+      'MongoDB Atlas Database'
     ],
     endpoints: [
       { path: '/api/test', method: 'GET' },
@@ -2196,6 +2381,10 @@ app.get('/', (req, res) => {
       { path: '/api/translate-video-free', method: 'POST' },
       { path: '/api/test-tts', method: 'POST' }
     ],
+    mongodb: {
+      connected: mongoose.connection.readyState === 1,
+      database: mongoose.connection.db?.databaseName || 'not connected'
+    },
     docs: 'https://github.com/katunguTECH/video-creator-api'
   });
 });
@@ -2218,6 +2407,7 @@ app.use((req, res) => {
 
 app.use((err, req, res, next) => {
   console.error('❌ Global error:', err.message);
+  console.error(err.stack);
   res.status(500).json({ success: false, error: err.message || 'Internal server error' });
 });
 
@@ -2228,20 +2418,18 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
   console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
   console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
-  console.log(`📊 Data file: ${DATA_FILE}`);
   console.log(`📁 Uploads directory: ${uploadsDir}`);
   console.log(`📁 Temp directory: ${tempDir}`);
   console.log(`☁️ Cloudinary storage configured`);
   console.log(`🌐 Google Cloud translation configured (REST API)`);
-  console.log(`🔐 Google Cloud TTS using API key (REST API)`);
+  console.log(`🔊 Google Cloud TTS configured (API key)`);
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
-  console.log(`💰 Replicate Balance: $${getApiBalance('replicate')}`);
-  console.log(`💰 BytePlus Balance: $${getApiBalance('byteplus')}`);
-  console.log(`📊 Total Revenue: KES ${dataStore.revenue.reduce((sum, r) => sum + r.amount, 0)}`);
-  console.log(`📊 Total Videos: ${dataStore.videoUsage.length}`);
-  console.log(`🌐 Total Translations: ${dataStore.translations ? dataStore.translations.length : 0}`);
+  console.log(`📊 MongoDB Atlas: ${mongoose.connection.db?.databaseName || 'connecting...'}`);
+  console.log(`📊 Total Revenue: KES 0`);
+  console.log(`📊 Total Videos: 0`);
+  console.log(`🌐 Total Translations: 0`);
   console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
   console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
   console.log(`💰 Translation Price: KES 300 (Fixed)`);
