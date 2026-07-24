@@ -8,7 +8,7 @@ const cors = require('cors');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const crypto = require('crypto');
+const crypto = require('crypto'); // ✅ Added for UUID generation
 const nodemailer = require('nodemailer');
 const mailgun = require('mailgun-js');
 const cloudinary = require('cloudinary').v2;
@@ -17,7 +17,7 @@ const axios = require('axios');
 const Groq = require('groq-sdk');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
-const { v4: uuidv4 } = require('uuid');
+// ❌ REMOVED: const { v4: uuidv4 } = require('uuid');
 const mongoose = require('mongoose');
 
 const app = express();
@@ -1080,7 +1080,8 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
 
   console.log(`🔊 Audio buffer size: ${audioBuffer.length} bytes`);
 
-  const tempAudioPath = path.join(tempDir, `${uuidv4()}.mp3`);
+  // ✅ REPLACED uuidv4() with crypto.randomUUID()
+  const tempAudioPath = path.join(tempDir, `${crypto.randomUUID()}.mp3`);
   fs.writeFileSync(tempAudioPath, audioBuffer);
 
   const stats = fs.statSync(tempAudioPath);
@@ -1128,7 +1129,8 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
   console.log(`🎬 Starting translation pipeline for ${targetLanguage}`);
   console.log(`📹 Original video: ${originalVideoUrl.substring(0, 100)}...`);
 
-  const videoId = uuidv4();
+  // ✅ REPLACED uuidv4() with crypto.randomUUID()
+  const videoId = crypto.randomUUID();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
   const audioPath = path.join(tempDir, `${videoId}.wav`);
   const outputPath = path.join(tempDir, `${videoId}_translated.mp4`);
@@ -1254,6 +1256,7 @@ app.post('/api/translate-video', async (req, res) => {
       duration || 5
     );
 
+    // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
     const translationId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
     const translationRecord = {
       id: translationId,
@@ -1536,6 +1539,7 @@ app.post('/api/verify-payment', async (req, res) => {
 
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
+      // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
@@ -1570,6 +1574,7 @@ app.post('/api/verify-payment', async (req, res) => {
     if (data.status && data.data.status === 'success') {
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
+      // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
 
       await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
@@ -1647,6 +1652,7 @@ app.post('/api/admin/add-missing-payment', async (req, res) => {
       });
     }
 
+    // ✅ REPLACED uuidv4() with crypto.randomUUID() - but using timestamp for this one
     const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
     const serviceKey = serviceType || 'textToVideo';
     const method = paymentMethod || 'mpesa';
@@ -2545,4 +2551,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
   console.log(`💰 Translation Price: KES 300 (Fixed)`);
   console.log(`🔒 CORS configured to allow: ${allowedOrigins.join(', ')}`);
+  console.log(`🔑 Using crypto.randomUUID() instead of uuid package ✅`);
 });
