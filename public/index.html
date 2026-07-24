@@ -21,24 +21,31 @@
     <meta name="twitter:description" content="Translate your videos to 37 languages with AI. Pay KES 300 per translation." />
     <meta name="twitter:image" content="%PUBLIC_URL%/og-image.png" />
     
-    <title>VidAI Creator - AI Video Translation</title>
+    <title>VidAI Creator - AI Video Translation & Generation</title>
     
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     
-    <!-- Paystack Script -->
-    <script src="https://js.paystack.co/v1/inline.js"></script>
+    <!-- ✅ Paystack Script - Loaded from CDN with proper attributes -->
+    <script src="https://js.paystack.co/v1/inline.js" async defer></script>
     
+    <!-- ✅ Fallback: Check if Paystack loaded correctly -->
     <script>
-      window.addEventListener('load', function() {
+      // Check if Paystack loaded after 3 seconds
+      setTimeout(function() {
         if (typeof window.PaystackPop === 'undefined') {
-          console.warn('⚠️ Paystack script not loaded, loading from CDN...');
+          console.warn('⚠️ Paystack script not loaded, reloading from CDN...');
           var script = document.createElement('script');
           script.src = 'https://js.paystack.co/v1/inline.js';
           script.async = true;
+          script.onload = function() {
+            console.log('✅ Paystack script reloaded successfully!');
+          };
           document.head.appendChild(script);
+        } else {
+          console.log('✅ Paystack script already loaded!');
         }
-      });
+      }, 3000);
     </script>
   </head>
   <body>
