@@ -27,62 +27,50 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// MONGODB ATLAS CONNECTION - FIXED WITH YOUR CREDENTIALS
+// MONGODB ATLAS CONNECTION - SIMPLIFIED & FIXED
 // ============================================
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://henrymunyoki_db_user:YOUR_PASSWORD@cluster0.2ykyi.mongodb.net/video-creator?retryWrites=true&w=majority&appName=Cluster0';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://henrymunyoki_db_user:Letmeinplease01!@cluster0.2ykyi.mongodb.net/video-creator?retryWrites=true&w=majority&appName=Cluster0';
 const DATABASE_NAME = process.env.DATABASE_NAME || 'video-creator';
-const MONGODB_API_KEY = process.env.MONGODB_API_KEY || 'al-YI5iqOyUlS7y4M1pfryAgH0jLnkjScv5bFGrJ_2lVqV';
 
 console.log('🔑 MongoDB Atlas configured');
 console.log(`📊 Database: ${DATABASE_NAME}`);
-console.log(`👤 User: henrymunyoki_db_user`);
 
-// Connection options for better reliability
+// Simple connection options without dbName in options
 const mongooseOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
-  serverSelectionTimeoutMS: 30000, // Increased for slower connections
+  serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
-  family: 4,
-  dbName: DATABASE_NAME // Explicitly set database name
+  family: 4
 };
 
-// Connect with retry logic
 let isMongoConnected = false;
 
 async function connectToMongo() {
-  let retries = 5;
-  while (retries > 0) {
-    try {
-      console.log(`🔄 Connecting to MongoDB Atlas... (${retries} attempts left)`);
-      await mongoose.connect(MONGODB_URI, mongooseOptions);
-      console.log('✅ MongoDB Atlas connected successfully!');
-      console.log(`   Database: ${mongoose.connection.db.databaseName}`);
-      console.log(`   Host: ${mongoose.connection.host}`);
-      isMongoConnected = true;
-      return true;
-    } catch (error) {
-      console.error(`❌ MongoDB connection attempt failed: ${error.message}`);
-      retries--;
-      if (retries > 0) {
-        console.log(`⏳ Waiting 5 seconds before retry...`);
-        await new Promise(resolve => setTimeout(resolve, 5000));
-      }
-    }
+  try {
+    console.log('🔄 Connecting to MongoDB Atlas...');
+    
+    // Connect WITHOUT specifying dbName in options
+    await mongoose.connect(MONGODB_URI, mongooseOptions);
+    
+    // Get the database name from the connection
+    const dbName = mongoose.connection.db?.databaseName || DATABASE_NAME;
+    console.log('✅ MongoDB Atlas connected successfully!');
+    console.log(`   Database: ${dbName}`);
+    console.log(`   Host: ${mongoose.connection.host}`);
+    
+    isMongoConnected = true;
+    return true;
+  } catch (error) {
+    console.error('❌ MongoDB connection error:', error.message);
+    isMongoConnected = false;
+    return false;
   }
-  console.error('❌ All MongoDB connection attempts failed');
-  isMongoConnected = false;
-  return false;
 }
 
-// Start connection
-connectToMongo().then(connected => {
-  isMongoConnected = connected;
-  if (!connected) {
-    console.warn('⚠️ Running without MongoDB - some features will be limited');
-  }
-});
+// Connect immediately
+connectToMongo();
 
 const db = mongoose.connection;
 
@@ -94,11 +82,8 @@ db.on('error', (error) => {
 db.on('disconnected', () => {
   console.warn('⚠️ MongoDB disconnected. Attempting to reconnect...');
   isMongoConnected = false;
-  // Auto-reconnect after 5 seconds
   setTimeout(() => {
-    connectToMongo().then(connected => {
-      isMongoConnected = connected;
-    });
+    connectToMongo();
   }, 5000);
 });
 
