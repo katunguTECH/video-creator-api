@@ -30,7 +30,7 @@ console.log('📡 Environment:', isProduction ? 'production' : 'development');
 // MONGODB ATLAS CONNECTION - SIMPLIFIED & FIXED
 // ============================================
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://henrymunyoki_db_user:Letmeinplease01!@cluster0.2ykyi.mongodb.net/video-creator?retryWrites=true&w=majority&appName=Cluster0';
+const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://henrymunyoki_db_user:Letmeinplease01%21@cluster0.0rbgeoc.mongodb.net/video-creator?retryWrites=true&w=majority&appName=Cluster0';
 const DATABASE_NAME = process.env.DATABASE_NAME || 'video-creator';
 
 console.log('🔑 MongoDB Atlas configured');
@@ -365,7 +365,6 @@ async function addActivityLog(userEmail, action, details, amount) {
 
 async function recordSiteVisit(page, ip, userAgent) {
   if (!isMongoConnected) {
-    // Silently skip if MongoDB is not connected
     return null;
   }
   
@@ -385,7 +384,6 @@ async function recordSiteVisit(page, ip, userAgent) {
 
     return entry.id;
   } catch (error) {
-    // Silently fail for site visits - not critical
     return null;
   }
 }
@@ -599,7 +597,7 @@ async function translateText(text, targetLanguage) {
 }
 
 // ============================================
-// TEXT-TO-SPEECH (with optional speakingRate to reduce drift before ffmpeg)
+// TEXT-TO-SPEECH
 // ============================================
 async function textToSpeech(text, targetLanguage, speakingRate = 1.0) {
   try {
@@ -618,7 +616,6 @@ async function textToSpeech(text, targetLanguage, speakingRate = 1.0) {
     };
     const languageCode = voiceMap[targetLanguage] || 'en-US';
 
-    // Clamp to Google's supported range (0.25 - 4.0)
     const clampedRate = Math.min(Math.max(speakingRate, 0.25), 4.0);
 
     const requestBody = {
@@ -676,7 +673,7 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 console.log('✅ FFmpeg configured');
 
 // ============================================
-// CORS CONFIGURATION - FIXED FOR PRODUCTION
+// CORS CONFIGURATION
 // ============================================
 const allowedOrigins = [
   'https://www.katareel.com',
@@ -688,7 +685,6 @@ const allowedOrigins = [
 
 app.use(cors({
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     if (allowedOrigins.indexOf(origin) !== -1) {
       callback(null, true);
@@ -703,7 +699,6 @@ app.use(cors({
   optionsSuccessStatus: 200
 }));
 
-// Handle preflight requests explicitly
 app.options('*', cors());
 
 // ============================================
@@ -759,7 +754,7 @@ if (!fs.existsSync(tempDir)) {
 }
 
 // ============================================
-// EMAIL CONFIGURATION - Mailgun with katareel.com
+// EMAIL CONFIGURATION - Mailgun
 // ============================================
 
 const MAILGUN_API_KEY = process.env.MAILGUN_API_KEY;
@@ -1183,7 +1178,6 @@ app.post('/api/upload-video', (req, res) => {
 // VIDEO TRANSLATION PIPELINE FUNCTIONS
 // ============================================
 
-// Audio extraction function
 async function extractAudio(videoPath, audioPath) {
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
@@ -1197,7 +1191,6 @@ async function extractAudio(videoPath, audioPath) {
   });
 }
 
-// Transcription using Groq
 async function transcribeAudio(audioPath) {
   if (!groq) {
     console.log('⚠️ Groq not available, using fallback transcription');
@@ -1228,7 +1221,6 @@ async function transcribeAudio(audioPath) {
 // SYNC FIX HELPERS
 // ============================================
 
-// Get duration (in seconds) of any media file via ffprobe
 function getDuration(filePath) {
   return new Promise((resolve, reject) => {
     ffmpeg.ffprobe(filePath, (err, metadata) => {
@@ -1238,8 +1230,6 @@ function getDuration(filePath) {
   });
 }
 
-// ffmpeg's atempo filter only accepts values between 0.5 and 2.0 per instance,
-// so chain multiple atempo filters together if the ratio falls outside that range.
 function buildAtempoFilter(ratio) {
   const filters = [];
   let remaining = ratio;
@@ -1255,9 +1245,6 @@ function buildAtempoFilter(ratio) {
   return filters.join(',');
 }
 
-// Combine translated audio with the original video, correcting for duration drift
-// (this is the core sync fix — translated speech is rarely the same length as
-// the original, so we time-stretch it to fit before muxing)
 async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
   if (!audioBuffer || audioBuffer.length < 100) {
     throw new Error(`Invalid audio buffer: ${audioBuffer ? audioBuffer.length : 'null'} bytes`);
@@ -1305,7 +1292,6 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
   });
 }
 
-// Main translation function
 async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duration) {
   console.log(`🎬 Starting translation pipeline for ${targetLanguage}`);
   console.log(`📹 Original video: ${originalVideoUrl.substring(0, 100)}...`);
@@ -1481,10 +1467,6 @@ app.post('/api/translate-video', async (req, res) => {
   }
 });
 
-// ============================================
-// FREE RETRY ENDPOINT FOR PAID USERS
-// ============================================
-
 app.post('/api/translate-video-free', async (req, res) => {
   try {
     const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = req.body;
@@ -1547,10 +1529,6 @@ app.post('/api/translate-video-free', async (req, res) => {
     });
   }
 });
-
-// ============================================
-// DIRECT TTS TEST ENDPOINT
-// ============================================
 
 app.post('/api/test-tts', async (req, res) => {
   try {
@@ -2625,7 +2603,7 @@ app.get('/api/debug-failed', (req, res) => {
 
 // ============================================
 // ============================================
-// 🔥 FIXED PRICE CALCULATION ENDPOINT
+// 🔥 UPDATED PRICE CALCULATION ENDPOINT
 // ============================================
 // ============================================
 
@@ -2640,71 +2618,84 @@ app.post('/api/calculate-price', (req, res) => {
 
     console.log(`📊 Service: ${serviceType}, Duration: ${duration}s, Photos: ${photoCount}`);
 
-    const durationMultiplier = duration === 5 ? 1 : duration === 10 ? 2 : duration === 15 ? 3 : 1;
-    let baseCost = 0;
+    let finalPrice = 0;
     let breakdown = [];
     let serviceName = '';
 
-    // PHOTO TO VIDEO - FIXED PRICING
+    // ============================================
+    // PHOTO TO VIDEO - NEW PRICING
+    // ============================================
     if (serviceType === 'photos_to_video' || serviceType === 'photo-to-video' || serviceType === 'photo_to_video') {
-      const baseFee = 50 * durationMultiplier;
-      const perPhotoFee = 10 * durationMultiplier;
-      const processingFee = 20 * durationMultiplier;
+      let pricePerPhoto = 0;
       
-      baseCost = baseFee + (photoCount * perPhotoFee) + processingFee;
+      // Pricing based on number of photos
+      if (photoCount === 1) {
+        // 1 photo: 300, 600, 900
+        if (duration === 5) pricePerPhoto = 300;
+        else if (duration === 10) pricePerPhoto = 600;
+        else if (duration === 15) pricePerPhoto = 900;
+      } else if (photoCount === 2) {
+        // 2 photos: 600, 1200, 1800
+        if (duration === 5) pricePerPhoto = 600;
+        else if (duration === 10) pricePerPhoto = 1200;
+        else if (duration === 15) pricePerPhoto = 1800;
+      } else if (photoCount >= 3) {
+        // 3+ photos: 500, 1000, 2000
+        if (duration === 5) pricePerPhoto = 500;
+        else if (duration === 10) pricePerPhoto = 1000;
+        else if (duration === 15) pricePerPhoto = 2000;
+      }
+      
+      finalPrice = pricePerPhoto;
       
       breakdown = [
-        { item: 'AI Photo-to-Video Base', amount: baseFee },
-        { item: `${photoCount} photo(s) processing`, amount: photoCount * perPhotoFee },
-        { item: 'AI video generation & rendering', amount: processingFee }
+        { item: `AI Photo-to-Video (${photoCount} photo${photoCount > 1 ? 's' : ''})`, amount: finalPrice },
+        { item: `${duration}s video generation`, amount: 0 }
       ];
       
       serviceName = `AI Photo-to-Video (${duration}s, ${photoCount} photo${photoCount > 1 ? 's' : ''})`;
     }
-    // IMAGE TO VIDEO
+    
+    // ============================================
+    // IMAGE TO VIDEO - NEW PRICING
+    // ============================================
     else if (serviceType === 'image_to_video') {
-      const baseFee = 60 * durationMultiplier;
-      const processingFee = 30 * durationMultiplier;
-      
-      baseCost = baseFee + processingFee;
+      // Image to Video: 300, 600, 1200
+      if (duration === 5) finalPrice = 300;
+      else if (duration === 10) finalPrice = 600;
+      else if (duration === 15) finalPrice = 1200;
       
       breakdown = [
-        { item: 'AI Image-to-Video Base', amount: baseFee },
-        { item: 'AI video generation & rendering', amount: processingFee }
+        { item: 'AI Image-to-Video', amount: finalPrice },
+        { item: `${duration}s video generation`, amount: 0 }
       ];
       
       serviceName = `AI Image-to-Video (${duration}s)`;
     }
-    // TEXT TO VIDEO
+    
+    // ============================================
+    // TEXT TO VIDEO - NEW PRICING
+    // ============================================
     else {
-      const baseFee = 40 * durationMultiplier;
-      const processingFee = 20 * durationMultiplier;
-      
-      baseCost = baseFee + processingFee;
+      // Text to Video: 300, 600, 1200
+      if (duration === 5) finalPrice = 300;
+      else if (duration === 10) finalPrice = 600;
+      else if (duration === 15) finalPrice = 1200;
       
       breakdown = [
-        { item: 'AI Video Generation', amount: baseFee },
-        { item: `${duration}s video processing`, amount: processingFee },
-        { item: 'HD Quality', amount: 0 }
+        { item: 'AI Text-to-Video', amount: finalPrice },
+        { item: `${duration}s video generation`, amount: 0 }
       ];
       
       serviceName = `AI Text-to-Video (${duration}s)`;
     }
 
-    const markupMultiplier = 10;
-    const finalPrice = baseCost * markupMultiplier;
-    const markupAmount = baseCost * (markupMultiplier - 1);
-
     console.log(`✅ Price calculated: KES ${finalPrice}`);
-    console.log(`   Base Cost: ${baseCost}, Markup: ${markupAmount}`);
 
     const priceData = {
       serviceType: serviceType || 'photo_to_video',
       serviceName: serviceName,
-      baseCost: baseCost,
-      markupMultiplier: markupMultiplier,
-      markupAmount: markupAmount,
-      finalPrice: Math.round(finalPrice),
+      finalPrice: finalPrice,
       breakdown: breakdown,
       currency: 'KES',
       duration: duration,
@@ -2714,7 +2705,7 @@ app.post('/api/calculate-price', (req, res) => {
     res.json({
       success: true,
       price: priceData,
-      formatted: `KES ${Math.round(finalPrice)}`
+      formatted: `KES ${finalPrice}`
     });
 
   } catch (error) {
@@ -2883,7 +2874,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
   console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected'}`);
   console.log(`📊 Database: ${DATABASE_NAME}`);
-  console.log(`💰 Price calculation endpoint: /api/calculate-price FIXED ✅`);
+  console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
   console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
   console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
   console.log(`💰 Translation Price: KES 300 (Fixed)`);
