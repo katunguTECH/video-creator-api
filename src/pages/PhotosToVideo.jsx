@@ -2,9 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './PhotosToVideo.css';
 
+// API Base URL from environment
 const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
-// Helper function with retry logic
+// Helper function with retry logic for cold starts
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -12,9 +13,11 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
       console.log(`🔄 Fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
       const response = await fetch(url, options);
       if (response.ok) return response;
+      // If it's a 404 or 400, don't retry
       if (response.status === 404 || response.status === 400) {
         return response;
       }
+      // For other errors, wait and retry
       if (attempt < maxRetries) {
         const delay = (attempt + 1) * 1000;
         console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
@@ -31,6 +34,20 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
     }
   }
   throw lastError || new Error('Max retries exceeded');
+};
+
+// Fallback languages
+const FALLBACK_LANGUAGES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia'
 };
 
 function PhotosToVideo() {
@@ -138,6 +155,7 @@ function PhotosToVideo() {
       }
     } catch (error) {
       console.error('❌ Price calculation error:', error);
+      // Set a default price if calculation fails
       setPrice({
         finalPrice: 300,
         formatted: 'KES 300',
@@ -166,19 +184,13 @@ function PhotosToVideo() {
     setPhotos(photos.filter(p => p.id !== id));
   };
 
-  // ============================================
-  // ✅ FIXED: Paystack v1 inline.js uses PaystackPop.setup(...).openIframe(),
-  // NOT `new PaystackPop()`. PaystackPop is a plain object with a static
-  // setup() method, not a constructor — calling `new` on it threw
-  // "window.PaystackPop is not a constructor".
-  // ============================================
   const openPaystackPopup = (paymentData) => {
     // Check if Paystack is available
     if (!paystackReady && typeof window.PaystackPop === 'undefined') {
       console.error('❌ Paystack not ready, retrying...');
       setError('Payment system is loading. Please try again in a moment.');
       setLoading(false);
-
+      
       // Try reloading the script
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
@@ -193,23 +205,23 @@ function PhotosToVideo() {
     }
 
     try {
-      const handler = window.PaystackPop.setup({
+      const popup = new window.PaystackPop();
+      popup.open({
         key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
         email: email,
         amount: paymentData.amount * 100,
         ref: paymentData.reference,
         metadata: paymentData.metadata,
         currency: 'KES',
-        callback: (response) => {
+        callback: async (response) => {
           console.log('✅ Payment successful:', response);
-          processPhotoVideo(response.reference);
+          await processPhotoVideo(response.reference);
         },
         onClose: () => {
           setLoading(false);
           setError('Payment was cancelled');
         }
       });
-      handler.openIframe();
     } catch (error) {
       console.error('❌ Paystack error:', error);
       setError('Payment system error. Please try again.');
@@ -327,18 +339,32 @@ function PhotosToVideo() {
       for (const photo of photos) {
         const formData = new FormData();
         formData.append('file', photo.file);
-        formData.append('upload_preset', 'ml_default');
+        formData.append('upload_preset', 'vidai_uploads'); // ✅ Updated preset name
 
+        console.log('📤 Uploading photo to Cloudinary...');
         const uploadResponse = await fetch('https://api.cloudinary.com/v1_1/y7d1nk2i/image/upload', {
           method: 'POST',
           body: formData
         });
 
+        if (!uploadResponse.ok) {
+          const errorData = await uploadResponse.json();
+          console.error('❌ Cloudinary upload failed:', errorData);
+          throw new Error(`Cloudinary upload failed: ${errorData.error?.message || uploadResponse.status}`);
+        }
+
         const uploadData = await uploadResponse.json();
+        console.log('✅ Photo uploaded:', uploadData.secure_url);
         if (uploadData.secure_url) {
           photoUrls.push(uploadData.secure_url);
         }
       }
+
+      if (photoUrls.length === 0) {
+        throw new Error('No photos were uploaded successfully');
+      }
+
+      console.log('✅ All photos uploaded:', photoUrls);
 
       // Generate video
       const generateResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-photo-video`, {
@@ -355,7 +381,9 @@ function PhotosToVideo() {
       });
 
       if (!generateResponse.ok) {
-        throw new Error(`Server error: ${generateResponse.status}`);
+        const errorData = await generateResponse.json();
+        console.error('❌ Video generation error:', errorData);
+        throw new Error(errorData.error || `Server error: ${generateResponse.status}`);
       }
 
       const data = await generateResponse.json();
@@ -378,9 +406,13 @@ function PhotosToVideo() {
     return `KES ${Math.round(price.finalPrice)}`;
   };
 
+  const getPriceAmount = () => {
+    if (!price) return 300;
+    return Math.round(price.finalPrice);
+  };
+
   return (
     <div className="photos-to-video-page">
-      {/* ... your existing JSX ... */}
       <div className="header">
         <button className="back-btn" onClick={() => navigate('/')}>
           ← Back to Home
