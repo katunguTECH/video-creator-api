@@ -231,7 +231,7 @@
 }
 
 /* ============================================
-   SETTINGS SECTION - FIXED TEXTAREA
+   SETTINGS SECTION
    ============================================ */
 .settings-section {
   margin-bottom: 25px;
@@ -258,9 +258,6 @@
   margin-bottom: 6px;
 }
 
-/* ============================================
-   FIX: TEXTAREA - BIGGER AND BETTER
-   ============================================ */
 .setting-group textarea {
   width: 100%;
   padding: 14px 16px;
@@ -270,7 +267,6 @@
   font-family: inherit;
   resize: vertical;
   min-height: 120px;
-  /* 👈 THIS IS THE KEY FIX - makes it taller */
   max-height: 300px;
   transition: border-color 0.3s ease;
   box-sizing: border-box;
@@ -290,9 +286,6 @@
   font-style: italic;
 }
 
-/* ============================================
-   SELECT DROPDOWNS
-   ============================================ */
 .setting-group select {
   width: 100%;
   padding: 12px 16px;
@@ -494,6 +487,172 @@
 }
 
 /* ============================================
+   REDO SECTION STYLES
+   ============================================ */
+.redo-section {
+  margin-top: 20px;
+  border-top: 1px solid #e0e0e0;
+  padding-top: 15px;
+}
+
+.redo-toggle-btn {
+  background: none;
+  border: none;
+  color: #667eea;
+  font-size: 14px;
+  cursor: pointer;
+  text-decoration: underline;
+  padding: 8px 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.redo-toggle-btn:hover {
+  color: #764ba2;
+}
+
+.coupon-badge {
+  background: #4caf50;
+  color: white;
+  padding: 2px 10px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.redo-container {
+  margin-top: 12px;
+  padding: 15px;
+  background: #f8f9fa;
+  border-radius: 10px;
+  border: 1px solid #e0e0e0;
+}
+
+.redo-info {
+  font-size: 14px;
+  color: #666;
+  margin-bottom: 10px;
+}
+
+.saved-coupon-info {
+  font-size: 14px;
+  color: #2e7d32;
+  background: #e8f5e9;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.saved-coupon-info strong {
+  font-family: monospace;
+  font-size: 16px;
+}
+
+.coupon-input-group {
+  display: flex;
+  gap: 10px;
+}
+
+.coupon-input-group input {
+  flex: 1;
+  padding: 10px 14px;
+  border: 2px solid #e0e0e0;
+  border-radius: 8px;
+  font-size: 14px;
+  font-family: monospace;
+  letter-spacing: 1px;
+}
+
+.coupon-input-group input:focus {
+  outline: none;
+  border-color: #667eea;
+  box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+}
+
+.check-coupon-btn {
+  padding: 10px 24px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 8px;
+  cursor: pointer;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: all 0.3s ease;
+}
+
+.check-coupon-btn:hover:not(:disabled) {
+  background: #5a6fd6;
+  transform: translateY(-1px);
+}
+
+.check-coupon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ============================================
+   REDO MODE ACTIVE
+   ============================================ */
+.redo-mode-active {
+  margin-top: 20px;
+  padding: 20px;
+  background: #e8f5e9;
+  border-radius: 12px;
+  border: 2px solid #4caf50;
+  text-align: center;
+}
+
+.redo-badge {
+  display: inline-block;
+  background: #4caf50;
+  color: white;
+  padding: 4px 16px;
+  border-radius: 20px;
+  font-size: 14px;
+  font-weight: 700;
+  margin-bottom: 10px;
+  letter-spacing: 0.5px;
+}
+
+.redo-success {
+  color: #2e7d32;
+  font-size: 16px;
+  font-weight: 600;
+  margin-bottom: 15px;
+}
+
+.redo-generate-btn {
+  background: linear-gradient(135deg, #4caf50 0%, #388e3c 100%) !important;
+  box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3) !important;
+}
+
+.redo-generate-btn:hover:not(:disabled) {
+  box-shadow: 0 6px 25px rgba(76, 175, 80, 0.4) !important;
+}
+
+.cancel-redo-btn {
+  display: block;
+  margin: 10px auto 0;
+  background: none;
+  border: none;
+  color: #666;
+  cursor: pointer;
+  font-size: 14px;
+  text-decoration: underline;
+  transition: color 0.3s ease;
+}
+
+.cancel-redo-btn:hover {
+  color: #d32f2f;
+}
+
+/* ============================================
    RESPONSIVE DESIGN
    ============================================ */
 @media (max-width: 1024px) {
@@ -544,6 +703,19 @@
     min-height: 100px;
     font-size: 14px;
   }
+
+  .coupon-input-group {
+    flex-direction: column;
+  }
+
+  .check-coupon-btn {
+    width: 100%;
+    padding: 12px;
+  }
+
+  .redo-mode-active {
+    padding: 15px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -558,6 +730,14 @@
   .left-panel,
   .right-panel {
     padding: 15px;
+  }
+
+  .price-card {
+    padding: 15px;
+  }
+
+  .price-amount {
+    font-size: 1.3rem;
   }
 }
 
@@ -584,6 +764,14 @@
   animation: fadeIn 0.3s ease-out;
 }
 
+.redo-section {
+  animation: fadeIn 0.4s ease-out;
+}
+
+.redo-mode-active {
+  animation: fadeIn 0.4s ease-out;
+}
+
 /* ============================================
    LOADING SPINNER (Optional)
    ============================================ */
@@ -602,4 +790,34 @@
   to {
     transform: rotate(360deg);
   }
+}
+
+/* ============================================
+   COUPON STATUS INDICATOR
+   ============================================ */
+.coupon-status-valid {
+  color: #2e7d32;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.coupon-status-invalid {
+  color: #d32f2f;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.coupon-status-checking {
+  color: #f57c00;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
 }

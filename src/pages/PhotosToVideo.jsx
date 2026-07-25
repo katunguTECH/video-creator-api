@@ -5,7 +5,7 @@ import './PhotosToVideo.css';
 // API Base URL from environment
 const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
-// Helper function with retry logic for cold starts
+// Helper function with retry logic
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -34,20 +34,6 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
   throw lastError || new Error('Max retries exceeded');
 };
 
-// Fallback languages
-const FALLBACK_LANGUAGES = {
-  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
-  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
-  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
-  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
-  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
-  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
-  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
-  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
-  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
-  'mr': 'Marathi', 'or': 'Odia'
-};
-
 function PhotosToVideo() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('katungu1@gmail.com');
@@ -68,41 +54,51 @@ function PhotosToVideo() {
   const [showRedoSection, setShowRedoSection] = useState(false);
   const [couponCode, setCouponCode] = useState('');
   const [couponValid, setCouponValid] = useState(false);
-  const [couponChecked, setCouponChecked] = useState(false);
   const [isRedoMode, setIsRedoMode] = useState(false);
   const [redoLoading, setRedoLoading] = useState(false);
   const [savedCoupon, setSavedCoupon] = useState('');
 
-  // ✅ Load Paystack script on component mount
+  // ✅ Load Paystack script with retry
   useEffect(() => {
     const loadPaystack = () => {
+      // Check if already loaded
       if (typeof window.PaystackPop !== 'undefined') {
         console.log('✅ Paystack already loaded');
         setPaystackReady(true);
         return;
       }
 
+      // Check if script tag already exists
       const existingScript = document.querySelector('script[src*="paystack"]');
       if (existingScript) {
-        console.log('📦 Paystack script already in DOM, waiting for it to load...');
-        existingScript.onload = () => {
-          console.log('✅ Paystack script loaded from existing tag!');
-          setPaystackReady(true);
-        };
+        console.log('📦 Paystack script already in DOM');
+        // Check again after a delay
+        setTimeout(() => {
+          if (typeof window.PaystackPop !== 'undefined') {
+            console.log('✅ Paystack loaded from existing script!');
+            setPaystackReady(true);
+          }
+        }, 2000);
         return;
       }
 
+      // Create and load script
       console.log('📦 Loading Paystack script...');
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
       script.async = true;
       script.onload = () => {
         console.log('✅ Paystack script loaded successfully!');
-        setPaystackReady(true);
+        setTimeout(() => {
+          if (typeof window.PaystackPop !== 'undefined') {
+            setPaystackReady(true);
+          }
+        }, 1000);
       };
       script.onerror = () => {
         console.error('❌ Failed to load Paystack script');
-        setTimeout(loadPaystack, 2000);
+        // Retry after 3 seconds
+        setTimeout(loadPaystack, 3000);
       };
       document.head.appendChild(script);
     };
@@ -114,6 +110,19 @@ function PhotosToVideo() {
     if (savedCouponCode) {
       setSavedCoupon(savedCouponCode);
       setCouponCode(savedCouponCode);
+      // Auto-show redo section if there's a saved coupon
+      setShowRedoSection(true);
+    }
+
+    // Also check if we have a payment reference from URL
+    const urlParams = new URLSearchParams(window.location.search);
+    const ref = urlParams.get('reference');
+    if (ref) {
+      setPaymentReference(ref);
+      // Auto-check for coupon
+      setTimeout(() => {
+        checkCouponForPayment(ref);
+      }, 1000);
     }
 
     return () => {};
@@ -168,6 +177,25 @@ function PhotosToVideo() {
     }
   };
 
+  const checkCouponForPayment = async (ref) => {
+    try {
+      const response = await fetchWithRetry(`${API_BASE_URL}/api/coupon-status/${ref}`, {
+        method: 'GET',
+        headers: { 'Content-Type': 'application/json' }
+      });
+      const data = await response.json();
+      if (data.hasCoupon && data.coupon && !data.coupon.used) {
+        setCouponCode(data.coupon.code);
+        setSavedCoupon(data.coupon.code);
+        localStorage.setItem('video_redo_coupon', data.coupon.code);
+        setShowRedoSection(true);
+        setSuccess('🎫 You have a valid redo coupon! Click "Need to redo your video?" to use it.');
+      }
+    } catch (error) {
+      console.warn('⚠️ Could not check coupon status:', error.message);
+    }
+  };
+
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
@@ -189,24 +217,33 @@ function PhotosToVideo() {
   };
 
   const openPaystackPopup = (paymentData) => {
+    // Wait for Paystack to be ready
     if (!paystackReady && typeof window.PaystackPop === 'undefined') {
-      console.error('❌ Paystack not ready, retrying...');
-      setError('Payment system is loading. Please try again in a moment.');
+      console.error('❌ Paystack not ready, waiting...');
+      setError('Payment system is loading. Please wait a moment...');
       setLoading(false);
       
+      // Try to load Paystack again
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
       script.async = true;
       script.onload = () => {
+        console.log('✅ Paystack reloaded');
         setPaystackReady(true);
-        console.log('✅ Paystack reloaded, please try payment again');
-        setError('Paystack loaded. Please click "Generate AI Video" again.');
+        // Retry after a short delay
+        setTimeout(() => {
+          setError('');
+          setLoading(false);
+          // User needs to click again
+          setSuccess('✅ Paystack loaded. Please click "Generate AI Video" again.');
+        }, 1000);
       };
       document.head.appendChild(script);
       return;
     }
 
     try {
+      console.log('💰 Opening Paystack popup with:', paymentData);
       const popup = new window.PaystackPop();
       popup.open({
         key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
@@ -244,12 +281,6 @@ function PhotosToVideo() {
 
     if (!email) {
       setError('Please enter your email address');
-      return;
-    }
-
-    if (!paystackReady && typeof window.PaystackPop === 'undefined') {
-      setError('Payment system is loading. Please wait a moment and try again.');
-      setLoading(false);
       return;
     }
 
@@ -393,7 +424,7 @@ function PhotosToVideo() {
         setLoading(false);
         setRedoLoading(false);
 
-        // Generate a redo coupon after successful payment (only for real payments, not redo)
+        // Generate a redo coupon after successful payment
         if (reference && !reference.startsWith('REDO-') && !reference.startsWith('test_')) {
           try {
             const couponResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-redo-coupon`, {
@@ -411,16 +442,14 @@ function PhotosToVideo() {
               setSavedCoupon(coupon);
               setCouponCode(coupon);
               localStorage.setItem('video_redo_coupon', coupon);
-              setSuccess(`✅ Video generated! Save this coupon for a free redo: ${coupon}`);
-              // Auto-show redo section with the coupon
               setShowRedoSection(true);
+              setSuccess(`✅ Video generated! Save this coupon for a free redo: ${coupon}`);
             }
           } catch (couponError) {
             console.warn('⚠️ Could not generate redo coupon:', couponError.message);
           }
         }
 
-        // Reset redo mode
         setIsRedoMode(false);
       } else {
         throw new Error(data.error || 'Video generation failed');
@@ -460,13 +489,11 @@ function PhotosToVideo() {
       const data = await response.json();
       if (data.valid) {
         setCouponValid(true);
-        setCouponChecked(true);
         setIsRedoMode(true);
         setSuccess('✅ Coupon valid! You can regenerate your video for free.');
         setError('');
       } else {
         setCouponValid(false);
-        setCouponChecked(true);
         setIsRedoMode(false);
         setError(data.error || 'Invalid coupon code');
       }
@@ -499,7 +526,6 @@ function PhotosToVideo() {
     setSuccess('');
 
     try {
-      // First, redeem the coupon
       const redeemResponse = await fetchWithRetry(`${API_BASE_URL}/api/redeem-redo-coupon`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -514,10 +540,8 @@ function PhotosToVideo() {
         throw new Error(redeemData.error || 'Failed to redeem coupon');
       }
 
-      // Process the video generation (without payment)
       await processPhotoVideo(redeemData.paymentReference || 'REDO-' + Date.now());
 
-      // Clear the coupon after successful redo
       localStorage.removeItem('video_redo_coupon');
       setCouponCode('');
       setSavedCoupon('');
@@ -648,14 +672,17 @@ function PhotosToVideo() {
             </div>
           )}
 
-          {/* Redo Section - Show after successful payment */}
-          {!isRedoMode && paymentReference && !loading && !redoLoading && (
+          {/* 🔥 REDO SECTION - Always visible if there's a coupon */}
+          {(savedCoupon || (paymentReference && !isRedoMode)) && (
             <div className="redo-section">
               <button 
                 className="redo-toggle-btn"
                 onClick={() => setShowRedoSection(!showRedoSection)}
               >
                 {showRedoSection ? '🔼 Hide' : '🔄 Need to redo your video? Click here'}
+                {savedCoupon && !showRedoSection && (
+                  <span className="coupon-badge">💳 Coupon available!</span>
+                )}
               </button>
               
               {showRedoSection && (
@@ -706,10 +733,6 @@ function PhotosToVideo() {
                 className="cancel-redo-btn"
                 onClick={() => {
                   setIsRedoMode(false);
-                  setCouponCode('');
-                  setCouponValid(false);
-                  setCouponChecked(false);
-                  setSuccess('');
                   setError('');
                 }}
               >
