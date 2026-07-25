@@ -27,7 +27,7 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// MONGODB ATLAS CONNECTION - SIMPLIFIED & FIXED
+// MONGODB ATLAS CONNECTION
 // ============================================
 
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://henrymunyoki_db_user:Letmeinplease01%21@cluster0.0rbgeoc.mongodb.net/video-creator?retryWrites=true&w=majority&appName=Cluster0';
@@ -36,7 +36,6 @@ const DATABASE_NAME = process.env.DATABASE_NAME || 'video-creator';
 console.log('🔑 MongoDB Atlas configured');
 console.log(`📊 Database: ${DATABASE_NAME}`);
 
-// Simple connection options without dbName in options
 const mongooseOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
@@ -50,16 +49,11 @@ let isMongoConnected = false;
 async function connectToMongo() {
   try {
     console.log('🔄 Connecting to MongoDB Atlas...');
-    
-    // Connect WITHOUT specifying dbName in options
     await mongoose.connect(MONGODB_URI, mongooseOptions);
-    
-    // Get the database name from the connection
     const dbName = mongoose.connection.db?.databaseName || DATABASE_NAME;
     console.log('✅ MongoDB Atlas connected successfully!');
     console.log(`   Database: ${dbName}`);
     console.log(`   Host: ${mongoose.connection.host}`);
-    
     isMongoConnected = true;
     return true;
   } catch (error) {
@@ -69,7 +63,6 @@ async function connectToMongo() {
   }
 }
 
-// Connect immediately
 connectToMongo();
 
 const db = mongoose.connection;
@@ -170,6 +163,18 @@ const siteVisitSchema = new mongoose.Schema({
   createdAt: { type: Date, default: Date.now }
 });
 
+// Coupon Schema
+const couponSchema = new mongoose.Schema({
+  code: { type: String, required: true, unique: true },
+  paymentReference: { type: String, required: true },
+  email: { type: String, required: true },
+  serviceType: { type: String, default: 'photo-to-video' },
+  used: { type: Boolean, default: false },
+  usedAt: { type: Date },
+  expiresAt: { type: Date, required: true },
+  createdAt: { type: Date, default: Date.now }
+});
+
 const InitialBalance = mongoose.model('InitialBalance', initialBalanceSchema);
 const ApiLedger = mongoose.model('ApiLedger', apiLedgerSchema);
 const Revenue = mongoose.model('Revenue', revenueSchema);
@@ -178,6 +183,7 @@ const UserPayment = mongoose.model('UserPayment', userPaymentSchema);
 const Translation = mongoose.model('Translation', translationSchema);
 const ActivityLog = mongoose.model('ActivityLog', activityLogSchema);
 const SiteVisit = mongoose.model('SiteVisit', siteVisitSchema);
+const Coupon = mongoose.model('Coupon', couponSchema);
 
 // ============================================
 // DATA ACCESS FUNCTIONS - MONGODB VERSION
@@ -208,7 +214,6 @@ async function initializeBalances() {
   }
 }
 
-// Initialize balances after MongoDB connects
 db.once('open', () => {
   setTimeout(initializeBalances, 1000);
 });
@@ -538,6 +543,103 @@ async function saveTranslation(translationData) {
   } catch (error) {
     console.error('❌ Error saving translation:', error.message);
     return null;
+  }
+}
+
+// ============================================
+// COUPON FUNCTIONS
+// ============================================
+
+async function generateCoupon(paymentReference, email, serviceType) {
+  if (!isMongoConnected) {
+    console.warn('⚠️ MongoDB not connected, generating in-memory coupon');
+    return `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+  }
+
+  try {
+    // Check if coupon already exists for this payment
+    const existingCoupon = await Coupon.findOne({ paymentReference });
+    if (existingCoupon) {
+      return existingCoupon.code;
+    }
+
+    const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+
+    const coupon = new Coupon({
+      code: couponCode,
+      paymentReference,
+      email,
+      serviceType: serviceType || 'photo-to-video',
+      expiresAt
+    });
+
+    await coupon.save();
+    return couponCode;
+  } catch (error) {
+    console.error('❌ Error generating coupon:', error.message);
+    return `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+  }
+}
+
+async function validateCoupon(couponCode, email) {
+  if (!isMongoConnected) {
+    // In-memory fallback
+    return { valid: false, error: 'Database not available' };
+  }
+
+  try {
+    const coupon = await Coupon.findOne({ code: couponCode });
+    if (!coupon) {
+      return { valid: false, error: 'Invalid coupon code' };
+    }
+
+    if (coupon.used) {
+      return { valid: false, error: 'This coupon has already been used' };
+    }
+
+    if (new Date(coupon.expiresAt) < new Date()) {
+      return { valid: false, error: 'Coupon has expired' };
+    }
+
+    if (email && coupon.email !== email) {
+      return { valid: false, error: 'Coupon not valid for this email' };
+    }
+
+    return { valid: true, coupon };
+  } catch (error) {
+    console.error('❌ Error validating coupon:', error.message);
+    return { valid: false, error: 'Error validating coupon' };
+  }
+}
+
+async function redeemCoupon(couponCode, email) {
+  if (!isMongoConnected) {
+    return { success: false, error: 'Database not available' };
+  }
+
+  try {
+    const coupon = await Coupon.findOne({ code: couponCode });
+    if (!coupon) {
+      return { success: false, error: 'Invalid coupon code' };
+    }
+
+    if (coupon.used) {
+      return { success: false, error: 'This coupon has already been used' };
+    }
+
+    if (new Date(coupon.expiresAt) < new Date()) {
+      return { success: false, error: 'Coupon has expired' };
+    }
+
+    coupon.used = true;
+    coupon.usedAt = new Date();
+    await coupon.save();
+
+    return { success: true, coupon };
+  } catch (error) {
+    console.error('❌ Error redeeming coupon:', error.message);
+    return { success: false, error: 'Error redeeming coupon' };
   }
 }
 
@@ -1947,6 +2049,174 @@ app.get('/api/admin/balances', async (req, res) => {
 });
 
 // ============================================
+// REDO COUPON SYSTEM - FREE REGENERATION
+// ============================================
+
+// Generate a redo coupon for a successful payment
+app.post('/api/generate-redo-coupon', async (req, res) => {
+  try {
+    const { paymentReference, email } = req.body;
+
+    if (!paymentReference) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment reference is required'
+      });
+    }
+
+    // Verify the payment was successful
+    const payment = await findPaymentByReference(paymentReference);
+    if (!payment) {
+      return res.status(404).json({
+        success: false,
+        error: 'Payment not found'
+      });
+    }
+
+    // Generate coupon
+    const couponCode = await generateCoupon(
+      paymentReference,
+      email || payment.email,
+      payment.serviceType || 'photo-to-video'
+    );
+
+    // Get the coupon details
+    const coupon = await Coupon.findOne({ code: couponCode });
+
+    res.json({
+      success: true,
+      coupon: couponCode,
+      message: 'Redo coupon generated successfully',
+      expiresAt: coupon ? coupon.expiresAt : new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+    });
+
+  } catch (error) {
+    console.error('❌ Error generating redo coupon:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Check if a coupon is valid
+app.post('/api/check-redo-coupon', async (req, res) => {
+  try {
+    const { couponCode, email } = req.body;
+
+    if (!couponCode) {
+      return res.json({
+        success: false,
+        valid: false,
+        error: 'Coupon code is required'
+      });
+    }
+
+    const result = await validateCoupon(couponCode, email);
+
+    if (result.valid) {
+      res.json({
+        success: true,
+        valid: true,
+        expiresAt: result.coupon.expiresAt,
+        message: 'Coupon is valid! You can regenerate your video for free.'
+      });
+    } else {
+      res.json({
+        success: false,
+        valid: false,
+        error: result.error
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error checking coupon:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Redeem a coupon for free video generation
+app.post('/api/redeem-redo-coupon', async (req, res) => {
+  try {
+    const { couponCode, email } = req.body;
+
+    if (!couponCode) {
+      return res.status(400).json({
+        success: false,
+        error: 'Coupon code is required'
+      });
+    }
+
+    const result = await redeemCoupon(couponCode, email);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        message: 'Coupon redeemed successfully! You can now regenerate your video for free.',
+        paymentReference: result.coupon.paymentReference
+      });
+    } else {
+      res.json({
+        success: false,
+        error: result.error
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error redeeming coupon:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Get coupon status for a payment
+app.get('/api/coupon-status/:paymentReference', async (req, res) => {
+  try {
+    const { paymentReference } = req.params;
+
+    if (!paymentReference) {
+      return res.status(400).json({
+        success: false,
+        error: 'Payment reference is required'
+      });
+    }
+
+    const coupon = await Coupon.findOne({ paymentReference });
+
+    if (coupon) {
+      res.json({
+        success: true,
+        hasCoupon: true,
+        coupon: {
+          code: coupon.code,
+          used: coupon.used,
+          expiresAt: coupon.expiresAt,
+          createdAt: coupon.createdAt
+        }
+      });
+    } else {
+      res.json({
+        success: true,
+        hasCoupon: false,
+        message: 'No coupon found for this payment'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error getting coupon status:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
 // TRANSLATION LANGUAGES
 // ============================================
 
@@ -2602,9 +2872,7 @@ app.get('/api/debug-failed', (req, res) => {
 });
 
 // ============================================
-// ============================================
-// 🔥 UPDATED PRICE CALCULATION ENDPOINT
-// ============================================
+// UPDATED PRICE CALCULATION ENDPOINT
 // ============================================
 
 app.post('/api/calculate-price', (req, res) => {
@@ -2881,4 +3149,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🔒 CORS configured to allow: ${allowedOrigins.join(', ')}`);
   console.log(`🔑 Using crypto.randomUUID() instead of uuid package ✅`);
   console.log(`🖼️ Photo-to-video endpoint: /api/generate-photo-video ✅`);
+  console.log(`🎫 Redo coupon system enabled ✅`);
 });

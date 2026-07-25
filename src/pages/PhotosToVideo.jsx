@@ -13,11 +13,9 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
       console.log(`🔄 Fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
       const response = await fetch(url, options);
       if (response.ok) return response;
-      // If it's a 404 or 400, don't retry
       if (response.status === 404 || response.status === 400) {
         return response;
       }
-      // For other errors, wait and retry
       if (attempt < maxRetries) {
         const delay = (attempt + 1) * 1000;
         console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
@@ -66,22 +64,27 @@ function PhotosToVideo() {
   const [paystackReady, setPaystackReady] = useState(false);
   const fileInputRef = useRef(null);
 
+  // Redo / Coupon states
+  const [showRedoSection, setShowRedoSection] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponValid, setCouponValid] = useState(false);
+  const [couponChecked, setCouponChecked] = useState(false);
+  const [isRedoMode, setIsRedoMode] = useState(false);
+  const [redoLoading, setRedoLoading] = useState(false);
+  const [savedCoupon, setSavedCoupon] = useState('');
+
   // ✅ Load Paystack script on component mount
   useEffect(() => {
-    // Function to load Paystack script
     const loadPaystack = () => {
-      // Check if already loaded
       if (typeof window.PaystackPop !== 'undefined') {
         console.log('✅ Paystack already loaded');
         setPaystackReady(true);
         return;
       }
 
-      // Check if script tag already exists
       const existingScript = document.querySelector('script[src*="paystack"]');
       if (existingScript) {
         console.log('📦 Paystack script already in DOM, waiting for it to load...');
-        // Wait for it to load
         existingScript.onload = () => {
           console.log('✅ Paystack script loaded from existing tag!');
           setPaystackReady(true);
@@ -89,7 +92,6 @@ function PhotosToVideo() {
         return;
       }
 
-      // Create and load script
       console.log('📦 Loading Paystack script...');
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
@@ -100,7 +102,6 @@ function PhotosToVideo() {
       };
       script.onerror = () => {
         console.error('❌ Failed to load Paystack script');
-        // Retry after 2 seconds
         setTimeout(loadPaystack, 2000);
       };
       document.head.appendChild(script);
@@ -108,10 +109,14 @@ function PhotosToVideo() {
 
     loadPaystack();
 
-    // Cleanup
-    return () => {
-      // Don't remove the script on unmount, it should stay
-    };
+    // Check for saved coupon in localStorage
+    const savedCouponCode = localStorage.getItem('video_redo_coupon');
+    if (savedCouponCode) {
+      setSavedCoupon(savedCouponCode);
+      setCouponCode(savedCouponCode);
+    }
+
+    return () => {};
   }, []);
 
   // Calculate price whenever photos or duration changes
@@ -155,7 +160,6 @@ function PhotosToVideo() {
       }
     } catch (error) {
       console.error('❌ Price calculation error:', error);
-      // Set a default price if calculation fails
       setPrice({
         finalPrice: 300,
         formatted: 'KES 300',
@@ -185,13 +189,11 @@ function PhotosToVideo() {
   };
 
   const openPaystackPopup = (paymentData) => {
-    // Check if Paystack is available
     if (!paystackReady && typeof window.PaystackPop === 'undefined') {
       console.error('❌ Paystack not ready, retrying...');
       setError('Payment system is loading. Please try again in a moment.');
       setLoading(false);
       
-      // Try reloading the script
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
       script.async = true;
@@ -245,7 +247,6 @@ function PhotosToVideo() {
       return;
     }
 
-    // Check if Paystack is ready
     if (!paystackReady && typeof window.PaystackPop === 'undefined') {
       setError('Payment system is loading. Please wait a moment and try again.');
       setLoading(false);
@@ -316,7 +317,6 @@ function PhotosToVideo() {
         return;
       }
 
-      // ✅ Open Paystack popup
       openPaystackPopup({
         amount: priceAmount,
         reference: paymentData.reference,
@@ -339,7 +339,7 @@ function PhotosToVideo() {
       for (const photo of photos) {
         const formData = new FormData();
         formData.append('file', photo.file);
-        formData.append('upload_preset', 'vidai_uploads'); // ✅ Updated preset name
+        formData.append('upload_preset', 'vidai_uploads');
 
         console.log('📤 Uploading photo to Cloudinary...');
         const uploadResponse = await fetch('https://api.cloudinary.com/v1_1/y7d1nk2i/image/upload', {
@@ -391,6 +391,37 @@ function PhotosToVideo() {
         setVideoUrl(data.videoUrl);
         setSuccess('✅ Video generated successfully! Check your email for the download link.');
         setLoading(false);
+        setRedoLoading(false);
+
+        // Generate a redo coupon after successful payment (only for real payments, not redo)
+        if (reference && !reference.startsWith('REDO-') && !reference.startsWith('test_')) {
+          try {
+            const couponResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-redo-coupon`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                paymentReference: reference,
+                email: email
+              })
+            });
+            
+            const couponData = await couponResponse.json();
+            if (couponData.success && couponData.coupon) {
+              const coupon = couponData.coupon;
+              setSavedCoupon(coupon);
+              setCouponCode(coupon);
+              localStorage.setItem('video_redo_coupon', coupon);
+              setSuccess(`✅ Video generated! Save this coupon for a free redo: ${coupon}`);
+              // Auto-show redo section with the coupon
+              setShowRedoSection(true);
+            }
+          } catch (couponError) {
+            console.warn('⚠️ Could not generate redo coupon:', couponError.message);
+          }
+        }
+
+        // Reset redo mode
+        setIsRedoMode(false);
       } else {
         throw new Error(data.error || 'Video generation failed');
       }
@@ -398,17 +429,112 @@ function PhotosToVideo() {
       console.error('❌ Video generation error:', error);
       setError('Video generation failed: ' + error.message);
       setLoading(false);
+      setRedoLoading(false);
+    }
+  };
+
+  // ============================================
+  // REDO COUPON FUNCTIONS
+  // ============================================
+
+  const checkCoupon = async () => {
+    if (!couponCode.trim()) {
+      setError('Please enter a coupon code');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+    
+    try {
+      const response = await fetchWithRetry(`${API_BASE_URL}/api/check-redo-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          couponCode: couponCode.trim(),
+          email: email 
+        })
+      });
+
+      const data = await response.json();
+      if (data.valid) {
+        setCouponValid(true);
+        setCouponChecked(true);
+        setIsRedoMode(true);
+        setSuccess('✅ Coupon valid! You can regenerate your video for free.');
+        setError('');
+      } else {
+        setCouponValid(false);
+        setCouponChecked(true);
+        setIsRedoMode(false);
+        setError(data.error || 'Invalid coupon code');
+      }
+    } catch (error) {
+      console.error('❌ Coupon check error:', error);
+      setError('Failed to validate coupon. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleRedoGeneration = async () => {
+    if (photos.length === 0) {
+      setError('Please upload at least one photo');
+      return;
+    }
+
+    if (!prompt.trim()) {
+      setError('Please describe what you want to generate');
+      return;
+    }
+
+    if (!email) {
+      setError('Please enter your email address');
+      return;
+    }
+
+    setRedoLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      // First, redeem the coupon
+      const redeemResponse = await fetchWithRetry(`${API_BASE_URL}/api/redeem-redo-coupon`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          couponCode: couponCode.trim(),
+          email: email
+        })
+      });
+
+      const redeemData = await redeemResponse.json();
+      if (!redeemData.success) {
+        throw new Error(redeemData.error || 'Failed to redeem coupon');
+      }
+
+      // Process the video generation (without payment)
+      await processPhotoVideo(redeemData.paymentReference || 'REDO-' + Date.now());
+
+      // Clear the coupon after successful redo
+      localStorage.removeItem('video_redo_coupon');
+      setCouponCode('');
+      setSavedCoupon('');
+      setCouponValid(false);
+      setIsRedoMode(false);
+
+    } catch (error) {
+      console.error('❌ Redo generation error:', error);
+      setError('Failed to regenerate video: ' + error.message);
+    } finally {
+      setRedoLoading(false);
     }
   };
 
   const getPriceDisplay = () => {
     if (!price) return 'Calculating price...';
     return `KES ${Math.round(price.finalPrice)}`;
-  };
-
-  const getPriceAmount = () => {
-    if (!price) return 300;
-    return Math.round(price.finalPrice);
   };
 
   return (
@@ -431,7 +557,7 @@ function PhotosToVideo() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="Enter your email"
-              disabled={loading}
+              disabled={loading || redoLoading}
             />
             <small>Your generated video will be sent to this email</small>
           </div>
@@ -449,7 +575,7 @@ function PhotosToVideo() {
                 accept="image/*"
                 multiple
                 style={{ display: 'none' }}
-                disabled={loading}
+                disabled={loading || redoLoading}
               />
             </div>
             {photos.length > 0 && (
@@ -480,13 +606,13 @@ function PhotosToVideo() {
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="Describe the scene, mood, and style you want"
                 rows={4}
-                disabled={loading}
+                disabled={loading || redoLoading}
               />
             </div>
 
             <div className="setting-group">
               <label>Video Duration</label>
-              <select value={duration} onChange={(e) => setDuration(parseInt(e.target.value))} disabled={loading}>
+              <select value={duration} onChange={(e) => setDuration(parseInt(e.target.value))} disabled={loading || redoLoading}>
                 <option value={5}>5 seconds</option>
                 <option value={10}>10 seconds</option>
                 <option value={15}>15 seconds</option>
@@ -495,7 +621,7 @@ function PhotosToVideo() {
 
             <div className="setting-group">
               <label>Aspect Ratio</label>
-              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={loading}>
+              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={loading || redoLoading}>
                 <option value="16:9">16:9 (Widescreen)</option>
                 <option value="1:1">1:1 (Square)</option>
                 <option value="9:16">9:16 (Vertical)</option>
@@ -504,30 +630,104 @@ function PhotosToVideo() {
           </div>
 
           {/* Price Display */}
-          <div className="price-section">
-            <h3>💰 Total Cost</h3>
-            <div className="price-card">
-              <div className="price-amount">{getPriceDisplay()}</div>
-              <div className="price-details">
-                <p>✅ AI video generation</p>
-                <p>✅ HD quality</p>
-                <p>✅ {duration}-second video</p>
-                <p>✅ {photos.length} photo{photos.length !== 1 ? 's' : ''}</p>
+          {!isRedoMode && (
+            <div className="price-section">
+              <h3>💰 Total Cost</h3>
+              <div className="price-card">
+                <div className="price-amount">{getPriceDisplay()}</div>
+                <div className="price-details">
+                  <p>✅ AI video generation</p>
+                  <p>✅ HD quality</p>
+                  <p>✅ {duration}-second video</p>
+                  <p>✅ {photos.length} photo{photos.length !== 1 ? 's' : ''}</p>
+                </div>
+              </div>
+              <div className="price-note">
+                <small>Complete your payment below</small>
               </div>
             </div>
-            <div className="price-note">
-              <small>Complete your payment below</small>
-            </div>
-          </div>
+          )}
 
-          {/* Payment Button */}
-          <button
-            className="generate-btn"
-            onClick={handlePayment}
-            disabled={loading || photos.length === 0 || !prompt.trim()}
-          >
-            {loading ? '⏳ Processing...' : `🤖 Generate AI Video (${getPriceDisplay()})`}
-          </button>
+          {/* Redo Section - Show after successful payment */}
+          {!isRedoMode && paymentReference && !loading && !redoLoading && (
+            <div className="redo-section">
+              <button 
+                className="redo-toggle-btn"
+                onClick={() => setShowRedoSection(!showRedoSection)}
+              >
+                {showRedoSection ? '🔼 Hide' : '🔄 Need to redo your video? Click here'}
+              </button>
+              
+              {showRedoSection && (
+                <div className="redo-container">
+                  <p className="redo-info">
+                    If your video didn't turn out as expected, you can regenerate it for free 
+                    using your redo coupon. Enter your coupon code below.
+                  </p>
+                  {savedCoupon && (
+                    <p className="saved-coupon-info">
+                      💡 Your saved coupon: <strong>{savedCoupon}</strong>
+                    </p>
+                  )}
+                  <div className="coupon-input-group">
+                    <input
+                      type="text"
+                      value={couponCode}
+                      onChange={(e) => setCouponCode(e.target.value)}
+                      placeholder="Enter your redo coupon code"
+                      disabled={loading || redoLoading}
+                    />
+                    <button 
+                      onClick={checkCoupon}
+                      disabled={loading || redoLoading || !couponCode.trim()}
+                      className="check-coupon-btn"
+                    >
+                      Check Coupon
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Redo Mode Active */}
+          {isRedoMode && (
+            <div className="redo-mode-active">
+              <div className="redo-badge">🔄 REDO MODE - Free Regeneration</div>
+              <p className="redo-success">✅ Coupon valid! Generate your video for free.</p>
+              <button
+                className="generate-btn redo-generate-btn"
+                onClick={handleRedoGeneration}
+                disabled={redoLoading || photos.length === 0 || !prompt.trim()}
+              >
+                {redoLoading ? '⏳ Processing...' : '🔄 Regenerate Video for Free'}
+              </button>
+              <button 
+                className="cancel-redo-btn"
+                onClick={() => {
+                  setIsRedoMode(false);
+                  setCouponCode('');
+                  setCouponValid(false);
+                  setCouponChecked(false);
+                  setSuccess('');
+                  setError('');
+                }}
+              >
+                Cancel Redo
+              </button>
+            </div>
+          )}
+
+          {/* Payment Button - Show only when not in redo mode */}
+          {!isRedoMode && (
+            <button
+              className="generate-btn"
+              onClick={handlePayment}
+              disabled={loading || photos.length === 0 || !prompt.trim()}
+            >
+              {loading ? '⏳ Processing...' : `🤖 Generate AI Video (${getPriceDisplay()})`}
+            </button>
+          )}
 
           {/* Messages */}
           {error && <div className="error-message">❌ {error}</div>}
@@ -558,6 +758,7 @@ function PhotosToVideo() {
               <li>📝 Describe what you want the AI to generate</li>
               <li>💰 Complete payment via Paystack</li>
               <li>📥 Download your AI-generated video</li>
+              <li>🔄 Use your redo coupon for free regeneration</li>
               <li>🔒 All AI generations are secure and private</li>
             </ul>
             <div className="support-info">
