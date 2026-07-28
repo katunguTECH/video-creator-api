@@ -39,12 +39,25 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
 // links — it just opens the video instead of downloading it. Cloudinary's
 // `fl_attachment` flag forces the server to send it as a real attachment,
 // which works for every user regardless of browser.
+//
+// ✅ FIX #2: Guard against `data:` URIs (the base64 fallback placeholder
+// image the backend returns when generation fails). Browsers block
+// top-frame navigation to data: URIs entirely ("Not allowed to navigate
+// top frame to data URL"), so trying to build a download link for one
+// does nothing when clicked. We only rewrite/return real http(s) URLs.
 const getDownloadUrl = (url) => {
   if (!url) return url;
+  if (url.startsWith('data:')) return null;
   if (url.includes('/upload/') && !url.includes('fl_attachment')) {
     return url.replace('/upload/', '/upload/fl_attachment/');
   }
   return url;
+};
+
+// ✅ Helper to detect the base64 fallback placeholder / any non-playable
+// data URI so we never show it to the user as if it were their real video.
+const isPlaceholderVideo = (url) => {
+  return !url || url.startsWith('data:');
 };
 
 function PhotosToVideo() {
@@ -245,15 +258,27 @@ function PhotosToVideo() {
     }
   };
 
-  // ✅ UPDATED: Handle video URL display and forced-download link
+  // ✅ UPDATED: Handle video URL display and forced-download link.
+  // Guards against placeholder/data: URIs — those never get a download
+  // link built for them since browsers block top-frame navigation to
+  // data: URIs anyway (the "Not allowed to navigate top frame to data
+  // URL" error from your console).
   const displayVideo = (url) => {
     console.log('🎬 Displaying video URL:', url);
     setVideoUrl(url);
 
+    if (isPlaceholderVideo(url)) {
+      // Nothing real to download — don't create a broken download link.
+      return;
+    }
+
     const videoContainer = document.querySelector('.video-container');
     if (videoContainer) {
+      const downloadHref = getDownloadUrl(url);
+      if (!downloadHref) return;
+
       const downloadLink = document.createElement('a');
-      downloadLink.href = getDownloadUrl(url); // fl_attachment forces a real download
+      downloadLink.href = downloadHref; // fl_attachment forces a real download
       downloadLink.className = 'download-btn';
       downloadLink.innerHTML = '📥 Download Video';
       downloadLink.style.cssText = `
@@ -380,9 +405,12 @@ function PhotosToVideo() {
   };
 
   // ✅ UPDATED: Process video, rely on the backend's `emailSent` status,
-  // and retry the email send once (via /api/send-video-email) if the
-  // server-side attempt failed, instead of always double-sending or
-  // silently giving up.
+  // retry the email send once if the server-side attempt failed, and —
+  // critically — check `data.isFallback` BEFORE treating the response as
+  // a real generated video. Previously the code called displayVideo() on
+  // whatever videoUrl came back, even when the backend was returning its
+  // base64 placeholder image after every BytePlus model failed. That's
+  // why the "video" wasn't downloadable: it was never a video.
   const processPhotoVideo = async (reference) => {
     try {
       setSuccess('🔄 Processing your video... This may take a few moments.');
@@ -443,13 +471,58 @@ function PhotosToVideo() {
       console.log('📦 Video generation response:', data);
 
       if (data.success && data.videoUrl) {
-        // ✅ Display video on the page (with forced-download link)
+
+        // ✅ FIX: The backend returns success:true even when generation
+        // failed and it's sending back a fallback placeholder image
+        // (data.isFallback === true / videoUrl starting with "data:").
+        // Detect that case FIRST and show a clear "generation failed,
+        // use your free redo" message instead of a broken video preview
+        // and a download button that can never work.
+        if (data.isFallback || isPlaceholderVideo(data.videoUrl)) {
+          console.warn('⚠️ Backend returned a fallback placeholder, not a real video.', data.debugErrors);
+          setVideoUrl(null);
+          setError(
+            'Video generation failed on our AI provider\'s end, so no video was created. ' +
+            'This was not charged as a normal attempt — please use the "Regenerate Video for Free" ' +
+            'option below with your redo coupon, or try again in a few minutes.'
+          );
+          setSuccess('');
+
+          // Still try to generate a redo coupon so the user has a free retry path
+          if (reference && !reference.startsWith('TEST-') && !reference.startsWith('REDO-')) {
+            try {
+              const couponResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-redo-coupon`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ paymentReference: reference, email: email })
+              });
+              const couponData = await couponResponse.json();
+              if (couponData.success && couponData.coupon) {
+                const coupon = couponData.coupon;
+                setSavedCoupon(coupon);
+                setCouponCode(coupon);
+                localStorage.setItem('video_redo_coupon', coupon);
+                setShowRedoSection(true);
+              }
+            } catch (couponError) {
+              console.warn('⚠️ Could not generate redo coupon:', couponError.message);
+            }
+          }
+
+          setLoading(false);
+          setRedoLoading(false);
+          setIsRedoMode(false);
+          return;
+        }
+
+        // ✅ Display the real video on the page (with forced-download link)
         displayVideo(data.videoUrl);
 
         // ✅ Trust the backend's emailSent flag. Only retry from the
         // frontend if the server-side send actually failed — avoids
         // double-sending the same email to every user.
         let emailOk = data.emailSent === true;
+        let emailErrorDetail = data.emailError || null;
 
         if (!emailOk) {
           try {
@@ -466,16 +539,24 @@ function PhotosToVideo() {
               })
             });
             emailOk = emailResponse.ok;
+            if (!emailOk) {
+              try {
+                const emailErrData = await emailResponse.json();
+                emailErrorDetail = emailErrData.error || emailErrorDetail;
+              } catch (_) { /* ignore parse errors */ }
+            }
           } catch (emailError) {
             console.warn('⚠️ Retry email send failed:', emailError.message);
+            emailErrorDetail = emailError.message;
           }
         }
 
-        setSuccess(
-          emailOk
-            ? '✅ Video generated successfully! Check your email for the download link.'
-            : '✅ Video generated! Download it below. (Email could not be sent — please use the download button.)'
-        );
+        if (emailOk) {
+          setSuccess('✅ Video generated successfully! Check your email for the download link.');
+        } else {
+          console.warn('⚠️ Email delivery failed:', emailErrorDetail);
+          setSuccess('✅ Video generated! Download it below. (Email could not be sent — please use the download button.)');
+        }
 
         // ✅ Generate redo coupon
         if (reference && !reference.startsWith('TEST-') && !reference.startsWith('REDO-')) {
@@ -769,40 +850,42 @@ function PhotosToVideo() {
           <div className="video-preview">
             <h3>📹 Video Preview</h3>
             <div className="video-container">
-              {videoUrl ? (
+              {videoUrl && !isPlaceholderVideo(videoUrl) ? (
                 <>
                   <video controls className="video-player">
                     <source src={videoUrl} type="video/mp4" />
                     Your browser does not support the video tag.
                   </video>
-                  <a
-                    href={getDownloadUrl(videoUrl)}
-                    className="download-btn"
-                    style={{
-                      display: 'inline-block',
-                      margin: '15px 0',
-                      padding: '12px 30px',
-                      background: 'linear-gradient(135deg, #4caf50, #388e3c)',
-                      color: 'white',
-                      borderRadius: '30px',
-                      textDecoration: 'none',
-                      fontWeight: '600',
-                      fontSize: '16px',
-                      boxShadow: '0 4px 15px rgba(76, 175, 80, 0.3)',
-                      transition: 'all 0.3s ease',
-                      cursor: 'pointer'
-                    }}
-                    onMouseOver={(e) => {
-                      e.target.style.transform = 'translateY(-2px)';
-                      e.target.style.boxShadow = '0 6px 25px rgba(76, 175, 80, 0.4)';
-                    }}
-                    onMouseOut={(e) => {
-                      e.target.style.transform = 'translateY(0)';
-                      e.target.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.3)';
-                    }}
-                  >
-                    📥 Download Video
-                  </a>
+                  {getDownloadUrl(videoUrl) && (
+                    <a
+                      href={getDownloadUrl(videoUrl)}
+                      className="download-btn"
+                      style={{
+                        display: 'inline-block',
+                        margin: '15px 0',
+                        padding: '12px 30px',
+                        background: 'linear-gradient(135deg, #4caf50, #388e3c)',
+                        color: 'white',
+                        borderRadius: '30px',
+                        textDecoration: 'none',
+                        fontWeight: '600',
+                        fontSize: '16px',
+                        boxShadow: '0 4px 15px rgba(76, 175, 80, 0.3)',
+                        transition: 'all 0.3s ease',
+                        cursor: 'pointer'
+                      }}
+                      onMouseOver={(e) => {
+                        e.target.style.transform = 'translateY(-2px)';
+                        e.target.style.boxShadow = '0 6px 25px rgba(76, 175, 80, 0.4)';
+                      }}
+                      onMouseOut={(e) => {
+                        e.target.style.transform = 'translateY(0)';
+                        e.target.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.3)';
+                      }}
+                    >
+                      📥 Download Video
+                    </a>
+                  )}
                 </>
               ) : (
                 <div className="placeholder">

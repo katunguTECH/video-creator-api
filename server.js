@@ -1055,11 +1055,26 @@ if (!mg) {
   }
 }
 
+// ============================================
+// ✅ FIX: sendEmail now captures and returns the REAL underlying error
+// from Mailgun/Gmail instead of a generic "No email provider available"
+// message. This is what /api/send-video-email and the dashboard need
+// to actually diagnose why emails are failing (bad domain verification,
+// bad SMTP auth, etc.) instead of guessing blind from a 500 with no body.
+// ============================================
 async function sendEmail(to, subject, html, text) {
   const fromEmail = process.env.EMAIL_FROM || `noreply@${MAILGUN_DOMAIN}`;
   const fromName = 'VidAI Creator';
 
   console.log(`📧 Sending email to ${to} via ${emailProvider.toUpperCase()}`);
+
+  if (emailProvider === 'none') {
+    const msg = 'No email provider configured on the server (missing MAILGUN_API_KEY or EMAIL_USER/EMAIL_PASSWORD env vars)';
+    console.error(`❌ ${msg}`);
+    return { success: false, provider: 'none', error: msg };
+  }
+
+  let lastError = null;
 
   if (emailProvider === 'mailgun' && mg) {
     try {
@@ -1082,7 +1097,12 @@ async function sendEmail(to, subject, html, text) {
       console.log(`   Message ID: ${result.id}`);
       return { success: true, provider: 'mailgun', id: result.id };
     } catch (error) {
+      // ✅ Log the FULL Mailgun error (statusCode + message), not just error.message,
+      // since Mailgun errors often carry the real reason in the response body
+      // (e.g. "Domain katareel.com is not allowed to send" / unverified domain).
       console.error('❌ Mailgun error:', error.message);
+      if (error.statusCode) console.error('   Mailgun status code:', error.statusCode);
+      lastError = `Mailgun error: ${error.message}`;
     }
   }
 
@@ -1102,11 +1122,12 @@ async function sendEmail(to, subject, html, text) {
       return { success: true, provider: 'gmail', id: info.messageId };
     } catch (error) {
       console.error('❌ Gmail error:', error.message);
+      lastError = `Gmail error: ${error.message}`;
     }
   }
 
-  console.error(`❌ Failed to send email to ${to}`);
-  return { success: false, error: 'No email provider available' };
+  console.error(`❌ Failed to send email to ${to}: ${lastError || 'unknown error'}`);
+  return { success: false, provider: emailProvider, error: lastError || 'No email provider available' };
 }
 
 // ============================================
@@ -1723,6 +1744,7 @@ app.post('/api/translate-video', async (req, res) => {
       console.log(`📧 Translation video sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.warn('⚠️ Could not send translation email:', emailErr.message);
+      emailResult = { success: false, error: emailErr.message };
     }
 
     res.json({
@@ -1734,7 +1756,8 @@ app.post('/api/translate-video', async (req, res) => {
       paymentReference,
       translationId,
       price: TRANSLATION_PRICE,
-      emailSent: emailResult.success
+      emailSent: emailResult.success,
+      emailError: emailResult.error || null
     });
 
   } catch (error) {
@@ -1786,6 +1809,7 @@ app.post('/api/translate-video-free', async (req, res) => {
       console.log(`📧 Email sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.error('❌ Email error:', emailErr);
+      emailResult = { success: false, error: emailErr.message };
     }
 
     try {
@@ -1799,7 +1823,8 @@ app.post('/api/translate-video-free', async (req, res) => {
       message: '✅ Translation complete! Check your email for the download link.',
       videoUrl: translatedVideoUrl,
       paymentReference: paymentReference,
-      emailSent: emailResult.success
+      emailSent: emailResult.success,
+      emailError: emailResult.error || null
     });
 
   } catch (error) {
@@ -2169,7 +2194,8 @@ app.get('/api/admin/dashboard', async (req, res) => {
       mongodb: {
         connected: isMongoConnected,
         database: DATABASE_NAME
-      }
+      },
+      emailProvider: emailProvider
     });
   } catch (error) {
     console.error('Error fetching dashboard data:', error);
@@ -2495,14 +2521,23 @@ app.post('/api/send-video-email', async (req, res) => {
 
     if (result.success) {
       console.log(`✅ Video email sent successfully to ${email}`);
-      res.json({
+      return res.json({
         success: true,
         message: 'Video sent to your email',
         provider: result.provider
       });
-    } else {
-      throw new Error(result.error || 'Failed to send email');
     }
+
+    // ✅ FIX: return the REAL reason as a 200 with success:false + error detail
+    // instead of throwing and returning a bare 500 with no body — this is
+    // what let the frontend retry loop exhaust 3 attempts against a dead
+    // endpoint with zero diagnostic info in the browser console.
+    console.error(`❌ Email send failed for ${email}: ${result.error}`);
+    return res.status(502).json({
+      success: false,
+      error: result.error || 'Failed to send email',
+      provider: result.provider
+    });
   } catch (error) {
     console.error('❌ Email error:', error.message);
     res.status(500).json({
@@ -2543,7 +2578,8 @@ app.post('/api/test-email', async (req, res) => {
     res.json({
       success: result.success,
       provider: result.provider,
-      message: result.success ? 'Test email sent successfully' : 'Failed to send test email'
+      error: result.error || null,
+      message: result.success ? 'Test email sent successfully' : `Failed to send test email: ${result.error}`
     });
   } catch (error) {
     console.error('❌ Test email error:', error.message);
@@ -2613,12 +2649,21 @@ async function pollDreaminaTask(taskId, token, endpoint) {
       const pollResponse = await fetch(`${endpoint}/contents/generations/tasks/${taskId}`, {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
-      if (!pollResponse.ok) { attempts++; continue; }
+      if (!pollResponse.ok) {
+        // ✅ Log poll failures too instead of silently retrying forever
+        const bodyText = await pollResponse.text().catch(() => '');
+        console.warn(`⚠️ Dreamina poll ${attempts + 1} failed: ${pollResponse.status} ${bodyText.substring(0, 300)}`);
+        attempts++;
+        continue;
+      }
       const result = await pollResponse.json();
       if (result.status === 'succeeded') return result;
       if (result.status === 'failed') throw new Error(result.error || 'Dreamina generation failed');
       attempts++;
-    } catch (error) { attempts++; }
+    } catch (error) {
+      console.warn(`⚠️ Dreamina poll ${attempts + 1} error:`, error.message);
+      attempts++;
+    }
   }
   throw new Error('Timeout waiting for Dreamina video generation');
 }
@@ -2668,6 +2713,7 @@ app.post('/api/generate-video', async (req, res) => {
     let usedModel = null;
     let provider = null;
     let cost = 0.08 * durationMultiplier;
+    const generationErrors = [];
 
     try {
       const replicateToken = process.env.REPLICATE_API_TOKEN;
@@ -2715,11 +2761,21 @@ app.post('/api/generate-video', async (req, res) => {
             provider = 'replicate';
             cost = 0.08 * durationMultiplier;
             console.log('✅ Replicate video generated successfully!');
+          } else {
+            generationErrors.push(`Replicate: prediction ended with status "${prediction.status}"`);
           }
+        } else {
+          // ✅ Log the actual Replicate rejection body instead of nothing
+          const bodyText = await response.text().catch(() => '');
+          console.warn(`⚠️ Replicate request failed: ${response.status} ${bodyText.substring(0, 500)}`);
+          generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
         }
+      } else {
+        generationErrors.push('Replicate: REPLICATE_API_TOKEN not set');
       }
     } catch (error) {
       console.warn('❌ Replicate error:', error.message);
+      generationErrors.push(`Replicate: ${error.message}`);
     }
 
     if (!videoUrl) {
@@ -2750,7 +2806,15 @@ app.post('/api/generate-video', async (req, res) => {
               });
 
               if (!createResponse.ok) {
-                console.warn(`⚠️ BytePlus ${modelId} failed:`, createResponse.status);
+                // ✅ FIX: This is the critical missing piece. Previously only
+                // the status code was logged, so a 401 (bad API key), 400
+                // (bad model id / bad params), or 403 (billing/plan issue)
+                // all looked identical from the outside. Logging the actual
+                // response body tells you exactly why BytePlus is rejecting
+                // every request.
+                const bodyText = await createResponse.text().catch(() => '');
+                console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
+                generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
                 continue;
               }
 
@@ -2765,27 +2829,36 @@ app.post('/api/generate-video', async (req, res) => {
                 cost = 0.15 * durationMultiplier;
                 console.log(`✅ BytePlus video generated with ${modelId}!`);
                 break;
+              } else {
+                generationErrors.push(`BytePlus ${modelId}: task succeeded but no video_url in response`);
               }
             } catch (error) {
               console.warn(`❌ BytePlus ${modelId} error:`, error.message);
+              generationErrors.push(`BytePlus ${modelId}: ${error.message}`);
               continue;
             }
           }
+        } else {
+          generationErrors.push('BytePlus: MODELARK_API_KEY not set');
         }
       } catch (error) {
         console.warn('❌ BytePlus error:', error.message);
+        generationErrors.push(`BytePlus: ${error.message}`);
       }
     }
 
     if (!videoUrl) {
-      console.log('🔄 Video generation failed, marking for retry');
+      // ✅ Print a consolidated summary of every provider failure to the
+      // Render logs so the root cause is visible in one place.
+      console.error('❌ All video providers failed:', generationErrors);
       if (paymentReference) {
         failedGenerations[paymentReference] = {
           timestamp: new Date().toISOString(),
           email: email,
           prompt: prompt,
           duration: videoDuration,
-          reason: 'Generation failed'
+          reason: 'Generation failed',
+          errors: generationErrors
         };
       }
       return res.json({
@@ -2795,7 +2868,8 @@ app.post('/api/generate-video', async (req, res) => {
         isFallback: true,
         canRetry: true,
         note: 'Video generation failed. You can retry for free.',
-        paymentReference
+        paymentReference,
+        debugErrors: generationErrors
       });
     }
 
@@ -2834,6 +2908,7 @@ app.post('/api/generate-video', async (req, res) => {
       console.log(`📧 Video email sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.warn('⚠️ Could not send video email:', emailErr.message);
+      emailResult = { success: false, error: emailErr.message };
     }
 
     res.json({
@@ -2845,7 +2920,8 @@ app.post('/api/generate-video', async (req, res) => {
       duration: videoDuration,
       paymentReference,
       userEmail: email,
-      emailSent: emailResult.success
+      emailSent: emailResult.success,
+      emailError: emailResult.error || null
     });
   } catch (error) {
     console.error('❌ Error:', error.message);
@@ -2913,6 +2989,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let usedModel = null;
     let provider = null;
     let cost = 0.15 * durationMultiplier;
+    const generationErrors = [];
 
     const token = process.env.MODELARK_API_KEY;
     if (token) {
@@ -2952,7 +3029,12 @@ app.post('/api/generate-photo-video', async (req, res) => {
           });
 
           if (!createResponse.ok) {
-            console.warn(`⚠️ BytePlus ${modelId} failed:`, createResponse.status);
+            // ✅ FIX: same critical fix as the text-to-video endpoint — log the
+            // actual response body (auth error, invalid image URL, unsupported
+            // ratio, plan/quota limit, etc.) instead of just the status code.
+            const bodyText = await createResponse.text().catch(() => '');
+            console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
+            generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
             continue;
           }
 
@@ -2968,15 +3050,20 @@ app.post('/api/generate-photo-video', async (req, res) => {
             cost = 0.15 * durationMultiplier;
             console.log(`✅ BytePlus video generated with ${modelId}!`);
             break;
+          } else {
+            generationErrors.push(`BytePlus ${modelId}: task succeeded but no video_url in response`);
           }
         } catch (err) {
           console.warn(`❌ BytePlus ${modelId} error:`, err.message);
+          generationErrors.push(`BytePlus ${modelId}: ${err.message}`);
         }
       }
+    } else {
+      generationErrors.push('BytePlus: MODELARK_API_KEY not set');
     }
 
     if (!videoUrl) {
-      console.log('🔄 Photo-to-video generation failed, returning fallback');
+      console.error('❌ Photo-to-video generation failed for all models:', generationErrors);
       return res.json({
         success: true,
         videoUrl: createFallbackVideo(prompt, paymentReference),
@@ -2984,7 +3071,8 @@ app.post('/api/generate-photo-video', async (req, res) => {
         isFallback: true,
         canRetry: true,
         note: 'Photo-to-video generation failed. You can retry for free.',
-        paymentReference
+        paymentReference,
+        debugErrors: generationErrors
       });
     }
 
@@ -3017,6 +3105,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
       console.log(`📧 Video email sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.warn('⚠️ Could not send video email:', emailErr.message);
+      emailResult = { success: false, error: emailErr.message };
     }
 
     res.json({
@@ -3028,7 +3117,8 @@ app.post('/api/generate-photo-video', async (req, res) => {
       duration: videoDuration,
       paymentReference,
       userEmail: email,
-      emailSent: emailResult.success
+      emailSent: emailResult.success,
+      emailError: emailResult.error || null
     });
 
   } catch (error) {
@@ -3210,7 +3300,8 @@ app.get('/api/test', (req, res) => {
       '/api/admin/add-missing-payment',
       '/api/test-google-cloud',
       '/api/translate-video-free',
-      '/api/test-tts'
+      '/api/test-tts',
+      '/api/debug-failed'
     ]
   });
 });
@@ -3349,4 +3440,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
   console.log(`📧 Video email delivery enabled ✅`);
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
+  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/Mailgun errors)`);
 });
