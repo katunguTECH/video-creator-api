@@ -5,7 +5,7 @@ import './PhotosToVideo.css';
 // API Base URL from environment
 const API_BASE_URL = process.env.REACT_APP_API_URL || '';
 
-// Helper function with retry logic
+// Helper function with retry logic for cold starts
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
@@ -34,6 +34,19 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
   throw lastError || new Error('Max retries exceeded');
 };
 
+// ✅ FIX: Cloudinary URLs are a different origin than katareel.com, so the
+// HTML `download` attribute is silently ignored by browsers on cross-origin
+// links — it just opens the video instead of downloading it. Cloudinary's
+// `fl_attachment` flag forces the server to send it as a real attachment,
+// which works for every user regardless of browser.
+const getDownloadUrl = (url) => {
+  if (!url) return url;
+  if (url.includes('/upload/') && !url.includes('fl_attachment')) {
+    return url.replace('/upload/', '/upload/fl_attachment/');
+  }
+  return url;
+};
+
 function PhotosToVideo() {
   const navigate = useNavigate();
   const [email, setEmail] = useState('katungu1@gmail.com');
@@ -58,21 +71,18 @@ function PhotosToVideo() {
   const [redoLoading, setRedoLoading] = useState(false);
   const [savedCoupon, setSavedCoupon] = useState('');
 
-  // ✅ Load Paystack script with retry
+  // ✅ Load Paystack script on component mount
   useEffect(() => {
     const loadPaystack = () => {
-      // Check if already loaded
       if (typeof window.PaystackPop !== 'undefined') {
         console.log('✅ Paystack already loaded');
         setPaystackReady(true);
         return;
       }
 
-      // Check if script tag already exists
       const existingScript = document.querySelector('script[src*="paystack"]');
       if (existingScript) {
         console.log('📦 Paystack script already in DOM');
-        // Check again after a delay
         setTimeout(() => {
           if (typeof window.PaystackPop !== 'undefined') {
             console.log('✅ Paystack loaded from existing script!');
@@ -82,7 +92,6 @@ function PhotosToVideo() {
         return;
       }
 
-      // Create and load script
       console.log('📦 Loading Paystack script...');
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
@@ -97,7 +106,6 @@ function PhotosToVideo() {
       };
       script.onerror = () => {
         console.error('❌ Failed to load Paystack script');
-        // Retry after 3 seconds
         setTimeout(loadPaystack, 3000);
       };
       document.head.appendChild(script);
@@ -105,24 +113,11 @@ function PhotosToVideo() {
 
     loadPaystack();
 
-    // Check for saved coupon in localStorage
     const savedCouponCode = localStorage.getItem('video_redo_coupon');
     if (savedCouponCode) {
       setSavedCoupon(savedCouponCode);
       setCouponCode(savedCouponCode);
-      // Auto-show redo section if there's a saved coupon
       setShowRedoSection(true);
-    }
-
-    // Also check if we have a payment reference from URL
-    const urlParams = new URLSearchParams(window.location.search);
-    const ref = urlParams.get('reference');
-    if (ref) {
-      setPaymentReference(ref);
-      // Auto-check for coupon
-      setTimeout(() => {
-        checkCouponForPayment(ref);
-      }, 1000);
     }
 
     return () => {};
@@ -177,25 +172,6 @@ function PhotosToVideo() {
     }
   };
 
-  const checkCouponForPayment = async (ref) => {
-    try {
-      const response = await fetchWithRetry(`${API_BASE_URL}/api/coupon-status/${ref}`, {
-        method: 'GET',
-        headers: { 'Content-Type': 'application/json' }
-      });
-      const data = await response.json();
-      if (data.hasCoupon && data.coupon && !data.coupon.used) {
-        setCouponCode(data.coupon.code);
-        setSavedCoupon(data.coupon.code);
-        localStorage.setItem('video_redo_coupon', data.coupon.code);
-        setShowRedoSection(true);
-        setSuccess('🎫 You have a valid redo coupon! Click "Need to redo your video?" to use it.');
-      }
-    } catch (error) {
-      console.warn('⚠️ Could not check coupon status:', error.message);
-    }
-  };
-
   const handleFileUpload = (e) => {
     const files = Array.from(e.target.files);
     if (files.length === 0) return;
@@ -216,25 +192,26 @@ function PhotosToVideo() {
     setPhotos(photos.filter(p => p.id !== id));
   };
 
+  // ✅ FIX: The version of inline.js loaded here (https://js.paystack.co/v1/inline.js)
+  // exposes the classic PaystackPop.setup(...) API, not a `new PaystackPop()`
+  // constructor. Calling `new window.PaystackPop()` throws
+  // "PaystackPop is not a constructor" for every user, which is exactly the
+  // error in your console log.
   const openPaystackPopup = (paymentData) => {
-    // Wait for Paystack to be ready
-    if (!paystackReady && typeof window.PaystackPop === 'undefined') {
+    if (typeof window.PaystackPop === 'undefined') {
       console.error('❌ Paystack not ready, waiting...');
       setError('Payment system is loading. Please wait a moment...');
       setLoading(false);
-      
-      // Try to load Paystack again
+
       const script = document.createElement('script');
       script.src = 'https://js.paystack.co/v1/inline.js';
       script.async = true;
       script.onload = () => {
         console.log('✅ Paystack reloaded');
         setPaystackReady(true);
-        // Retry after a short delay
         setTimeout(() => {
           setError('');
           setLoading(false);
-          // User needs to click again
           setSuccess('✅ Paystack loaded. Please click "Generate AI Video" again.');
         }, 1000);
       };
@@ -244,27 +221,68 @@ function PhotosToVideo() {
 
     try {
       console.log('💰 Opening Paystack popup with:', paymentData);
-      const popup = new window.PaystackPop();
-      popup.open({
+      const handler = window.PaystackPop.setup({
         key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
         email: email,
         amount: paymentData.amount * 100,
         ref: paymentData.reference,
         metadata: paymentData.metadata,
         currency: 'KES',
-        callback: async (response) => {
+        callback: (response) => {
           console.log('✅ Payment successful:', response);
-          await processPhotoVideo(response.reference);
+          processPhotoVideo(response.reference);
         },
         onClose: () => {
           setLoading(false);
           setError('Payment was cancelled');
         }
       });
+      handler.openIframe();
     } catch (error) {
       console.error('❌ Paystack error:', error);
       setError('Payment system error. Please try again.');
       setLoading(false);
+    }
+  };
+
+  // ✅ UPDATED: Handle video URL display and forced-download link
+  const displayVideo = (url) => {
+    console.log('🎬 Displaying video URL:', url);
+    setVideoUrl(url);
+
+    const videoContainer = document.querySelector('.video-container');
+    if (videoContainer) {
+      const downloadLink = document.createElement('a');
+      downloadLink.href = getDownloadUrl(url); // fl_attachment forces a real download
+      downloadLink.className = 'download-btn';
+      downloadLink.innerHTML = '📥 Download Video';
+      downloadLink.style.cssText = `
+        display: inline-block;
+        margin: 15px 0;
+        padding: 12px 30px;
+        background: linear-gradient(135deg, #4caf50, #388e3c);
+        color: white;
+        border-radius: 30px;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 16px;
+        box-shadow: 0 4px 15px rgba(76, 175, 80, 0.3);
+        transition: all 0.3s ease;
+        cursor: pointer;
+      `;
+      downloadLink.onmouseover = () => {
+        downloadLink.style.transform = 'translateY(-2px)';
+        downloadLink.style.boxShadow = '0 6px 25px rgba(76, 175, 80, 0.4)';
+      };
+      downloadLink.onmouseout = () => {
+        downloadLink.style.transform = 'translateY(0)';
+        downloadLink.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.3)';
+      };
+
+      const videoPlayer = videoContainer.querySelector('.video-player');
+      if (videoPlayer) {
+        videoPlayer.parentNode.insertBefore(downloadLink, videoPlayer.nextSibling);
+      }
     }
   };
 
@@ -361,6 +379,10 @@ function PhotosToVideo() {
     }
   };
 
+  // ✅ UPDATED: Process video, rely on the backend's `emailSent` status,
+  // and retry the email send once (via /api/send-video-email) if the
+  // server-side attempt failed, instead of always double-sending or
+  // silently giving up.
   const processPhotoVideo = async (reference) => {
     try {
       setSuccess('🔄 Processing your video... This may take a few moments.');
@@ -397,7 +419,7 @@ function PhotosToVideo() {
 
       console.log('✅ All photos uploaded:', photoUrls);
 
-      // Generate video
+      // ✅ Generate video
       const generateResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-photo-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -418,14 +440,45 @@ function PhotosToVideo() {
       }
 
       const data = await generateResponse.json();
-      if (data.success) {
-        setVideoUrl(data.videoUrl);
-        setSuccess('✅ Video generated successfully! Check your email for the download link.');
-        setLoading(false);
-        setRedoLoading(false);
+      console.log('📦 Video generation response:', data);
 
-        // Generate a redo coupon after successful payment
-        if (reference && !reference.startsWith('REDO-') && !reference.startsWith('test_')) {
+      if (data.success && data.videoUrl) {
+        // ✅ Display video on the page (with forced-download link)
+        displayVideo(data.videoUrl);
+
+        // ✅ Trust the backend's emailSent flag. Only retry from the
+        // frontend if the server-side send actually failed — avoids
+        // double-sending the same email to every user.
+        let emailOk = data.emailSent === true;
+
+        if (!emailOk) {
+          try {
+            console.log('📧 Backend email failed, retrying from frontend for:', email);
+            const emailResponse = await fetchWithRetry(`${API_BASE_URL}/api/send-video-email`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email: email,
+                videoUrl: data.videoUrl,
+                prompt: prompt,
+                amount: price?.finalPrice || 300,
+                duration: duration
+              })
+            });
+            emailOk = emailResponse.ok;
+          } catch (emailError) {
+            console.warn('⚠️ Retry email send failed:', emailError.message);
+          }
+        }
+
+        setSuccess(
+          emailOk
+            ? '✅ Video generated successfully! Check your email for the download link.'
+            : '✅ Video generated! Download it below. (Email could not be sent — please use the download button.)'
+        );
+
+        // ✅ Generate redo coupon
+        if (reference && !reference.startsWith('TEST-') && !reference.startsWith('REDO-')) {
           try {
             const couponResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-redo-coupon`, {
               method: 'POST',
@@ -435,7 +488,7 @@ function PhotosToVideo() {
                 email: email
               })
             });
-            
+
             const couponData = await couponResponse.json();
             if (couponData.success && couponData.coupon) {
               const coupon = couponData.coupon;
@@ -443,16 +496,18 @@ function PhotosToVideo() {
               setCouponCode(coupon);
               localStorage.setItem('video_redo_coupon', coupon);
               setShowRedoSection(true);
-              setSuccess(`✅ Video generated! Save this coupon for a free redo: ${coupon}`);
             }
           } catch (couponError) {
             console.warn('⚠️ Could not generate redo coupon:', couponError.message);
           }
         }
 
+        setLoading(false);
+        setRedoLoading(false);
         setIsRedoMode(false);
+
       } else {
-        throw new Error(data.error || 'Video generation failed');
+        throw new Error(data.error || 'Video generation failed - no video URL returned');
       }
     } catch (error) {
       console.error('❌ Video generation error:', error);
@@ -462,96 +517,48 @@ function PhotosToVideo() {
     }
   };
 
-  // ============================================
-  // REDO COUPON FUNCTIONS
-  // ============================================
-
   const checkCoupon = async () => {
-    if (!couponCode.trim()) {
-      setError('Please enter a coupon code');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
-    
+    if (!couponCode.trim()) return;
     try {
+      setError('');
       const response = await fetchWithRetry(`${API_BASE_URL}/api/check-redo-coupon`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ 
-          couponCode: couponCode.trim(),
-          email: email 
-        })
+        body: JSON.stringify({ couponCode: couponCode.trim(), email })
       });
-
       const data = await response.json();
-      if (data.valid) {
+      if (data.success && data.valid) {
         setCouponValid(true);
         setIsRedoMode(true);
         setSuccess('✅ Coupon valid! You can regenerate your video for free.');
-        setError('');
       } else {
         setCouponValid(false);
-        setIsRedoMode(false);
         setError(data.error || 'Invalid coupon code');
       }
     } catch (error) {
       console.error('❌ Coupon check error:', error);
-      setError('Failed to validate coupon. Please try again.');
-    } finally {
-      setLoading(false);
+      setError('Could not verify coupon. Please try again.');
     }
   };
 
   const handleRedoGeneration = async () => {
-    if (photos.length === 0) {
-      setError('Please upload at least one photo');
-      return;
-    }
-
-    if (!prompt.trim()) {
-      setError('Please describe what you want to generate');
-      return;
-    }
-
-    if (!email) {
-      setError('Please enter your email address');
-      return;
-    }
-
+    if (!couponCode.trim()) return;
     setRedoLoading(true);
     setError('');
-    setSuccess('');
-
     try {
       const redeemResponse = await fetchWithRetry(`${API_BASE_URL}/api/redeem-redo-coupon`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          couponCode: couponCode.trim(),
-          email: email
-        })
+        body: JSON.stringify({ couponCode: couponCode.trim(), email })
       });
-
       const redeemData = await redeemResponse.json();
       if (!redeemData.success) {
-        throw new Error(redeemData.error || 'Failed to redeem coupon');
+        throw new Error(redeemData.error || 'Could not redeem coupon');
       }
-
-      await processPhotoVideo(redeemData.paymentReference || 'REDO-' + Date.now());
-
-      localStorage.removeItem('video_redo_coupon');
-      setCouponCode('');
-      setSavedCoupon('');
-      setCouponValid(false);
-      setIsRedoMode(false);
-
+      await processPhotoVideo(redeemData.paymentReference);
     } catch (error) {
       console.error('❌ Redo generation error:', error);
-      setError('Failed to regenerate video: ' + error.message);
-    } finally {
+      setError('Redo failed: ' + error.message);
       setRedoLoading(false);
     }
   };
@@ -672,10 +679,10 @@ function PhotosToVideo() {
             </div>
           )}
 
-          {/* 🔥 REDO SECTION - Always visible if there's a coupon */}
+          {/* Redo Section */}
           {(savedCoupon || (paymentReference && !isRedoMode)) && (
             <div className="redo-section">
-              <button 
+              <button
                 className="redo-toggle-btn"
                 onClick={() => setShowRedoSection(!showRedoSection)}
               >
@@ -684,11 +691,11 @@ function PhotosToVideo() {
                   <span className="coupon-badge">💳 Coupon available!</span>
                 )}
               </button>
-              
+
               {showRedoSection && (
                 <div className="redo-container">
                   <p className="redo-info">
-                    If your video didn't turn out as expected, you can regenerate it for free 
+                    If your video didn't turn out as expected, you can regenerate it for free
                     using your redo coupon. Enter your coupon code below.
                   </p>
                   {savedCoupon && (
@@ -704,7 +711,7 @@ function PhotosToVideo() {
                       placeholder="Enter your redo coupon code"
                       disabled={loading || redoLoading}
                     />
-                    <button 
+                    <button
                       onClick={checkCoupon}
                       disabled={loading || redoLoading || !couponCode.trim()}
                       className="check-coupon-btn"
@@ -729,7 +736,7 @@ function PhotosToVideo() {
               >
                 {redoLoading ? '⏳ Processing...' : '🔄 Regenerate Video for Free'}
               </button>
-              <button 
+              <button
                 className="cancel-redo-btn"
                 onClick={() => {
                   setIsRedoMode(false);
@@ -741,7 +748,7 @@ function PhotosToVideo() {
             </div>
           )}
 
-          {/* Payment Button - Show only when not in redo mode */}
+          {/* Payment Button */}
           {!isRedoMode && (
             <button
               className="generate-btn"
@@ -761,16 +768,48 @@ function PhotosToVideo() {
           {/* Video Preview */}
           <div className="video-preview">
             <h3>📹 Video Preview</h3>
-            {videoUrl ? (
-              <video controls className="video-player">
-                <source src={videoUrl} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
-            ) : (
-              <div className="placeholder">
-                <p>Upload photos and generate a video</p>
-              </div>
-            )}
+            <div className="video-container">
+              {videoUrl ? (
+                <>
+                  <video controls className="video-player">
+                    <source src={videoUrl} type="video/mp4" />
+                    Your browser does not support the video tag.
+                  </video>
+                  <a
+                    href={getDownloadUrl(videoUrl)}
+                    className="download-btn"
+                    style={{
+                      display: 'inline-block',
+                      margin: '15px 0',
+                      padding: '12px 30px',
+                      background: 'linear-gradient(135deg, #4caf50, #388e3c)',
+                      color: 'white',
+                      borderRadius: '30px',
+                      textDecoration: 'none',
+                      fontWeight: '600',
+                      fontSize: '16px',
+                      boxShadow: '0 4px 15px rgba(76, 175, 80, 0.3)',
+                      transition: 'all 0.3s ease',
+                      cursor: 'pointer'
+                    }}
+                    onMouseOver={(e) => {
+                      e.target.style.transform = 'translateY(-2px)';
+                      e.target.style.boxShadow = '0 6px 25px rgba(76, 175, 80, 0.4)';
+                    }}
+                    onMouseOut={(e) => {
+                      e.target.style.transform = 'translateY(0)';
+                      e.target.style.boxShadow = '0 4px 15px rgba(76, 175, 80, 0.3)';
+                    }}
+                  >
+                    📥 Download Video
+                  </a>
+                </>
+              ) : (
+                <div className="placeholder">
+                  <p>Upload photos and generate a video</p>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* How It Works */}
