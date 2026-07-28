@@ -131,7 +131,6 @@ console.log(`✅ Generic test coupon created: ${GENERIC_COUPON}`);
 // MONGODB SCHEMAS AND MODELS
 // ============================================
 
-// Only define schemas if MongoDB is connected
 let InitialBalance, ApiLedger, Revenue, VideoUsage, UserPayment, Translation, ActivityLog, SiteVisit, Coupon;
 
 try {
@@ -242,7 +241,7 @@ async function initializeBalances() {
     console.warn('⚠️ MongoDB not connected, skipping balance initialization');
     return;
   }
-  
+
   try {
     const defaultBalances = [
       { provider: 'replicate', balance: parseFloat(process.env.REPLICATE_BALANCE) || 10.00 },
@@ -262,7 +261,6 @@ async function initializeBalances() {
   }
 }
 
-// Initialize balances after MongoDB connects
 db.once('open', () => {
   setTimeout(initializeBalances, 1000);
 });
@@ -272,7 +270,7 @@ async function addApiTransaction(provider, amount, type, description) {
     console.warn('⚠️ MongoDB not connected, skipping API transaction');
     return null;
   }
-  
+
   try {
     const entry = new ApiLedger({
       provider,
@@ -293,7 +291,7 @@ async function getApiBalance(provider) {
     console.warn('⚠️ MongoDB not connected, returning default balance');
     return 0;
   }
-  
+
   try {
     const initialBalance = await InitialBalance.findOne({ provider });
     const initial = initialBalance ? initialBalance.balance : 0;
@@ -320,7 +318,6 @@ async function getApiBalances() {
 }
 
 async function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
-  // Always store in memory fallback
   memoryStore.payments.push({
     email,
     amount: parseFloat(amount),
@@ -335,7 +332,7 @@ async function addUserPayment(email, amount, paymentMethod, serviceType, referen
     console.warn('⚠️ MongoDB not connected, payment stored in memory only');
     return 'memory-' + Date.now();
   }
-  
+
   try {
     const entry = new UserPayment({
       email,
@@ -353,7 +350,6 @@ async function addUserPayment(email, amount, paymentMethod, serviceType, referen
 }
 
 async function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
-  // Always store in memory fallback
   memoryStore.revenues.push({
     transactionId,
     email,
@@ -369,7 +365,7 @@ async function addRevenue(transactionId, email, amount, serviceType, paymentRefe
     console.warn('⚠️ MongoDB not connected, revenue stored in memory only');
     return 'memory-' + Date.now();
   }
-  
+
   try {
     const entry = new Revenue({
       transactionId,
@@ -388,7 +384,6 @@ async function addRevenue(transactionId, email, amount, serviceType, paymentRefe
 }
 
 async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
-  // Always store in memory fallback
   memoryStore.videoUsages.push({
     transactionId,
     userEmail: userEmail || 'anonymous',
@@ -405,7 +400,7 @@ async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, 
     console.warn('⚠️ MongoDB not connected, video usage stored in memory only');
     return 'memory-' + Date.now();
   }
-  
+
   try {
     const entry = new VideoUsage({
       transactionId,
@@ -426,7 +421,6 @@ async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, 
 }
 
 async function addActivityLog(userEmail, action, details, amount) {
-  // Always store in memory fallback
   memoryStore.activityLogs.push({
     userEmail: userEmail || 'anonymous',
     action,
@@ -439,7 +433,7 @@ async function addActivityLog(userEmail, action, details, amount) {
     console.warn('⚠️ MongoDB not connected, activity log stored in memory only');
     return 'memory-' + Date.now();
   }
-  
+
   try {
     const entry = new ActivityLog({
       userEmail: userEmail || 'anonymous',
@@ -466,7 +460,7 @@ async function recordSiteVisit(page, ip, userAgent) {
   if (!isMongoConnected || !SiteVisit) {
     return null;
   }
-  
+
   try {
     const entry = new SiteVisit({
       page,
@@ -489,11 +483,10 @@ async function recordSiteVisit(page, ip, userAgent) {
 
 async function getRevenueByService() {
   if (!isMongoConnected || !Revenue) {
-    // Use memory fallback
     const total = memoryStore.revenues.reduce((sum, r) => sum + r.amount, 0);
     return { total, textToVideo: 0, photoToVideo: 0, translation: 0 };
   }
-  
+
   try {
     const textToVideo = await Revenue.aggregate([
       { $match: { serviceType: 'textToVideo' } },
@@ -528,7 +521,7 @@ async function getVideoUsage() {
   if (!isMongoConnected || !VideoUsage) {
     return { totalVideos: memoryStore.videoUsages.length, textToVideo: 0, photoToVideo: 0, translation: 0 };
   }
-  
+
   try {
     const textToVideo = await VideoUsage.countDocuments({ videoType: 'text-to-video' });
     const photoToVideo = await VideoUsage.countDocuments({ videoType: 'photo-to-video' });
@@ -566,7 +559,7 @@ async function getRecentActivity(limit = 10) {
       time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
     }));
   }
-  
+
   try {
     const logs = await ActivityLog.find()
       .sort({ createdAt: -1 })
@@ -599,7 +592,7 @@ async function getUserPayments(limit = 20) {
       createdAt: p.createdAt ? new Date(p.createdAt).toLocaleString() : 'Just now'
     }));
   }
-  
+
   try {
     const payments = await UserPayment.find()
       .sort({ createdAt: -1 })
@@ -625,7 +618,7 @@ async function findPaymentByReference(reference) {
   if (!isMongoConnected || !UserPayment) {
     return memoryStore.payments.find(p => p.reference === reference) || null;
   }
-  
+
   try {
     return await UserPayment.findOne({ reference });
   } catch (error) {
@@ -638,7 +631,7 @@ async function getTranslations(email) {
   if (!isMongoConnected || !Translation) {
     return memoryStore.translations.filter(t => !email || t.email === email).slice(-20);
   }
-  
+
   try {
     const query = email ? { email } : {};
     return await Translation.find(query)
@@ -651,14 +644,13 @@ async function getTranslations(email) {
 }
 
 async function saveTranslation(translationData) {
-  // Always store in memory fallback
   memoryStore.translations.push(translationData);
 
   if (!isMongoConnected || !Translation) {
     console.warn('⚠️ MongoDB not connected, translation stored in memory only');
     return translationData;
   }
-  
+
   try {
     const entry = new Translation(translationData);
     await entry.save();
@@ -677,7 +669,6 @@ async function generateCoupon(paymentReference, email, serviceType) {
   const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
   const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-  // Always store in memory fallback
   memoryStore.coupons[couponCode] = {
     code: couponCode,
     paymentReference,
@@ -695,7 +686,6 @@ async function generateCoupon(paymentReference, email, serviceType) {
   }
 
   try {
-    // Check if coupon already exists for this payment
     const existingCoupon = await Coupon.findOne({ paymentReference });
     if (existingCoupon) {
       return existingCoupon.code;
@@ -714,13 +704,11 @@ async function generateCoupon(paymentReference, email, serviceType) {
     return couponCode;
   } catch (error) {
     console.error('❌ Error generating coupon in MongoDB:', error.message);
-    // Return the memory version
     return couponCode;
   }
 }
 
 async function validateCoupon(couponCode, email) {
-  // Check memory fallback first
   if (memoryStore.coupons[couponCode]) {
     const coupon = memoryStore.coupons[couponCode];
     if (coupon.used) {
@@ -765,7 +753,6 @@ async function validateCoupon(couponCode, email) {
 }
 
 async function redeemCoupon(couponCode, email) {
-  // Check memory fallback first
   if (memoryStore.coupons[couponCode]) {
     const coupon = memoryStore.coupons[couponCode];
     if (coupon.used) {
@@ -976,7 +963,7 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   res.header('Access-Control-Allow-Credentials', 'true');
-  
+
   if (req.method === 'OPTIONS') {
     return res.sendStatus(200);
   }
@@ -1198,6 +1185,13 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
 }
 
 function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
+  // Use fl_attachment so the download button forces a real download
+  // instead of opening the video in-browser (needed because Cloudinary
+  // is a different origin than the site, which breaks the HTML `download` attribute)
+  const downloadUrl = videoUrl.includes('/upload/')
+    ? videoUrl.replace('/upload/', '/upload/fl_attachment/')
+    : videoUrl;
+
   return {
     subject: '🎬 Your AI Video is Ready!',
     html: `
@@ -1249,12 +1243,12 @@ function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
             <p style="font-size: 16px; margin: 10px 0;">
               Click the button below to download your video
             </p>
-            <a href="${videoUrl}" class="button" download style="font-size: 18px; padding: 15px 40px;">
+            <a href="${downloadUrl}" class="button" style="font-size: 18px; padding: 15px 40px;">
               ⬇️ Download Video
             </a>
             <p style="font-size: 12px; color: #666; margin-top: 10px;">
               Or copy this link: <br>
-              <a href="${videoUrl}" style="word-break: break-all; font-size: 12px;">${videoUrl}</a>
+              <a href="${downloadUrl}" style="word-break: break-all; font-size: 12px;">${downloadUrl}</a>
             </p>
           </div>
 
@@ -1271,6 +1265,10 @@ function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
 }
 
 function generateTranslationEmail(email, videoUrl, translatedText, language, amount) {
+  const downloadUrl = videoUrl.includes('/upload/')
+    ? videoUrl.replace('/upload/', '/upload/fl_attachment/')
+    : videoUrl;
+
   return {
     subject: `🌐 Your Translated Video is Ready! (${language})`,
     html: `
@@ -1323,12 +1321,12 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
             <p style="font-size: 16px; margin: 10px 0;">
               Click the button below to download your video
             </p>
-            <a href="${videoUrl}" class="button" download style="font-size: 18px; padding: 15px 40px;">
+            <a href="${downloadUrl}" class="button" style="font-size: 18px; padding: 15px 40px;">
               ⬇️ Download Video
             </a>
             <p style="font-size: 12px; color: #666; margin-top: 10px;">
               Or copy this link: <br>
-              <a href="${videoUrl}" style="word-break: break-all; font-size: 12px;">${videoUrl}</a>
+              <a href="${downloadUrl}" style="word-break: break-all; font-size: 12px;">${downloadUrl}</a>
             </p>
           </div>
 
@@ -1712,6 +1710,7 @@ app.post('/api/translate-video', async (req, res) => {
     await addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
     await addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
 
+    let emailResult = { success: false };
     try {
       const translationEmail = generateTranslationEmail(
         email,
@@ -1720,8 +1719,8 @@ app.post('/api/translate-video', async (req, res) => {
         FREE_TRANSLATION_LANGUAGES[targetLanguage],
         translationCost
       );
-      await sendEmail(email, translationEmail.subject, translationEmail.html);
-      console.log(`📧 Translation video sent to ${email}`);
+      emailResult = await sendEmail(email, translationEmail.subject, translationEmail.html);
+      console.log(`📧 Translation video sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.warn('⚠️ Could not send translation email:', emailErr.message);
     }
@@ -1734,7 +1733,8 @@ app.post('/api/translate-video', async (req, res) => {
       duration: duration || 5,
       paymentReference,
       translationId,
-      price: TRANSLATION_PRICE
+      price: TRANSLATION_PRICE,
+      emailSent: emailResult.success
     });
 
   } catch (error) {
@@ -1772,6 +1772,7 @@ app.post('/api/translate-video-free', async (req, res) => {
       duration || 5
     );
 
+    let emailResult = { success: false };
     try {
       const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French';
       const translationEmail = generateTranslationEmail(
@@ -1781,8 +1782,8 @@ app.post('/api/translate-video-free', async (req, res) => {
         languageName,
         300
       );
-      await sendEmail(email, translationEmail.subject, translationEmail.html);
-      console.log(`📧 Email sent to ${email}`);
+      emailResult = await sendEmail(email, translationEmail.subject, translationEmail.html);
+      console.log(`📧 Email sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.error('❌ Email error:', emailErr);
     }
@@ -1797,7 +1798,8 @@ app.post('/api/translate-video-free', async (req, res) => {
       success: true,
       message: '✅ Translation complete! Check your email for the download link.',
       videoUrl: translatedVideoUrl,
-      paymentReference: paymentReference
+      paymentReference: paymentReference,
+      emailSent: emailResult.success
     });
 
   } catch (error) {
@@ -2229,7 +2231,6 @@ app.get('/api/admin/balances', async (req, res) => {
 // REDO COUPON SYSTEM - WITH FALLBACK
 // ============================================
 
-// Generate a redo coupon for a successful payment
 app.post('/api/generate-redo-coupon', async (req, res) => {
   try {
     const { paymentReference, email } = req.body;
@@ -2241,7 +2242,6 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
       });
     }
 
-    // Verify the payment was successful
     const payment = await findPaymentByReference(paymentReference);
     if (!payment) {
       return res.status(404).json({
@@ -2250,14 +2250,12 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
       });
     }
 
-    // Generate coupon
     const couponCode = await generateCoupon(
       paymentReference,
       email || payment.email,
       payment.serviceType || 'photo-to-video'
     );
 
-    // Get the coupon details
     let expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     if (memoryStore.coupons[couponCode]) {
       expiresAt = new Date(memoryStore.coupons[couponCode].expiresAt);
@@ -2284,7 +2282,6 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
   }
 });
 
-// Check if a coupon is valid
 app.post('/api/check-redo-coupon', async (req, res) => {
   try {
     const { couponCode, email } = req.body;
@@ -2323,7 +2320,6 @@ app.post('/api/check-redo-coupon', async (req, res) => {
   }
 });
 
-// Redeem a coupon for free video generation
 app.post('/api/redeem-redo-coupon', async (req, res) => {
   try {
     const { couponCode, email } = req.body;
@@ -2359,7 +2355,6 @@ app.post('/api/redeem-redo-coupon', async (req, res) => {
   }
 });
 
-// Get coupon status for a payment
 app.get('/api/coupon-status/:paymentReference', async (req, res) => {
   try {
     const { paymentReference } = req.params;
@@ -2371,7 +2366,6 @@ app.get('/api/coupon-status/:paymentReference', async (req, res) => {
       });
     }
 
-    // Check memory fallback
     let coupon = null;
     for (const key in memoryStore.coupons) {
       if (memoryStore.coupons[key].paymentReference === paymentReference) {
@@ -2478,7 +2472,7 @@ app.get('/api/translations', async (req, res) => {
 });
 
 // ============================================
-// ✅ SEND VIDEO EMAIL ENDPOINT - FIXED
+// ✅ SEND VIDEO EMAIL ENDPOINT
 // ============================================
 
 app.post('/api/send-video-email', async (req, res) => {
@@ -2507,7 +2501,7 @@ app.post('/api/send-video-email', async (req, res) => {
         provider: result.provider
       });
     } else {
-      throw new Error('Failed to send email');
+      throw new Error(result.error || 'Failed to send email');
     }
   } catch (error) {
     console.error('❌ Email error:', error.message);
@@ -2833,10 +2827,11 @@ app.post('/api/generate-video', async (req, res) => {
       delete failedGenerations[paymentReference];
     }
 
+    let emailResult = { success: false };
     try {
       const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, amount || 0, videoDuration);
-      await sendEmail(email, videoEmail.subject, videoEmail.html);
-      console.log(`📧 Video email sent to ${email}`);
+      emailResult = await sendEmail(email, videoEmail.subject, videoEmail.html);
+      console.log(`📧 Video email sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.warn('⚠️ Could not send video email:', emailErr.message);
     }
@@ -2849,7 +2844,8 @@ app.post('/api/generate-video', async (req, res) => {
       cost: cost,
       duration: videoDuration,
       paymentReference,
-      userEmail: email
+      userEmail: email,
+      emailSent: emailResult.success
     });
   } catch (error) {
     console.error('❌ Error:', error.message);
@@ -2882,31 +2878,29 @@ app.post('/api/generate-photo-video', async (req, res) => {
     console.log('💳 Payment Reference:', paymentReference);
 
     if (!photoUrls || photoUrls.length === 0) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'At least one photo URL is required' 
+      return res.status(400).json({
+        success: false,
+        error: 'At least one photo URL is required'
       });
     }
 
-    // Allow test/redo payments without strict verification
     const isTestMode = paymentReference && (paymentReference.startsWith('TEST-') || paymentReference.startsWith('REDO-') || paymentReference.startsWith('MANUAL-'));
-    
+
     if (!paymentReference) {
-      return res.status(402).json({ 
-        success: false, 
-        error: 'Payment required.', 
-        requiresPayment: true 
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required.',
+        requiresPayment: true
       });
     }
 
-    // Only verify payment if not in test mode
     if (!isTestMode) {
       const isValid = await verifyPayment(paymentReference);
       if (!isValid) {
-        return res.status(402).json({ 
-          success: false, 
-          error: 'Invalid or expired payment.', 
-          requiresPayment: true 
+        return res.status(402).json({
+          success: false,
+          error: 'Invalid or expired payment.',
+          requiresPayment: true
         });
       }
       console.log('✅ Payment verified:', paymentReference);
@@ -2928,20 +2922,20 @@ app.post('/api/generate-photo-video', async (req, res) => {
       for (const modelId of modelIds) {
         try {
           console.log(`🔄 Trying BytePlus model: ${modelId}`);
-          
+
           const content = [
             { type: 'text', text: prompt || 'Create a video from these photos' },
-            ...photoUrls.map(url => ({ 
-              type: 'image_url', 
-              image_url: { url } 
+            ...photoUrls.map(url => ({
+              type: 'image_url',
+              image_url: { url }
             }))
           ];
 
           const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
             method: 'POST',
-            headers: { 
-              'Content-Type': 'application/json', 
-              'Authorization': `Bearer ${token}` 
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${token}`
             },
             body: JSON.stringify({
               model: modelId,
@@ -2964,7 +2958,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
 
           const taskData = await createResponse.json();
           console.log(`✅ BytePlus task created:`, taskData.id);
-          
+
           const result = await pollDreaminaTask(taskData.id, token, endpoint);
           videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
 
@@ -2996,41 +2990,45 @@ app.post('/api/generate-photo-video', async (req, res) => {
 
     await addApiTransaction('byteplus', cost, 'usage', `Photo-to-video with ${usedModel} (${videoDuration}s)`);
     await addVideoUsage(
-      paymentReference, 
-      email || 'anonymous', 
-      'photo-to-video', 
-      prompt, 
-      cost, 
-      usedModel, 
-      provider, 
+      paymentReference,
+      email || 'anonymous',
+      'photo-to-video',
+      prompt,
+      cost,
+      usedModel,
+      provider,
       videoDuration
     );
     await addActivityLog(
-      email || 'anonymous', 
-      `🖼️ Generated ${videoDuration}s photo-to-video`, 
-      `Model: ${usedModel}, Photos: ${photoUrls.length}`, 
+      email || 'anonymous',
+      `🖼️ Generated ${videoDuration}s photo-to-video`,
+      `Model: ${usedModel}, Photos: ${photoUrls.length}`,
       0
     );
 
-    // ✅ Send email with video link
+    // ✅ FIX: capture and return whether the email actually sent, instead of
+    // silently swallowing failures. The frontend uses this to retry once
+    // if the server-side send failed (e.g. Mailgun/Gmail env vars missing on Render).
+    let emailResult = { success: false };
     try {
       console.log(`📧 Sending video email to ${email}`);
       const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, 0, videoDuration);
-      await sendEmail(email, videoEmail.subject, videoEmail.html);
-      console.log(`📧 Video email sent to ${email}`);
+      emailResult = await sendEmail(email, videoEmail.subject, videoEmail.html);
+      console.log(`📧 Video email sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
       console.warn('⚠️ Could not send video email:', emailErr.message);
     }
 
-    res.json({ 
-      success: true, 
-      videoUrl, 
-      usedModel, 
-      provider, 
-      cost, 
-      duration: videoDuration, 
-      paymentReference, 
-      userEmail: email 
+    res.json({
+      success: true,
+      videoUrl,
+      usedModel,
+      provider,
+      cost,
+      duration: videoDuration,
+      paymentReference,
+      userEmail: email,
+      emailSent: emailResult.success
     });
 
   } catch (error) {
@@ -3104,13 +3102,9 @@ app.post('/api/calculate-price', (req, res) => {
     let breakdown = [];
     let serviceName = '';
 
-    // ============================================
-    // PHOTO TO VIDEO - NEW PRICING
-    // ============================================
     if (serviceType === 'photos_to_video' || serviceType === 'photo-to-video' || serviceType === 'photo_to_video') {
       let pricePerPhoto = 0;
-      
-      // Pricing based on number of photos
+
       if (photoCount === 1) {
         if (duration === 5) pricePerPhoto = 300;
         else if (duration === 10) pricePerPhoto = 600;
@@ -3124,46 +3118,38 @@ app.post('/api/calculate-price', (req, res) => {
         else if (duration === 10) pricePerPhoto = 1000;
         else if (duration === 15) pricePerPhoto = 2000;
       }
-      
+
       finalPrice = pricePerPhoto;
-      
+
       breakdown = [
         { item: `AI Photo-to-Video (${photoCount} photo${photoCount > 1 ? 's' : ''})`, amount: finalPrice },
         { item: `${duration}s video generation`, amount: 0 }
       ];
-      
+
       serviceName = `AI Photo-to-Video (${duration}s, ${photoCount} photo${photoCount > 1 ? 's' : ''})`;
     }
-    
-    // ============================================
-    // IMAGE TO VIDEO - NEW PRICING
-    // ============================================
     else if (serviceType === 'image_to_video') {
       if (duration === 5) finalPrice = 300;
       else if (duration === 10) finalPrice = 600;
       else if (duration === 15) finalPrice = 1200;
-      
+
       breakdown = [
         { item: 'AI Image-to-Video', amount: finalPrice },
         { item: `${duration}s video generation`, amount: 0 }
       ];
-      
+
       serviceName = `AI Image-to-Video (${duration}s)`;
     }
-    
-    // ============================================
-    // TEXT TO VIDEO - NEW PRICING
-    // ============================================
     else {
       if (duration === 5) finalPrice = 300;
       else if (duration === 10) finalPrice = 600;
       else if (duration === 15) finalPrice = 1200;
-      
+
       breakdown = [
         { item: 'AI Text-to-Video', amount: finalPrice },
         { item: `${duration}s video generation`, amount: 0 }
       ];
-      
+
       serviceName = `AI Text-to-Video (${duration}s)`;
     }
 
@@ -3362,5 +3348,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🧪 Test mode enabled: Use TEST-* or REDO-* payment references to bypass payment`);
   console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
   console.log(`📧 Video email delivery enabled ✅`);
-  console.log(`📥 Download link displayed on website ✅`);
+  console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
 });
