@@ -1055,13 +1055,6 @@ if (!mg) {
   }
 }
 
-// ============================================
-// ✅ FIX: sendEmail now captures and returns the REAL underlying error
-// from Mailgun/Gmail instead of a generic "No email provider available"
-// message. This is what /api/send-video-email and the dashboard need
-// to actually diagnose why emails are failing (bad domain verification,
-// bad SMTP auth, etc.) instead of guessing blind from a 500 with no body.
-// ============================================
 async function sendEmail(to, subject, html, text) {
   const fromEmail = process.env.EMAIL_FROM || `noreply@${MAILGUN_DOMAIN}`;
   const fromName = 'VidAI Creator';
@@ -1097,9 +1090,6 @@ async function sendEmail(to, subject, html, text) {
       console.log(`   Message ID: ${result.id}`);
       return { success: true, provider: 'mailgun', id: result.id };
     } catch (error) {
-      // ✅ Log the FULL Mailgun error (statusCode + message), not just error.message,
-      // since Mailgun errors often carry the real reason in the response body
-      // (e.g. "Domain katareel.com is not allowed to send" / unverified domain).
       console.error('❌ Mailgun error:', error.message);
       if (error.statusCode) console.error('   Mailgun status code:', error.statusCode);
       lastError = `Mailgun error: ${error.message}`;
@@ -1206,9 +1196,6 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
 }
 
 function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
-  // Use fl_attachment so the download button forces a real download
-  // instead of opening the video in-browser (needed because Cloudinary
-  // is a different origin than the site, which breaks the HTML `download` attribute)
   const downloadUrl = videoUrl.includes('/upload/')
     ? videoUrl.replace('/upload/', '/upload/fl_attachment/')
     : videoUrl;
@@ -2130,10 +2117,10 @@ app.get('/api/admin/payments', async (req, res) => {
   try {
     const limit = parseInt(req.query.limit) || 50;
     const payments = await getUserPayments(limit);
-    const total = await UserPayment.countDocuments();
-    const totalAmountResult = await UserPayment.aggregate([
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
+    const total = isMongoConnected && UserPayment ? await UserPayment.countDocuments() : payments.length;
+    const totalAmountResult = isMongoConnected && UserPayment
+      ? await UserPayment.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
+      : [];
 
     res.json({
       success: true,
@@ -2158,13 +2145,20 @@ app.get('/api/admin/dashboard', async (req, res) => {
     const visits = await getSiteVisits();
     const activity = await getRecentActivity(10);
     const payments = await getUserPayments(10);
-    const translations = await Translation.countDocuments();
+    const translations = isMongoConnected && Translation ? await Translation.countDocuments() : memoryStore.translations.length;
 
-    const totalDurationResult = await VideoUsage.aggregate([
-      { $group: { _id: null, totalDuration: { $sum: '$duration' } } }
-    ]);
-    const totalDuration = totalDurationResult[0]?.totalDuration || 0;
-    const totalVideos = await VideoUsage.countDocuments();
+    let totalDuration = 0;
+    let totalVideos = 0;
+    if (isMongoConnected && VideoUsage) {
+      const totalDurationResult = await VideoUsage.aggregate([
+        { $group: { _id: null, totalDuration: { $sum: '$duration' } } }
+      ]);
+      totalDuration = totalDurationResult[0]?.totalDuration || 0;
+      totalVideos = await VideoUsage.countDocuments();
+    } else {
+      totalVideos = memoryStore.videoUsages.length;
+      totalDuration = memoryStore.videoUsages.reduce((sum, v) => sum + (v.duration || 0), 0);
+    }
     const avgDuration = totalVideos > 0 ? Math.round(totalDuration / totalVideos) : 0;
 
     res.json({
@@ -2236,8 +2230,8 @@ app.post('/api/admin/add-credits', async (req, res) => {
 app.get('/api/admin/balances', async (req, res) => {
   try {
     const balances = await getApiBalances();
-    const initialBalances = await InitialBalance.find();
-    const transactionCount = await ApiLedger.countDocuments();
+    const initialBalances = isMongoConnected && InitialBalance ? await InitialBalance.find() : [];
+    const transactionCount = isMongoConnected && ApiLedger ? await ApiLedger.countDocuments() : 0;
 
     res.json({
       success: true,
@@ -2498,7 +2492,7 @@ app.get('/api/translations', async (req, res) => {
 });
 
 // ============================================
-// ✅ SEND VIDEO EMAIL ENDPOINT
+// SEND VIDEO EMAIL ENDPOINT
 // ============================================
 
 app.post('/api/send-video-email', async (req, res) => {
@@ -2528,10 +2522,6 @@ app.post('/api/send-video-email', async (req, res) => {
       });
     }
 
-    // ✅ FIX: return the REAL reason as a 200 with success:false + error detail
-    // instead of throwing and returning a bare 500 with no body — this is
-    // what let the frontend retry loop exhaust 3 attempts against a dead
-    // endpoint with zero diagnostic info in the browser console.
     console.error(`❌ Email send failed for ${email}: ${result.error}`);
     return res.status(502).json({
       success: false,
@@ -2642,25 +2632,43 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
 const failedGenerations = {};
 
 // ============================================
-// ✅ CENTRALIZED BYTEPLUS MODEL ID RESOLUTION
+// ✅ FIXED — CENTRALIZED BYTEPLUS MODEL ID RESOLUTION
 //
 // Resolves the model IDs (or ModelArk endpoint IDs) to try, from the
 // MODELARK_MODEL_IDS env var (comma-separated, in priority order).
-// This lets you fix "model not found" errors purely by updating the
-// Render env var — no code changes needed when BytePlus changes IDs
-// or you create a new inference endpoint in the console.
+// Setting that env var on Render is still the recommended way to
+// control this — no redeploy needed, just a restart.
 //
-// If MODELARK_MODEL_IDS is not set, falls back to the exact model
-// strings shown as "Activated" in the ModelArk console (Model
-// activation page): Dreamina-Seedance-2.0-mini, Dreamina-Seedance-2.0
-// (note the capitalization and the literal dot, not a hyphen).
+// ⚠️ ROOT CAUSE OF THE 404s: the old defaults here were the *display
+// names* shown on the ModelArk "Model activation" page
+// (Dreamina-Seedance-2.0-mini / Dreamina-Seedance-2.0). Those strings
+// are NOT valid values for the `model` field on the
+// /api/v3/contents/generations/tasks endpoint — BytePlus's REST API
+// needs either:
+//   1) the Model ID from the "Online inference" table, e.g.
+//      dreamina-seedance-2-0-260128 (includes a version/date suffix
+//      that's invisible on the activation page), or
+//   2) the Endpoint ID from that same table, e.g.
+//      ep-m-20260721145303-hf4fp
+//
+// Fix: default to the CONFIRMED WORKING Model ID first, then
+// automatically fall back to the confirmed Endpoint ID for the same
+// model if the Model ID variant ever fails. This means BytePlus works
+// out of the box even without setting MODELARK_MODEL_IDS at all.
+//
+// If/when you find the Model ID for the "-mini" variant in the same
+// ModelArk > Online inference table, just add it via the
+// MODELARK_MODEL_IDS env var (comma-separated) — no code change
+// needed:
+//   MODELARK_MODEL_IDS=dreamina-seedance-2-0-260128,ep-m-20260721145303-hf4fp,dreamina-seedance-2-0-mini-XXXXXX
 // ============================================
 function getModelArkModelIds() {
   const raw = process.env.MODELARK_MODEL_IDS;
   if (raw && raw.trim().length > 0) {
     return raw.split(',').map(id => id.trim()).filter(Boolean);
   }
-  return ['Dreamina-Seedance-2.0-mini', 'Dreamina-Seedance-2.0'];
+  // Confirmed-working defaults (Model ID, then its Endpoint ID as fallback)
+  return ['dreamina-seedance-2-0-260128', 'ep-m-20260721145303-hf4fp'];
 }
 
 async function pollDreaminaTask(taskId, token, endpoint) {
@@ -2672,7 +2680,6 @@ async function pollDreaminaTask(taskId, token, endpoint) {
         headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json' }
       });
       if (!pollResponse.ok) {
-        // ✅ Log poll failures too instead of silently retrying forever
         const bodyText = await pollResponse.text().catch(() => '');
         console.warn(`⚠️ Dreamina poll ${attempts + 1} failed: ${pollResponse.status} ${bodyText.substring(0, 300)}`);
         attempts++;
@@ -2787,7 +2794,6 @@ app.post('/api/generate-video', async (req, res) => {
             generationErrors.push(`Replicate: prediction ended with status "${prediction.status}"`);
           }
         } else {
-          // ✅ Log the actual Replicate rejection body instead of nothing
           const bodyText = await response.text().catch(() => '');
           console.warn(`⚠️ Replicate request failed: ${response.status} ${bodyText.substring(0, 500)}`);
           generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
@@ -2805,9 +2811,6 @@ app.post('/api/generate-video', async (req, res) => {
         const token = process.env.MODELARK_API_KEY;
         if (token) {
           const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-          // ✅ FIX: model IDs now come from MODELARK_MODEL_IDS env var (or the
-          // corrected console-matching defaults) instead of being hardcoded
-          // with the wrong casing/hyphenation that caused 404s.
           const modelIds = getModelArkModelIds();
           console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
 
@@ -2832,12 +2835,6 @@ app.post('/api/generate-video', async (req, res) => {
               });
 
               if (!createResponse.ok) {
-                // ✅ FIX: This is the critical missing piece. Previously only
-                // the status code was logged, so a 401 (bad API key), 400
-                // (bad model id / bad params), or 403 (billing/plan issue)
-                // all looked identical from the outside. Logging the actual
-                // response body tells you exactly why BytePlus is rejecting
-                // every request.
                 const bodyText = await createResponse.text().catch(() => '');
                 console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
                 generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
@@ -2874,8 +2871,6 @@ app.post('/api/generate-video', async (req, res) => {
     }
 
     if (!videoUrl) {
-      // ✅ Print a consolidated summary of every provider failure to the
-      // Render logs so the root cause is visible in one place.
       console.error('❌ All video providers failed:', generationErrors);
       if (paymentReference) {
         failedGenerations[paymentReference] = {
@@ -3020,9 +3015,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
     const token = process.env.MODELARK_API_KEY;
     if (token) {
       const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-      // ✅ FIX: same env-driven model ID resolution as the text-to-video
-      // endpoint — fixes the casing/hyphenation mismatch and lets you
-      // update model/endpoint IDs via Render env vars only.
       const modelIds = getModelArkModelIds();
       console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
 
@@ -3059,9 +3051,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
           });
 
           if (!createResponse.ok) {
-            // ✅ FIX: same critical fix as the text-to-video endpoint — log the
-            // actual response body (auth error, invalid image URL, unsupported
-            // ratio, plan/quota limit, etc.) instead of just the status code.
             const bodyText = await createResponse.text().catch(() => '');
             console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
             generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
@@ -3124,9 +3113,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
       0
     );
 
-    // ✅ FIX: capture and return whether the email actually sent, instead of
-    // silently swallowing failures. The frontend uses this to retry once
-    // if the server-side send failed (e.g. Mailgun/Gmail env vars missing on Render).
     let emailResult = { success: false };
     try {
       console.log(`📧 Sending video email to ${email}`);
@@ -3204,15 +3190,15 @@ app.get('/api/debug-failed', (req, res) => {
 });
 
 // ============================================
-// ✅ DEBUG ENDPOINT — resolved ModelArk model IDs
+// DEBUG ENDPOINT — resolved ModelArk model IDs
 // Hit this in a browser to confirm exactly what model/endpoint IDs the
 // server will send to BytePlus, without needing to trigger a real
-// generation. Useful right after changing MODELARK_MODEL_IDS on Render.
+// generation.
 // ============================================
 app.get('/api/debug-modelark-ids', (req, res) => {
   res.json({
     resolvedModelIds: getModelArkModelIds(),
-    source: process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default',
+    source: process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)',
     endpoint: process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3',
     tokenConfigured: !!process.env.MODELARK_API_KEY
   });
@@ -3356,11 +3342,11 @@ app.get('/api/health', async (req, res) => {
   try {
     const replicateBalance = await getApiBalance('replicate');
     const byteplusBalance = await getApiBalance('byteplus');
-    const totalRevenueResult = await Revenue.aggregate([
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const totalVideos = await VideoUsage.countDocuments();
-    const totalTranslations = await Translation.countDocuments();
+    const totalRevenueResult = isMongoConnected && Revenue
+      ? await Revenue.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
+      : [];
+    const totalVideos = isMongoConnected && VideoUsage ? await VideoUsage.countDocuments() : memoryStore.videoUsages.length;
+    const totalTranslations = isMongoConnected && Translation ? await Translation.countDocuments() : memoryStore.translations.length;
 
     res.json({
       status: 'healthy',
@@ -3489,5 +3475,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Video email delivery enabled ✅`);
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
   console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/Mailgun errors)`);
-  console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default'})`);
+  console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)'})`);
 });
