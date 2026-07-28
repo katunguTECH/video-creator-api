@@ -1214,6 +1214,13 @@ function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
           .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
           .details { background: white; padding: 15px; border-radius: 8px; margin: 15px 0; border: 1px solid #e0e0e0; }
           .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
+          .download-section {
+            background: #e8f5e9;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+            text-align: center;
+          }
         </style>
       </head>
       <body>
@@ -1237,14 +1244,19 @@ function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
             </video>
           </div>
 
-          <p style="text-align: center;">
-            <a href="${videoUrl}" class="button" download>📥 Download Video</a>
-          </p>
-
-          <p style="text-align: center; font-size: 14px; color: #666;">
-            Or copy this link to share: <br>
-            <a href="${videoUrl}" style="word-break: break-all;">${videoUrl}</a>
-          </p>
+          <div class="download-section">
+            <h3>📥 Download Your Video</h3>
+            <p style="font-size: 16px; margin: 10px 0;">
+              Click the button below to download your video
+            </p>
+            <a href="${videoUrl}" class="button" download style="font-size: 18px; padding: 15px 40px;">
+              ⬇️ Download Video
+            </a>
+            <p style="font-size: 12px; color: #666; margin-top: 10px;">
+              Or copy this link: <br>
+              <a href="${videoUrl}" style="word-break: break-all; font-size: 12px;">${videoUrl}</a>
+            </p>
+          </div>
 
           <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
           <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
@@ -2465,6 +2477,10 @@ app.get('/api/translations', async (req, res) => {
   }
 });
 
+// ============================================
+// ✅ SEND VIDEO EMAIL ENDPOINT - FIXED
+// ============================================
+
 app.post('/api/send-video-email', async (req, res) => {
   try {
     const { email, videoUrl, prompt, amount, duration } = req.body;
@@ -2477,13 +2493,14 @@ app.post('/api/send-video-email', async (req, res) => {
     }
 
     console.log(`📧 Sending video to ${email}`);
-    console.log(`📹 Video URL: ${videoUrl.substring(0, 100)}...`);
+    console.log(`📹 Video URL: ${videoUrl}`);
 
     const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration || 5);
 
     const result = await sendEmail(email, videoEmail.subject, videoEmail.html);
 
     if (result.success) {
+      console.log(`✅ Video email sent successfully to ${email}`);
       res.json({
         success: true,
         message: 'Video sent to your email',
@@ -2500,6 +2517,10 @@ app.post('/api/send-video-email', async (req, res) => {
     });
   }
 });
+
+// ============================================
+// TEST EMAIL ENDPOINT
+// ============================================
 
 app.post('/api/test-email', async (req, res) => {
   try {
@@ -2991,7 +3012,9 @@ app.post('/api/generate-photo-video', async (req, res) => {
       0
     );
 
+    // ✅ Send email with video link
     try {
+      console.log(`📧 Sending video email to ${email}`);
       const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, 0, videoDuration);
       await sendEmail(email, videoEmail.subject, videoEmail.html);
       console.log(`📧 Video email sent to ${email}`);
@@ -3338,4 +3361,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎫 Redo coupon system enabled ✅ (with in-memory fallback)`);
   console.log(`🧪 Test mode enabled: Use TEST-* or REDO-* payment references to bypass payment`);
   console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
+  console.log(`📧 Video email delivery enabled ✅`);
+  console.log(`📥 Download link displayed on website ✅`);
 });
