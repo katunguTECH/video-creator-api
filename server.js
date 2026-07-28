@@ -98,6 +98,36 @@ const memoryStore = {
 };
 
 // ============================================
+// ✅ PRE-CREATE TEST COUPON FOR katungu1@gmail.com
+// ============================================
+const TEST_COUPON = 'REDO-KATUNGU-001';
+memoryStore.coupons[TEST_COUPON] = {
+  code: TEST_COUPON,
+  paymentReference: 'MANUAL-PAYMENT-001',
+  email: 'katungu1@gmail.com',
+  serviceType: 'photo-to-video',
+  used: false,
+  usedAt: null,
+  expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+  createdAt: new Date().toISOString()
+};
+console.log(`✅ Test coupon created: ${TEST_COUPON} for katungu1@gmail.com`);
+
+// Also create a generic test coupon
+const GENERIC_COUPON = 'REDO-TEST-001';
+memoryStore.coupons[GENERIC_COUPON] = {
+  code: GENERIC_COUPON,
+  paymentReference: 'MANUAL-PAYMENT-002',
+  email: 'test@example.com',
+  serviceType: 'photo-to-video',
+  used: false,
+  usedAt: null,
+  expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
+  createdAt: new Date().toISOString()
+};
+console.log(`✅ Generic test coupon created: ${GENERIC_COUPON}`);
+
+// ============================================
 // MONGODB SCHEMAS AND MODELS
 // ============================================
 
@@ -3307,4 +3337,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🖼️ Photo-to-video endpoint: /api/generate-photo-video ✅`);
   console.log(`🎫 Redo coupon system enabled ✅ (with in-memory fallback)`);
   console.log(`🧪 Test mode enabled: Use TEST-* or REDO-* payment references to bypass payment`);
+  console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
 });
