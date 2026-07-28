@@ -2641,6 +2641,28 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
 
 const failedGenerations = {};
 
+// ============================================
+// ✅ CENTRALIZED BYTEPLUS MODEL ID RESOLUTION
+//
+// Resolves the model IDs (or ModelArk endpoint IDs) to try, from the
+// MODELARK_MODEL_IDS env var (comma-separated, in priority order).
+// This lets you fix "model not found" errors purely by updating the
+// Render env var — no code changes needed when BytePlus changes IDs
+// or you create a new inference endpoint in the console.
+//
+// If MODELARK_MODEL_IDS is not set, falls back to the exact model
+// strings shown as "Activated" in the ModelArk console (Model
+// activation page): Dreamina-Seedance-2.0-mini, Dreamina-Seedance-2.0
+// (note the capitalization and the literal dot, not a hyphen).
+// ============================================
+function getModelArkModelIds() {
+  const raw = process.env.MODELARK_MODEL_IDS;
+  if (raw && raw.trim().length > 0) {
+    return raw.split(',').map(id => id.trim()).filter(Boolean);
+  }
+  return ['Dreamina-Seedance-2.0-mini', 'Dreamina-Seedance-2.0'];
+}
+
 async function pollDreaminaTask(taskId, token, endpoint) {
   let attempts = 0;
   while (attempts < 60) {
@@ -2783,7 +2805,11 @@ app.post('/api/generate-video', async (req, res) => {
         const token = process.env.MODELARK_API_KEY;
         if (token) {
           const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-          const modelIds = ['dreamina-seedance-2-0-mini', 'dreamina-seedance-2-0', 'seedance-2-0'];
+          // ✅ FIX: model IDs now come from MODELARK_MODEL_IDS env var (or the
+          // corrected console-matching defaults) instead of being hardcoded
+          // with the wrong casing/hyphenation that caused 404s.
+          const modelIds = getModelArkModelIds();
+          console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
 
           for (const modelId of modelIds) {
             try {
@@ -2994,7 +3020,11 @@ app.post('/api/generate-photo-video', async (req, res) => {
     const token = process.env.MODELARK_API_KEY;
     if (token) {
       const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-      const modelIds = ['dreamina-seedance-2-0-mini', 'dreamina-seedance-2-0'];
+      // ✅ FIX: same env-driven model ID resolution as the text-to-video
+      // endpoint — fixes the casing/hyphenation mismatch and lets you
+      // update model/endpoint IDs via Render env vars only.
+      const modelIds = getModelArkModelIds();
+      console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
 
       for (const modelId of modelIds) {
         try {
@@ -3174,6 +3204,21 @@ app.get('/api/debug-failed', (req, res) => {
 });
 
 // ============================================
+// ✅ DEBUG ENDPOINT — resolved ModelArk model IDs
+// Hit this in a browser to confirm exactly what model/endpoint IDs the
+// server will send to BytePlus, without needing to trigger a real
+// generation. Useful right after changing MODELARK_MODEL_IDS on Render.
+// ============================================
+app.get('/api/debug-modelark-ids', (req, res) => {
+  res.json({
+    resolvedModelIds: getModelArkModelIds(),
+    source: process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default',
+    endpoint: process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3',
+    tokenConfigured: !!process.env.MODELARK_API_KEY
+  });
+});
+
+// ============================================
 // UPDATED PRICE CALCULATION ENDPOINT
 // ============================================
 
@@ -3301,7 +3346,8 @@ app.get('/api/test', (req, res) => {
       '/api/test-google-cloud',
       '/api/translate-video-free',
       '/api/test-tts',
-      '/api/debug-failed'
+      '/api/debug-failed',
+      '/api/debug-modelark-ids'
     ]
   });
 });
@@ -3322,6 +3368,7 @@ app.get('/api/health', async (req, res) => {
       environment: isProduction ? 'production' : 'development',
       uptime: process.uptime(),
       byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
+      byteplus_model_ids: getModelArkModelIds(),
       paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
       email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
       mongodb_connected: isMongoConnected,
@@ -3379,7 +3426,8 @@ app.get('/', (req, res) => {
       { path: '/api/admin/add-missing-payment', method: 'POST' },
       { path: '/api/test-google-cloud', method: 'GET' },
       { path: '/api/translate-video-free', method: 'POST' },
-      { path: '/api/test-tts', method: 'POST' }
+      { path: '/api/test-tts', method: 'POST' },
+      { path: '/api/debug-modelark-ids', method: 'GET' }
     ],
     mongodb: {
       connected: isMongoConnected,
@@ -3441,4 +3489,5 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Video email delivery enabled ✅`);
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
   console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/Mailgun errors)`);
+  console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default'})`);
 });
