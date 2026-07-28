@@ -1,6 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
+    <!-- ✅ PAYSTACK SCRIPT - MUST LOAD FIRST -->
+    <script src="https://js.paystack.co/v1/inline.js"></script>
+    
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -26,10 +29,7 @@
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
     
-    <!-- ✅ Paystack Script - Load with defer -->
-    <script defer src="https://js.paystack.co/v1/inline.js"></script>
-    
-    <!-- ✅ Fallback: Check if Paystack loaded correctly -->
+    <!-- ✅ Paystack Script - Already loaded at top, this is a fallback check -->
     <script>
       // Check if Paystack loaded after 3 seconds
       setTimeout(function() {
