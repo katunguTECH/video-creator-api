@@ -2645,9 +2645,10 @@ const failedGenerations = {};
 
 // ============================================
 // ✅ CENTRALIZED BYTEPLUS MODEL ID RESOLUTION
-// (kept as a fallback provider — see D-ID integration below,
-// which now runs FIRST for photo-to-video since it's built to
-// animate real faces, unlike BytePlus/Dreamina.)
+// (kept as a fallback provider — see the scene-generation
+// waterfall below, which now runs FIRST for photo-to-video since
+// it's built to generate real new scenes/backgrounds, unlike
+// BytePlus/Dreamina.)
 // ============================================
 function getModelArkModelIds() {
   const raw = process.env.MODELARK_MODEL_IDS;
@@ -2685,94 +2686,12 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 }
 
 // ============================================
-// ✅ NEW — D-ID PHOTO-TO-VIDEO INTEGRATION
-// Talking-photo fallback for /api/generate-photo-video.
-// D-ID animates the mouth/head of a static photo to speak given text —
-// it does NOT generate new scenes/backgrounds. Scene-generation
-// providers (Kling/Hailuo/Runway/Veo, see below) are tried FIRST;
-// D-ID only runs if all of those fail, as a "make the photo talk"
-// fallback rather than a true scene generator.
-// ============================================
-
-const DID_API_KEY = process.env.DID_API_KEY;
-const DID_BASE = 'https://api.d-id.com';
-
-async function pollDidTalk(talkId) {
-  let attempts = 0;
-  while (attempts < 60) { // ~5 min max (60 * 5s)
-    await new Promise(resolve => setTimeout(resolve, 5000));
-    try {
-      const res = await fetch(`${DID_BASE}/talks/${talkId}`, {
-        headers: { 'Authorization': `Basic ${DID_API_KEY}` }
-      });
-      if (!res.ok) {
-        const bodyText = await res.text().catch(() => '');
-        console.warn(`⚠️ D-ID poll ${attempts + 1} failed: ${res.status} ${bodyText.substring(0, 300)}`);
-        attempts++;
-        continue;
-      }
-      const data = await res.json();
-      console.log(`⏳ D-ID poll ${attempts + 1}: ${data.status}`);
-      if (data.status === 'done') return data;
-      if (data.status === 'error' || data.status === 'rejected') {
-        throw new Error(data.error?.description || `D-ID talk ${data.status}`);
-      }
-      attempts++;
-    } catch (error) {
-      console.warn(`⚠️ D-ID poll ${attempts + 1} error:`, error.message);
-      attempts++;
-    }
-  }
-  throw new Error('Timeout waiting for D-ID video generation');
-}
-
-async function generateDidVideo(photoUrl, script, options = {}) {
-  if (!DID_API_KEY) throw new Error('DID_API_KEY not set');
-
-  console.log('🔄 Creating D-ID talk...');
-  const createRes = await fetch(`${DID_BASE}/talks`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Basic ${DID_API_KEY}`,
-      'Content-Type': 'application/json'
-    },
-    body: JSON.stringify({
-      source_url: photoUrl,
-      script: {
-        type: 'text',
-        input: script,
-        provider: {
-          type: 'microsoft',
-          voice_id: options.voiceId || 'en-US-JennyNeural'
-        }
-      },
-      config: {
-        result_format: 'mp4'
-      }
-    })
-  });
-
-  if (!createRes.ok) {
-    const bodyText = await createRes.text().catch(() => '');
-    throw new Error(`D-ID talk creation failed: ${createRes.status} - ${bodyText.substring(0, 300)}`);
-  }
-
-  const createJson = await createRes.json();
-  const talkId = createJson.id;
-  if (!talkId) throw new Error('D-ID talk creation returned no id');
-  console.log('✅ D-ID talk created:', talkId);
-
-  const result = await pollDidTalk(talkId);
-  return result.result_url;
-}
-
-// ============================================
 // ✅ NEW — SCENE-GENERATION PROVIDERS
 // Kling 3.0, MiniMax Hailuo 2.3, Runway Gen-4.5, Google Veo 3.1.
-// Unlike D-ID (talking-photo only), these can actually generate new
-// scenes/backgrounds around the subject photo. Tried in this order:
-// cheapest/free-tier-friendly first, Veo last since it has no free
-// trial on this account and bills from the very first request.
+// These generate new scenes/backgrounds around the subject photo.
+// Tried in this order: cheapest/free-tier-friendly first, Veo last
+// since it has no free trial on this account and bills from the
+// very first request.
 // ============================================
 
 async function generateKlingVideo(photoUrl, prompt, duration) {
@@ -2938,9 +2857,7 @@ function createFallbackVideo(prompt, paymentReference) {
 
 // ============================================
 // TEXT TO VIDEO GENERATION ENDPOINT
-// (unchanged — still Replicate primary, BytePlus fallback;
-// D-ID is a talking-photo product and isn't a fit for generic
-// text-to-video prompts)
+// (unchanged — still Replicate primary, BytePlus fallback)
 // ============================================
 
 app.post('/api/generate-video', async (req, res) => {
@@ -3199,10 +3116,10 @@ app.post('/api/generate-video', async (req, res) => {
 // ============================================
 // PHOTO TO VIDEO GENERATION ENDPOINT
 // ✅ UPDATED — Scene-generation waterfall (Kling → Hailuo → Runway →
-// Veo) now runs FIRST since it can build real scenes/backgrounds
-// around the subject. D-ID (talking-photo only) runs as a fallback
-// if every scene provider fails, followed by BytePlus as the final
-// safety net.
+// Veo) runs FIRST since it can build real scenes/backgrounds around
+// the subject. D-ID has been REMOVED from this flow per requirement:
+// only the scene providers (or BytePlus as a last-resort safety net)
+// are used now — no talking-photo fallback.
 // ============================================
 
 app.post('/api/generate-photo-video', async (req, res) => {
@@ -3268,29 +3185,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
       generationErrors.push(error.message);
     }
 
-    // --- FALLBACK 1: D-ID (talking-photo, only if all scene providers failed) ---
-    if (!videoUrl) {
-      const didToken = process.env.DID_API_KEY;
-      if (didToken) {
-        try {
-          videoUrl = await generateDidVideo(
-            photoUrls[0],
-            prompt || 'Hi there! Thanks for checking this out.'
-          );
-          usedModel = 'D-ID Talks';
-          provider = 'd-id';
-          cost = 0;
-          console.log('✅ D-ID video generated successfully!');
-        } catch (error) {
-          console.warn('❌ D-ID error:', error.message);
-          generationErrors.push(`D-ID: ${error.message}`);
-        }
-      } else {
-        generationErrors.push('D-ID: DID_API_KEY not set');
-      }
-    }
-
-    // --- FALLBACK 2: BytePlus (only runs if scene waterfall and D-ID both failed) ---
+    // --- FALLBACK: BytePlus (only runs if scene waterfall failed) ---
     if (!videoUrl) {
       const token = process.env.MODELARK_API_KEY;
       if (token) {
@@ -3485,16 +3380,6 @@ app.get('/api/debug-modelark-ids', (req, res) => {
 });
 
 // ============================================
-// DEBUG ENDPOINT — D-ID config check
-// ============================================
-app.get('/api/debug-did-config', (req, res) => {
-  res.json({
-    didTokenConfigured: !!process.env.DID_API_KEY,
-    endpoint: DID_BASE
-  });
-});
-
-// ============================================
 // DEBUG ENDPOINT — scene provider config check
 // ============================================
 app.get('/api/debug-scene-providers', (req, res) => {
@@ -3633,7 +3518,6 @@ app.get('/api/test', (req, res) => {
       '/api/test-tts',
       '/api/debug-failed',
       '/api/debug-modelark-ids',
-      '/api/debug-did-config',
       '/api/debug-scene-providers'
     ]
   });
@@ -3656,7 +3540,6 @@ app.get('/api/health', async (req, res) => {
       uptime: process.uptime(),
       byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
       byteplus_model_ids: getModelArkModelIds(),
-      did_token: process.env.DID_API_KEY ? '✅ Set' : '❌ Not set',
       kling_token: process.env.KLING_API_KEY ? '✅ Set' : '❌ Not set',
       hailuo_token: process.env.MINIMAX_API_KEY ? '✅ Set' : '❌ Not set',
       runway_token: process.env.RUNWAY_API_KEY ? '✅ Set' : '❌ Not set',
@@ -3688,7 +3571,7 @@ app.get('/', (req, res) => {
     status: 'running',
     features: [
       'Text-to-Video Generation',
-      'Photo-to-Video Scene Generation (Kling/Hailuo/Runway/Veo, D-ID + BytePlus fallback)',
+      'Photo-to-Video Scene Generation (Kling/Hailuo/Runway/Veo, BytePlus fallback)',
       'Video Translation with Payment',
       'Email Delivery',
       'Payment Integration (Paystack)',
@@ -3720,7 +3603,6 @@ app.get('/', (req, res) => {
       { path: '/api/translate-video-free', method: 'POST' },
       { path: '/api/test-tts', method: 'POST' },
       { path: '/api/debug-modelark-ids', method: 'GET' },
-      { path: '/api/debug-did-config', method: 'GET' },
       { path: '/api/debug-scene-providers', method: 'GET' }
     ],
     mongodb: {
@@ -3768,7 +3650,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Text-to-video: Replicate HappyHorse primary, BytePlus fallback`);
-  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Runway → Veo), D-ID + BytePlus fallback`);
+  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Runway → Veo), BytePlus fallback (D-ID removed)`);
   console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected (using in-memory fallback)'}`);
   console.log(`📊 Database: ${DATABASE_NAME}`);
   console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
@@ -3783,8 +3665,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
   console.log(`📧 Video email delivery enabled ✅`);
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
-  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/D-ID/Mailgun errors)`);
+  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/Mailgun errors)`);
   console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)'})`);
-  console.log(`🧩 D-ID API key: ${process.env.DID_API_KEY ? 'configured' : 'NOT SET'}`);
   console.log(`🧩 Scene providers configured: ${SCENE_PROVIDERS.filter(p => p.enabled()).map(p => p.name).join(', ') || 'NONE'}`);
 });
