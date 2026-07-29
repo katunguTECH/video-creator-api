@@ -2265,7 +2265,7 @@ app.get('/api/admin/balances', async (req, res) => {
 
 app.post('/api/generate-redo-coupon', async (req, res) => {
   try {
-    const { paymentReference, email } = req.body;
+    const { paymentReference, email, serviceType } = req.body;
 
     if (!paymentReference) {
       return res.status(400).json({
@@ -2274,18 +2274,37 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
       });
     }
 
+    const isTestMode = paymentReference.startsWith('TEST-') ||
+                        paymentReference.startsWith('REDO-') ||
+                        paymentReference.startsWith('MANUAL-');
+
     const payment = await findPaymentByReference(paymentReference);
-    if (!payment) {
+
+    // ✅ FIX: this used to 404 whenever no UserPayment record existed for
+    // the reference — which is ALWAYS true for test-mode generations,
+    // since generate-photo-video's isTestMode branch skips verifyPayment()
+    // (and therefore addUserPayment()) for TEST-/REDO-/MANUAL- references.
+    // That silently broke the free-redo safety net for every failed
+    // test-mode generation. Real Paystack-verified references still
+    // require a matching payment record.
+    if (!payment && !isTestMode) {
       return res.status(404).json({
         success: false,
         error: 'Payment not found'
       });
     }
 
+    if (!payment && !email) {
+      return res.status(400).json({
+        success: false,
+        error: 'Email is required to generate a coupon for this payment reference'
+      });
+    }
+
     const couponCode = await generateCoupon(
       paymentReference,
-      email || payment.email,
-      payment.serviceType || 'photo-to-video'
+      email || payment?.email,
+      serviceType || payment?.serviceType || 'photo-to-video'
     );
 
     let expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
@@ -2813,57 +2832,92 @@ async function generateKieVideo(photoUrl, prompt, duration) {
 }
 
 // ============================================
-// ✅ MAGIC HOUR AI INTEGRATION
+// ✅ MAGIC HOUR AI INTEGRATION (FIXED)
+// Magic Hour requires source images to live in ITS OWN storage — you
+// can't hand it an external URL. Flow: request a pre-signed upload slot
+// → PUT the image bytes there → create the project referencing the
+// returned file_path → poll /v1/video-projects/{id} for completion.
 // ============================================
 async function generateMagicHourVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.MAGIC_HR_API;
   if (!apiKey) throw new Error('Magic Hour: MAGIC_HR_API not configured');
 
-  // Magic Hour API endpoint (using their image-to-video endpoint)
-  const response = await fetch('https://api.magichour.ai/v1/image-to-video', {
+  const headers = {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  };
+
+  // Step 1: get a pre-signed upload URL for the image
+  const cleanExt = (photoUrl.split('?')[0].split('.').pop() || 'jpg').toLowerCase();
+  const validExtensions = ['png', 'jpg', 'jpeg', 'heic', 'heif', 'webp', 'avif', 'jp2', 'tiff', 'bmp'];
+  const extension = validExtensions.includes(cleanExt) ? cleanExt : 'jpg';
+
+  const uploadUrlRes = await fetch('https://api.magichour.ai/v1/files/upload-urls', {
     method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
-    },
+    headers,
+    body: JSON.stringify({ items: [{ type: 'image', extension }] })
+  });
+  if (!uploadUrlRes.ok) {
+    throw new Error(`Magic Hour: HTTP ${uploadUrlRes.status} (upload-urls) - ${(await uploadUrlRes.text()).substring(0, 300)}`);
+  }
+  const { items } = await uploadUrlRes.json();
+  const { upload_url: uploadUrl, file_path: filePath } = items[0];
+
+  // Step 2: fetch our photo and PUT it to Magic Hour's storage
+  const imgRes = await fetch(photoUrl);
+  if (!imgRes.ok) throw new Error(`Magic Hour: failed to fetch source photo (HTTP ${imgRes.status})`);
+  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+
+  const putRes = await fetch(uploadUrl, { method: 'PUT', body: imgBuffer });
+  if (!putRes.ok) {
+    throw new Error(`Magic Hour: HTTP ${putRes.status} (asset upload) - ${(await putRes.text()).substring(0, 300)}`);
+  }
+
+  // Step 3: create the image-to-video project. end_seconds is required,
+  // range 5–60. Our app only ever sends 5/10/15 so no clamping needed,
+  // but guard anyway in case duration comes in oddly.
+  const endSeconds = Math.min(Math.max(duration, 5), 60);
+
+  const createRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
+    method: 'POST',
+    headers,
     body: JSON.stringify({
-      image_url: photoUrl,
-      prompt: prompt,
-      duration: Math.min(duration, 10),
-      aspect_ratio: '16:9'
+      name: `photo-to-video-${Date.now()}`,
+      end_seconds: endSeconds,
+      resolution: '720p',
+      assets: { image_file_path: filePath },
+      style: { prompt: prompt || 'A cinematic scene' }
     })
   });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Magic Hour: HTTP ${response.status} - ${errorText.substring(0, 300)}`);
+  if (!createRes.ok) {
+    const errorText = await createRes.text();
+    throw new Error(`Magic Hour: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
   }
+  const created = await createRes.json();
+  const projectId = created.id;
+  if (!projectId) throw new Error('Magic Hour: no project id returned from image-to-video');
 
-  const data = await response.json();
-  const taskId = data.task_id || data.id || data.job_id;
-
-  if (!taskId) {
-    if (data.video_url || data.output?.video_url) {
-      return data.video_url || data.output.video_url;
-    }
-    throw new Error('Magic Hour: No task ID or video URL in response');
-  }
-
-  // Poll for completion
+  // Step 4: poll /v1/video-projects/{id} (NOT /v1/task/{id})
   for (let i = 0; i < 60; i++) {
-    await new Promise(r => setTimeout(r, 3000));
-    const pollRes = await fetch(`https://api.magichour.ai/v1/task/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${apiKey}` }
-    });
+    await new Promise(r => setTimeout(r, 5000));
+    const pollRes = await fetch(`https://api.magichour.ai/v1/video-projects/${projectId}`, { headers });
+    if (!pollRes.ok) continue;
     const poll = await pollRes.json();
-    if (poll.status === 'completed' || poll.status === 'succeeded' || poll.status === 'done') {
-      return poll.video_url || poll.result?.video_url || poll.output?.video_url;
+
+    if (poll.status === 'complete') {
+      const url = poll.downloads?.[0]?.url;
+      if (!url) throw new Error('Magic Hour: completed but no download URL in response');
+      return url;
     }
-    if (poll.status === 'failed' || poll.status === 'error') {
-      throw new Error(`Magic Hour: Generation failed - ${poll.error || 'Unknown error'}`);
+    if (poll.status === 'error') {
+      throw new Error(`Magic Hour: ${poll.error?.message || 'generation failed'} (${poll.error?.code || 'unknown'})`);
     }
+    if (poll.status === 'canceled') {
+      throw new Error('Magic Hour: generation was canceled');
+    }
+    // 'queued' or 'rendering' → keep polling
   }
-  throw new Error('Magic Hour: Timeout waiting for video');
+  throw new Error('Magic Hour: timeout waiting for video');
 }
 
 async function generateRunwayVideo(photoUrl, prompt, duration) {
