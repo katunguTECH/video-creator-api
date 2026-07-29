@@ -2687,7 +2687,7 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 
 // ============================================
 // ✅ NEW — SCENE-GENERATION PROVIDERS
-// Kling 3.0, MiniMax Hailuo 2.3, Runway Gen-4.5, Google Veo 3.1.
+// Kling 3.0, MiniMax Hailuo 2.3, Kie.ai, Magic Hour, Runway Gen-4.5, Google Veo 3.1.
 // These generate new scenes/backgrounds around the subject photo.
 // Tried in this order: cheapest/free-tier-friendly first, Veo last
 // since it has no free trial on this account and bills from the
@@ -2759,6 +2759,113 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
   throw new Error('Hailuo: timeout waiting for video');
 }
 
+// ============================================
+// ✅ KIE.AI INTEGRATION
+// ============================================
+async function generateKieVideo(photoUrl, prompt, duration) {
+  const apiKey = process.env.KIE_API_KEY;
+  if (!apiKey) throw new Error('Kie: KIE_API_KEY not configured');
+
+  // Kie.ai API endpoint (using their image-to-video endpoint)
+  const response = await fetch('https://api.kie.ai/v1/image-to-video', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      image_url: photoUrl,
+      prompt: prompt,
+      duration: Math.min(duration, 10),
+      resolution: '720p'
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Kie: HTTP ${response.status} - ${errorText.substring(0, 300)}`);
+  }
+
+  const data = await response.json();
+  const taskId = data.task_id || data.id;
+
+  if (!taskId) {
+    // Some APIs return the video URL directly
+    if (data.video_url) return data.video_url;
+    throw new Error('Kie: No task ID or video URL in response');
+  }
+
+  // Poll for completion
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const pollRes = await fetch(`https://api.kie.ai/v1/task/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    const poll = await pollRes.json();
+    if (poll.status === 'completed' || poll.status === 'succeeded') {
+      return poll.video_url || poll.result?.video_url;
+    }
+    if (poll.status === 'failed') {
+      throw new Error(`Kie: Generation failed - ${poll.error || 'Unknown error'}`);
+    }
+  }
+  throw new Error('Kie: Timeout waiting for video');
+}
+
+// ============================================
+// ✅ MAGIC HOUR AI INTEGRATION
+// ============================================
+async function generateMagicHourVideo(photoUrl, prompt, duration) {
+  const apiKey = process.env.MAGIC_HR_API;
+  if (!apiKey) throw new Error('Magic Hour: MAGIC_HR_API not configured');
+
+  // Magic Hour API endpoint (using their image-to-video endpoint)
+  const response = await fetch('https://api.magichour.ai/v1/image-to-video', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      image_url: photoUrl,
+      prompt: prompt,
+      duration: Math.min(duration, 10),
+      aspect_ratio: '16:9'
+    })
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Magic Hour: HTTP ${response.status} - ${errorText.substring(0, 300)}`);
+  }
+
+  const data = await response.json();
+  const taskId = data.task_id || data.id || data.job_id;
+
+  if (!taskId) {
+    if (data.video_url || data.output?.video_url) {
+      return data.video_url || data.output.video_url;
+    }
+    throw new Error('Magic Hour: No task ID or video URL in response');
+  }
+
+  // Poll for completion
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 3000));
+    const pollRes = await fetch(`https://api.magichour.ai/v1/task/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${apiKey}` }
+    });
+    const poll = await pollRes.json();
+    if (poll.status === 'completed' || poll.status === 'succeeded' || poll.status === 'done') {
+      return poll.video_url || poll.result?.video_url || poll.output?.video_url;
+    }
+    if (poll.status === 'failed' || poll.status === 'error') {
+      throw new Error(`Magic Hour: Generation failed - ${poll.error || 'Unknown error'}`);
+    }
+  }
+  throw new Error('Magic Hour: Timeout waiting for video');
+}
+
 async function generateRunwayVideo(photoUrl, prompt, duration) {
   const createRes = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
     method: 'POST',
@@ -2827,6 +2934,8 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
 const SCENE_PROVIDERS = [
   { name: 'kling',  fn: generateKlingVideo,  enabled: () => !!process.env.KLING_API_KEY,      cost: 0.084 },
   { name: 'hailuo', fn: generateHailuoVideo, enabled: () => !!process.env.MINIMAX_API_KEY,    cost: 0.10 },
+  { name: 'kie',    fn: generateKieVideo,    enabled: () => !!process.env.KIE_API_KEY,        cost: 0.06 },
+  { name: 'magic_hour', fn: generateMagicHourVideo, enabled: () => !!process.env.MAGIC_HR_API, cost: 0.04 },
   { name: 'runway', fn: generateRunwayVideo, enabled: () => !!process.env.RUNWAY_API_KEY,     cost: 0.50 },
   { name: 'veo',    fn: generateVeoVideo,    enabled: () => !!process.env.GOOGLE_VEO_API_KEY, cost: 0.30 }
 ];
@@ -3115,11 +3224,7 @@ app.post('/api/generate-video', async (req, res) => {
 
 // ============================================
 // PHOTO TO VIDEO GENERATION ENDPOINT
-// ✅ UPDATED — Scene-generation waterfall (Kling → Hailuo → Runway →
-// Veo) runs FIRST since it can build real scenes/backgrounds around
-// the subject. D-ID has been REMOVED from this flow per requirement:
-// only the scene providers (or BytePlus as a last-resort safety net)
-// are used now — no talking-photo fallback.
+// ✅ UPDATED — Scene-generation waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo)
 // ============================================
 
 app.post('/api/generate-photo-video', async (req, res) => {
@@ -3172,7 +3277,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    // --- PRIMARY: Scene-generation waterfall (Kling → Hailuo → Runway → Veo) ---
+    // --- PRIMARY: Scene-generation waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo) ---
     try {
       const sceneResult = await generateSceneVideo(photoUrls[0], prompt || 'A cinematic scene', videoDuration);
       videoUrl = sceneResult.videoUrl;
@@ -3542,8 +3647,11 @@ app.get('/api/health', async (req, res) => {
       byteplus_model_ids: getModelArkModelIds(),
       kling_token: process.env.KLING_API_KEY ? '✅ Set' : '❌ Not set',
       hailuo_token: process.env.MINIMAX_API_KEY ? '✅ Set' : '❌ Not set',
+      kie_token: process.env.KIE_API_KEY ? '✅ Set' : '❌ Not set',
+      magic_hour_token: process.env.MAGIC_HR_API ? '✅ Set' : '❌ Not set',
       runway_token: process.env.RUNWAY_API_KEY ? '✅ Set' : '❌ Not set',
       veo_token: process.env.GOOGLE_VEO_API_KEY ? '✅ Set' : '❌ Not set',
+      replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
       paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
       email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
       mongodb_connected: isMongoConnected,
@@ -3570,8 +3678,8 @@ app.get('/', (req, res) => {
     version: '1.0.0',
     status: 'running',
     features: [
-      'Text-to-Video Generation',
-      'Photo-to-Video Scene Generation (Kling/Hailuo/Runway/Veo, BytePlus fallback)',
+      'Text-to-Video Generation (Replicate + BytePlus)',
+      'Photo-to-Video Scene Generation (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → BytePlus)',
       'Video Translation with Payment',
       'Email Delivery',
       'Payment Integration (Paystack)',
@@ -3650,7 +3758,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Text-to-video: Replicate HappyHorse primary, BytePlus fallback`);
-  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Runway → Veo), BytePlus fallback (D-ID removed)`);
+  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo), BytePlus fallback`);
   console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected (using in-memory fallback)'}`);
   console.log(`📊 Database: ${DATABASE_NAME}`);
   console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
@@ -3665,7 +3773,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
   console.log(`📧 Video email delivery enabled ✅`);
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
-  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/Mailgun errors)`);
+  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real API errors)`);
   console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)'})`);
   console.log(`🧩 Scene providers configured: ${SCENE_PROVIDERS.filter(p => p.enabled()).map(p => p.name).join(', ') || 'NONE'}`);
+  console.log(`💰 Replicate credit balance: $${process.env.REPLICATE_BALANCE || '10.00'}`);
 });
