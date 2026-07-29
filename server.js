@@ -2280,13 +2280,6 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
 
     const payment = await findPaymentByReference(paymentReference);
 
-    // ✅ FIX: this used to 404 whenever no UserPayment record existed for
-    // the reference — which is ALWAYS true for test-mode generations,
-    // since generate-photo-video's isTestMode branch skips verifyPayment()
-    // (and therefore addUserPayment()) for TEST-/REDO-/MANUAL- references.
-    // That silently broke the free-redo safety net for every failed
-    // test-mode generation. Real Paystack-verified references still
-    // require a matching payment record.
     if (!payment && !isTestMode) {
       return res.status(404).json({
         success: false,
@@ -2663,18 +2656,13 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
 const failedGenerations = {};
 
 // ============================================
-// ✅ CENTRALIZED BYTEPLUS MODEL ID RESOLUTION
-// (kept as a fallback provider — see the scene-generation
-// waterfall below, which now runs FIRST for photo-to-video since
-// it's built to generate real new scenes/backgrounds, unlike
-// BytePlus/Dreamina.)
+// BYTEPLUS MODEL ID RESOLUTION
 // ============================================
 function getModelArkModelIds() {
   const raw = process.env.MODELARK_MODEL_IDS;
   if (raw && raw.trim().length > 0) {
     return raw.split(',').map(id => id.trim()).filter(Boolean);
   }
-  // Confirmed-working defaults (Model ID, then its Endpoint ID as fallback)
   return ['dreamina-seedance-2-0-260128', 'ep-m-20260721145303-hf4fp'];
 }
 
@@ -2705,87 +2693,141 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 }
 
 // ============================================
-// ✅ NEW — SCENE-GENERATION PROVIDERS
-// Kling 3.0, MiniMax Hailuo 2.3, Kie.ai, Magic Hour, Runway Gen-4.5, Google Veo 3.1.
-// These generate new scenes/backgrounds around the subject photo.
-// Tried in this order: cheapest/free-tier-friendly first, Veo last
-// since it has no free trial on this account and bills from the
-// very first request.
+// SCENE GENERATION PROVIDERS
 // ============================================
 
+// Kling API
 async function generateKlingVideo(photoUrl, prompt, duration) {
+  const apiKey = process.env.KLING_API_KEY;
+  if (!apiKey) throw new Error('Kling: KLING_API_KEY not configured');
+
+  // Ensure API key has proper format (3 parts)
+  const parts = apiKey.split('.');
+  if (parts.length !== 3) {
+    throw new Error(`Kling: API key format invalid - expected 3 parts, got ${parts.length}`);
+  }
+
   const createRes = await fetch('https://api-singapore.klingai.com/v1/videos/image2video', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.KLING_API_KEY}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
       model_name: 'kling-v3-0',
       image: photoUrl,
-      prompt,
+      prompt: prompt || 'Create a cinematic scene',
       duration: String(duration <= 5 ? 5 : 10),
-      mode: 'std'
+      mode: 'std',
+      cfg_scale: 0.5
     })
   });
-  if (!createRes.ok) throw new Error(`Kling: HTTP ${createRes.status} - ${(await createRes.text()).substring(0, 300)}`);
+
+  if (!createRes.ok) {
+    const errorText = await createRes.text();
+    throw new Error(`Kling: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
+  }
+
   const { data } = await createRes.json();
   const taskId = data.task_id;
 
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
     const pollRes = await fetch(`https://api-singapore.klingai.com/v1/videos/image2video/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${process.env.KLING_API_KEY}` }
+      headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     const poll = await pollRes.json();
-    if (poll.data?.task_status === 'succeed') return poll.data.task_result.videos[0].url;
-    if (poll.data?.task_status === 'failed') throw new Error(`Kling generation failed: ${poll.data.task_status_msg}`);
+    if (poll.data?.task_status === 'succeed') {
+      return poll.data.task_result.videos[0].url;
+    }
+    if (poll.data?.task_status === 'failed') {
+      throw new Error(`Kling generation failed: ${poll.data.task_status_msg}`);
+    }
   }
   throw new Error('Kling: timeout waiting for video');
 }
 
+// Hailuo API (MiniMax)
 async function generateHailuoVideo(photoUrl, prompt, duration) {
+  const apiKey = process.env.MINIMAX_API_KEY;
+  if (!apiKey) throw new Error('Hailuo: MINIMAX_API_KEY not configured');
+
   const host = process.env.MINIMAX_API_HOST || 'https://api.minimax.io';
-  const createRes = await fetch(`${host}/v1/video_generation`, {
+
+  // First, upload the image
+  const uploadRes = await fetch(`${host}/v1/files/upload`, {
     method: 'POST',
-    headers: { 'Authorization': `Bearer ${process.env.MINIMAX_API_KEY}`, 'Content-Type': 'application/json' },
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
     body: JSON.stringify({
-      model: 'MiniMax-Hailuo-2.3',
-      prompt,
-      first_frame_image: photoUrl,
-      duration: duration <= 6 ? 6 : 10,
-      resolution: '1080P'
+      purpose: 'image_to_video',
+      file: photoUrl
     })
   });
-  if (!createRes.ok) throw new Error(`Hailuo: HTTP ${createRes.status} - ${(await createRes.text()).substring(0, 300)}`);
+
+  if (!uploadRes.ok) {
+    const errorText = await uploadRes.text();
+    throw new Error(`Hailuo upload failed: HTTP ${uploadRes.status} - ${errorText.substring(0, 300)}`);
+  }
+
+  const uploadData = await uploadRes.json();
+  const fileId = uploadData.file?.file_id;
+
+  if (!fileId) {
+    throw new Error('Hailuo: No file_id returned from upload');
+  }
+
+  const createRes = await fetch(`${host}/v1/video_generation`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model: 'MiniMax-Hailuo-2.3',
+      prompt: prompt || 'Create a cinematic scene',
+      first_frame_image: fileId,
+      duration: duration <= 6 ? 6 : 10,
+      resolution: '1080P',
+      audio_setting: 'none'
+    })
+  });
+
+  if (!createRes.ok) {
+    const errorText = await createRes.text();
+    throw new Error(`Hailuo: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
+  }
+
   const { task_id } = await createRes.json();
 
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
     const pollRes = await fetch(`${host}/v1/query/video_generation?task_id=${task_id}`, {
-      headers: { 'Authorization': `Bearer ${process.env.MINIMAX_API_KEY}` }
+      headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     const poll = await pollRes.json();
     if (poll.status === 'Success') {
       const fileRes = await fetch(`${host}/v1/files/retrieve?file_id=${poll.file_id}`, {
-        headers: { 'Authorization': `Bearer ${process.env.MINIMAX_API_KEY}` }
+        headers: { 'Authorization': `Bearer ${apiKey}` }
       });
       const file = await fileRes.json();
       return file.file.download_url;
     }
-    if (poll.status === 'Fail') throw new Error('Hailuo: generation failed');
+    if (poll.status === 'Fail') {
+      throw new Error(`Hailuo generation failed: ${poll.fail_msg || 'Unknown error'}`);
+    }
   }
   throw new Error('Hailuo: timeout waiting for video');
 }
 
-// ============================================
-// ✅ KIE.AI INTEGRATION
-// ============================================
+// Kie.ai API
 async function generateKieVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.KIE_API_KEY;
   if (!apiKey) throw new Error('Kie: KIE_API_KEY not configured');
 
-  // Kie.ai API endpoint (using their image-to-video endpoint)
+  // Kie.ai uses a different endpoint structure
   const response = await fetch('https://api.kie.ai/v1/image-to-video', {
     method: 'POST',
     headers: {
@@ -2793,10 +2835,11 @@ async function generateKieVideo(photoUrl, prompt, duration) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      image_url: photoUrl,
-      prompt: prompt,
+      image: photoUrl,
+      prompt: prompt || 'Create a cinematic scene',
       duration: Math.min(duration, 10),
-      resolution: '720p'
+      resolution: '720p',
+      style: 'cinematic'
     })
   });
 
@@ -2806,15 +2849,15 @@ async function generateKieVideo(photoUrl, prompt, duration) {
   }
 
   const data = await response.json();
-  const taskId = data.task_id || data.id;
 
+  // Some APIs return video URL directly
+  if (data.video_url) return data.video_url;
+
+  const taskId = data.task_id || data.id;
   if (!taskId) {
-    // Some APIs return the video URL directly
-    if (data.video_url) return data.video_url;
     throw new Error('Kie: No task ID or video URL in response');
   }
 
-  // Poll for completion
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 3000));
     const pollRes = await fetch(`https://api.kie.ai/v1/task/${taskId}`, {
@@ -2825,19 +2868,13 @@ async function generateKieVideo(photoUrl, prompt, duration) {
       return poll.video_url || poll.result?.video_url;
     }
     if (poll.status === 'failed') {
-      throw new Error(`Kie: Generation failed - ${poll.error || 'Unknown error'}`);
+      throw new Error(`Kie generation failed: ${poll.error || 'Unknown error'}`);
     }
   }
   throw new Error('Kie: Timeout waiting for video');
 }
 
-// ============================================
-// ✅ MAGIC HOUR AI INTEGRATION (FIXED)
-// Magic Hour requires source images to live in ITS OWN storage — you
-// can't hand it an external URL. Flow: request a pre-signed upload slot
-// → PUT the image bytes there → create the project referencing the
-// returned file_path → poll /v1/video-projects/{id} for completion.
-// ============================================
+// Magic Hour AI
 async function generateMagicHourVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.MAGIC_HR_API;
   if (!apiKey) throw new Error('Magic Hour: MAGIC_HR_API not configured');
@@ -2847,7 +2884,7 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
     'Content-Type': 'application/json'
   };
 
-  // Step 1: get a pre-signed upload URL for the image
+  // Get upload URL
   const cleanExt = (photoUrl.split('?')[0].split('.').pop() || 'jpg').toLowerCase();
   const validExtensions = ['png', 'jpg', 'jpeg', 'heic', 'heif', 'webp', 'avif', 'jp2', 'tiff', 'bmp'];
   const extension = validExtensions.includes(cleanExt) ? cleanExt : 'jpg';
@@ -2857,25 +2894,27 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
     headers,
     body: JSON.stringify({ items: [{ type: 'image', extension }] })
   });
+
   if (!uploadUrlRes.ok) {
-    throw new Error(`Magic Hour: HTTP ${uploadUrlRes.status} (upload-urls) - ${(await uploadUrlRes.text()).substring(0, 300)}`);
+    const errorText = await uploadUrlRes.text();
+    throw new Error(`Magic Hour: HTTP ${uploadUrlRes.status} - ${errorText.substring(0, 300)}`);
   }
+
   const { items } = await uploadUrlRes.json();
   const { upload_url: uploadUrl, file_path: filePath } = items[0];
 
-  // Step 2: fetch our photo and PUT it to Magic Hour's storage
+  // Upload image
   const imgRes = await fetch(photoUrl);
   if (!imgRes.ok) throw new Error(`Magic Hour: failed to fetch source photo (HTTP ${imgRes.status})`);
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
 
   const putRes = await fetch(uploadUrl, { method: 'PUT', body: imgBuffer });
   if (!putRes.ok) {
-    throw new Error(`Magic Hour: HTTP ${putRes.status} (asset upload) - ${(await putRes.text()).substring(0, 300)}`);
+    const errorText = await putRes.text();
+    throw new Error(`Magic Hour: HTTP ${putRes.status} - ${errorText.substring(0, 300)}`);
   }
 
-  // Step 3: create the image-to-video project. end_seconds is required,
-  // range 5–60. Our app only ever sends 5/10/15 so no clamping needed,
-  // but guard anyway in case duration comes in oddly.
+  // Create image-to-video project
   const endSeconds = Math.min(Math.max(duration, 5), 60);
 
   const createRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
@@ -2884,20 +2923,22 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
     body: JSON.stringify({
       name: `photo-to-video-${Date.now()}`,
       end_seconds: endSeconds,
-      resolution: '720p',
+      resolution: '1080p', // Use 1080p instead of 720p
       assets: { image_file_path: filePath },
       style: { prompt: prompt || 'A cinematic scene' }
     })
   });
+
   if (!createRes.ok) {
     const errorText = await createRes.text();
     throw new Error(`Magic Hour: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
   }
+
   const created = await createRes.json();
   const projectId = created.id;
-  if (!projectId) throw new Error('Magic Hour: no project id returned from image-to-video');
+  if (!projectId) throw new Error('Magic Hour: no project id returned');
 
-  // Step 4: poll /v1/video-projects/{id} (NOT /v1/task/{id})
+  // Poll for completion
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
     const pollRes = await fetch(`https://api.magichour.ai/v1/video-projects/${projectId}`, { headers });
@@ -2906,43 +2947,54 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
 
     if (poll.status === 'complete') {
       const url = poll.downloads?.[0]?.url;
-      if (!url) throw new Error('Magic Hour: completed but no download URL in response');
+      if (!url) throw new Error('Magic Hour: completed but no download URL');
       return url;
     }
     if (poll.status === 'error') {
-      throw new Error(`Magic Hour: ${poll.error?.message || 'generation failed'} (${poll.error?.code || 'unknown'})`);
+      throw new Error(`Magic Hour: ${poll.error?.message || 'generation failed'}`);
     }
     if (poll.status === 'canceled') {
       throw new Error('Magic Hour: generation was canceled');
     }
-    // 'queued' or 'rendering' → keep polling
   }
   throw new Error('Magic Hour: timeout waiting for video');
 }
 
+// Runway API
 async function generateRunwayVideo(photoUrl, prompt, duration) {
+  const apiKey = process.env.RUNWAY_API_KEY;
+  if (!apiKey) throw new Error('Runway: RUNWAY_API_KEY not configured');
+
   const createRes = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${process.env.RUNWAY_API_KEY}`,
+      'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
       'X-Runway-Version': '2024-11-06'
     },
     body: JSON.stringify({
       model: 'gen4_turbo',
       promptImage: photoUrl,
-      promptText: prompt,
+      promptText: prompt || 'A cinematic scene',
       ratio: '1280:720',
       duration: duration <= 5 ? 5 : 10
     })
   });
-  if (!createRes.ok) throw new Error(`Runway: HTTP ${createRes.status} - ${(await createRes.text()).substring(0, 300)}`);
+
+  if (!createRes.ok) {
+    const errorText = await createRes.text();
+    throw new Error(`Runway: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
+  }
+
   const { id: taskId } = await createRes.json();
 
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
     const pollRes = await fetch(`https://api.dev.runwayml.com/v1/tasks/${taskId}`, {
-      headers: { 'Authorization': `Bearer ${process.env.RUNWAY_API_KEY}`, 'X-Runway-Version': '2024-11-06' }
+      headers: {
+        'Authorization': `Bearer ${apiKey}`,
+        'X-Runway-Version': '2024-11-06'
+      }
     });
     const poll = await pollRes.json();
     if (poll.status === 'SUCCEEDED') return poll.output[0];
@@ -2951,9 +3003,13 @@ async function generateRunwayVideo(photoUrl, prompt, duration) {
   throw new Error('Runway: timeout waiting for video');
 }
 
+// Google Veo API
 async function generateVeoVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.GOOGLE_VEO_API_KEY;
+  if (!apiKey) throw new Error('Veo: GOOGLE_VEO_API_KEY not configured');
+
   const imgRes = await fetch(photoUrl);
+  if (!imgRes.ok) throw new Error(`Veo: failed to fetch image (HTTP ${imgRes.status})`);
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
   const imgBase64 = imgBuffer.toString('base64');
 
@@ -2963,12 +3019,20 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        instances: [{ prompt, image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' } }],
+        instances: [{
+          prompt: prompt || 'A cinematic scene with natural motion',
+          image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' }
+        }],
         parameters: { durationSeconds: Math.min(duration, 8), aspectRatio: '16:9' }
       })
     }
   );
-  if (!startRes.ok) throw new Error(`Veo: HTTP ${startRes.status} - ${(await startRes.text()).substring(0, 300)}`);
+
+  if (!startRes.ok) {
+    const errorText = await startRes.text();
+    throw new Error(`Veo: HTTP ${startRes.status} - ${errorText.substring(0, 300)}`);
+  }
+
   const { name: opName } = await startRes.json();
 
   for (let i = 0; i < 60; i++) {
@@ -2984,18 +3048,25 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
   throw new Error('Veo: timeout waiting for video');
 }
 
-// Ordered cheapest/free-tier-friendly first; Veo last (no free trial on this account)
+// ============================================
+// SCENE PROVIDER ORDER (with cost estimates)
+// ============================================
 const SCENE_PROVIDERS = [
-  { name: 'kling',  fn: generateKlingVideo,  enabled: () => !!process.env.KLING_API_KEY,      cost: 0.084 },
-  { name: 'hailuo', fn: generateHailuoVideo, enabled: () => !!process.env.MINIMAX_API_KEY,    cost: 0.10 },
-  { name: 'kie',    fn: generateKieVideo,    enabled: () => !!process.env.KIE_API_KEY,        cost: 0.06 },
+  { name: 'kling', fn: generateKlingVideo, enabled: () => !!process.env.KLING_API_KEY, cost: 0.084 },
+  { name: 'hailuo', fn: generateHailuoVideo, enabled: () => !!process.env.MINIMAX_API_KEY, cost: 0.10 },
+  { name: 'kie', fn: generateKieVideo, enabled: () => !!process.env.KIE_API_KEY, cost: 0.06 },
   { name: 'magic_hour', fn: generateMagicHourVideo, enabled: () => !!process.env.MAGIC_HR_API, cost: 0.04 },
-  { name: 'runway', fn: generateRunwayVideo, enabled: () => !!process.env.RUNWAY_API_KEY,     cost: 0.50 },
-  { name: 'veo',    fn: generateVeoVideo,    enabled: () => !!process.env.GOOGLE_VEO_API_KEY, cost: 0.30 }
+  { name: 'runway', fn: generateRunwayVideo, enabled: () => !!process.env.RUNWAY_API_KEY, cost: 0.50 },
+  { name: 'veo', fn: generateVeoVideo, enabled: () => !!process.env.GOOGLE_VEO_API_KEY, cost: 0.30 }
 ];
 
+// ============================================
+// GENERATE SCENE VIDEO - MAIN FUNCTION
+// ============================================
 async function generateSceneVideo(photoUrl, prompt, duration) {
   const errors = [];
+
+  // Try each provider in order
   for (const providerDef of SCENE_PROVIDERS) {
     if (!providerDef.enabled()) {
       errors.push(`${providerDef.name}: not configured`);
@@ -3005,24 +3076,30 @@ async function generateSceneVideo(photoUrl, prompt, duration) {
       console.log(`🔄 Trying ${providerDef.name} for scene generation...`);
       const videoUrl = await providerDef.fn(photoUrl, prompt, duration);
       console.log(`✅ ${providerDef.name} succeeded!`);
-      return { videoUrl, provider: providerDef.name, cost: providerDef.cost * (duration / 5) };
+      return {
+        videoUrl,
+        provider: providerDef.name,
+        cost: providerDef.cost * (duration / 5)
+      };
     } catch (error) {
       console.warn(`❌ ${providerDef.name} failed:`, error.message);
       errors.push(`${providerDef.name}: ${error.message}`);
     }
   }
+
   throw new Error(`All scene providers failed: ${errors.join(' | ')}`);
 }
 
+// ============================================
+// FALLBACK VIDEO FUNCTION
+// ============================================
 function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 }
 
 // ============================================
-// TEXT TO VIDEO GENERATION ENDPOINT
-// (unchanged — still Replicate primary, BytePlus fallback)
+// TEXT TO VIDEO GENERATION
 // ============================================
-
 app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, retry, duration } = req.body;
@@ -3062,6 +3139,7 @@ app.post('/api/generate-video', async (req, res) => {
     let cost = 0.08 * durationMultiplier;
     const generationErrors = [];
 
+    // Try Replicate first
     try {
       const replicateToken = process.env.REPLICATE_API_TOKEN;
       if (replicateToken) {
@@ -3124,6 +3202,7 @@ app.post('/api/generate-video', async (req, res) => {
       generationErrors.push(`Replicate: ${error.message}`);
     }
 
+    // Try BytePlus as fallback
     if (!videoUrl) {
       try {
         const token = process.env.MODELARK_API_KEY;
@@ -3277,10 +3356,8 @@ app.post('/api/generate-video', async (req, res) => {
 });
 
 // ============================================
-// PHOTO TO VIDEO GENERATION ENDPOINT
-// ✅ UPDATED — Scene-generation waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo)
+// PHOTO TO VIDEO GENERATION - FIXED
 // ============================================
-
 app.post('/api/generate-photo-video', async (req, res) => {
   try {
     const { photoUrls, prompt, duration, aspectRatio, paymentReference, email } = req.body;
@@ -3300,7 +3377,9 @@ app.post('/api/generate-photo-video', async (req, res) => {
       });
     }
 
-    const isTestMode = paymentReference && (paymentReference.startsWith('TEST-') || paymentReference.startsWith('REDO-') || paymentReference.startsWith('MANUAL-'));
+    const isTestMode = paymentReference && (paymentReference.startsWith('TEST-') ||
+      paymentReference.startsWith('REDO-') ||
+      paymentReference.startsWith('MANUAL-'));
 
     if (!paymentReference) {
       return res.status(402).json({
@@ -3331,9 +3410,13 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    // --- PRIMARY: Scene-generation waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo) ---
+    // Try scene generation providers first
     try {
-      const sceneResult = await generateSceneVideo(photoUrls[0], prompt || 'A cinematic scene', videoDuration);
+      const sceneResult = await generateSceneVideo(
+        photoUrls[0],
+        prompt || 'A cinematic scene with natural motion',
+        videoDuration
+      );
       videoUrl = sceneResult.videoUrl;
       usedModel = sceneResult.provider;
       provider = sceneResult.provider;
@@ -3341,83 +3424,171 @@ app.post('/api/generate-photo-video', async (req, res) => {
       console.log(`✅ Scene video generated via ${sceneResult.provider}!`);
     } catch (error) {
       console.warn('❌ Scene-generation waterfall failed:', error.message);
-      generationErrors.push(error.message);
+      generationErrors.push(`Scene providers: ${error.message}`);
     }
 
-    // --- FALLBACK: BytePlus (only runs if scene waterfall failed) ---
+    // If scene providers failed, try BytePlus
     if (!videoUrl) {
-      const token = process.env.MODELARK_API_KEY;
-      if (token) {
-        const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-        const modelIds = getModelArkModelIds();
-        console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
+      try {
+        const token = process.env.MODELARK_API_KEY;
+        if (token) {
+          const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
+          const modelIds = getModelArkModelIds();
 
-        for (const modelId of modelIds) {
-          try {
-            console.log(`🔄 Trying BytePlus model: ${modelId}`);
+          for (const modelId of modelIds) {
+            try {
+              console.log(`🔄 Trying BytePlus model: ${modelId}`);
 
-            const content = [
-              { type: 'text', text: prompt || 'Create a video from these photos' },
-              ...photoUrls.map(url => ({
-                type: 'image_url',
-                image_url: { url }
-              }))
-            ];
+              // Build content with image and prompt
+              const content = [
+                { type: 'text', text: prompt || 'Create a video from this image' }
+              ];
 
-            const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
-              method: 'POST',
-              headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${token}`
-              },
-              body: JSON.stringify({
-                model: modelId,
-                content,
-                parameters: {
-                  duration: videoDuration,
-                  resolution: '720p',
-                  ratio: aspectRatio || '16:9',
-                  fps: 24,
-                  output_sound: 'close',
-                  watermark: false
-                }
-              })
-            });
+              // Add each photo URL
+              for (const url of photoUrls) {
+                content.push({
+                  type: 'image_url',
+                  image_url: { url }
+                });
+              }
 
-            if (!createResponse.ok) {
-              const bodyText = await createResponse.text().catch(() => '');
-              console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
-              generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
-              continue;
+              const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({
+                  model: modelId,
+                  content,
+                  parameters: {
+                    duration: videoDuration,
+                    resolution: '720p',
+                    ratio: aspectRatio || '16:9',
+                    fps: 24,
+                    output_sound: 'close',
+                    watermark: false
+                  }
+                })
+              });
+
+              if (!createResponse.ok) {
+                const bodyText = await createResponse.text().catch(() => '');
+                console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status}`);
+                generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status}`);
+                continue;
+              }
+
+              const taskData = await createResponse.json();
+              console.log(`✅ BytePlus task created:`, taskData.id);
+
+              const result = await pollDreaminaTask(taskData.id, token, endpoint);
+              videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+
+              if (videoUrl) {
+                usedModel = modelId;
+                provider = 'byteplus';
+                cost = 0.15 * durationMultiplier;
+                console.log(`✅ BytePlus video generated with ${modelId}!`);
+                break;
+              }
+            } catch (err) {
+              console.warn(`❌ BytePlus ${modelId} error:`, err.message);
+              generationErrors.push(`BytePlus ${modelId}: ${err.message}`);
             }
-
-            const taskData = await createResponse.json();
-            console.log(`✅ BytePlus task created:`, taskData.id);
-
-            const result = await pollDreaminaTask(taskData.id, token, endpoint);
-            videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
-
-            if (videoUrl) {
-              usedModel = modelId;
-              provider = 'byteplus';
-              cost = 0.15 * durationMultiplier;
-              console.log(`✅ BytePlus video generated with ${modelId}!`);
-              break;
-            } else {
-              generationErrors.push(`BytePlus ${modelId}: task succeeded but no video_url in response`);
-            }
-          } catch (err) {
-            console.warn(`❌ BytePlus ${modelId} error:`, err.message);
-            generationErrors.push(`BytePlus ${modelId}: ${err.message}`);
           }
+        } else {
+          generationErrors.push('BytePlus: MODELARK_API_KEY not set');
         }
-      } else {
-        generationErrors.push('BytePlus: MODELARK_API_KEY not set');
+      } catch (error) {
+        console.warn('❌ BytePlus error:', error.message);
+        generationErrors.push(`BytePlus: ${error.message}`);
+      }
+    }
+
+    // If still no video, try using Replicate as final fallback
+    if (!videoUrl) {
+      try {
+        const replicateToken = process.env.REPLICATE_API_TOKEN;
+        if (replicateToken) {
+          console.log('🔄 Trying Replicate as final fallback...');
+
+          // Use photo as first frame for video generation
+          const response = await fetch('https://api.replicate.com/v1/predictions', {
+            method: 'POST',
+            headers: {
+              'Authorization': `Token ${replicateToken}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              version: "lucataco/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
+              input: {
+                input_image: photoUrls[0],
+                video_length: videoDuration === 5 ? 25 : videoDuration === 10 ? 50 : 75,
+                s_conditioning_mode: "both",
+                s_churn: 0.5,
+                s_tmax: 0.1,
+                s_tmin: 0.1,
+                s_noise: 0.2,
+                frames_per_second: 5,
+                motion_bucket_id: 127,
+                cond_aug: 0.02,
+                decoding_t: 7,
+                seed: Math.floor(Math.random() * 1000000)
+              }
+            })
+          });
+
+          if (response.ok) {
+            const data = await response.json();
+            console.log('✅ Replicate prediction created:', data.id);
+
+            let prediction = data;
+            let attempts = 0;
+            while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < 60) {
+              await new Promise(resolve => setTimeout(resolve, 3000));
+              const pollResponse = await fetch(`https://api.replicate.com/v1/predictions/${prediction.id}`, {
+                headers: { 'Authorization': `Token ${replicateToken}` }
+              });
+              prediction = await pollResponse.json();
+              attempts++;
+              console.log(`⏳ Replicate poll ${attempts}: ${prediction.status}`);
+            }
+
+            if (prediction.status === 'succeeded') {
+              videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
+              usedModel = 'Stable Video Diffusion';
+              provider = 'replicate';
+              cost = 0.20 * durationMultiplier;
+              console.log('✅ Replicate video generated successfully!');
+            } else {
+              generationErrors.push(`Replicate: prediction ended with status "${prediction.status}"`);
+            }
+          } else {
+            const bodyText = await response.text().catch(() => '');
+            generationErrors.push(`Replicate: HTTP ${response.status}`);
+          }
+        } else {
+          generationErrors.push('Replicate: REPLICATE_API_TOKEN not set');
+        }
+      } catch (error) {
+        console.warn('❌ Replicate final fallback error:', error.message);
+        generationErrors.push(`Replicate fallback: ${error.message}`);
       }
     }
 
     if (!videoUrl) {
       console.error('❌ Photo-to-video generation failed for all models:', generationErrors);
+      if (paymentReference) {
+        failedGenerations[paymentReference] = {
+          timestamp: new Date().toISOString(),
+          email: email,
+          prompt: prompt,
+          duration: videoDuration,
+          reason: 'Generation failed',
+          errors: generationErrors
+        };
+      }
       return res.json({
         success: true,
         videoUrl: createFallbackVideo(prompt, paymentReference),
@@ -3430,9 +3601,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
       });
     }
 
-    if (provider === 'byteplus') {
-      await addApiTransaction('byteplus', cost, 'usage', `Photo-to-video with ${usedModel} (${videoDuration}s)`);
-    }
+    // Record usage
     await addVideoUsage(
       paymentReference,
       email || 'anonymous',
@@ -3443,6 +3612,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
       provider,
       videoDuration
     );
+
     await addActivityLog(
       email || 'anonymous',
       `🖼️ Generated ${videoDuration}s photo-to-video`,
@@ -3450,6 +3620,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
       0
     );
 
+    // Send email
     let emailResult = { success: false };
     try {
       console.log(`📧 Sending video email to ${email}`);
@@ -3486,6 +3657,10 @@ app.post('/api/generate-photo-video', async (req, res) => {
     });
   }
 });
+
+// ============================================
+// FREE RETRY ENDPOINTS
+// ============================================
 
 app.post('/api/check-free-retry', (req, res) => {
   const { paymentReference } = req.body;
@@ -3527,8 +3702,9 @@ app.get('/api/debug-failed', (req, res) => {
 });
 
 // ============================================
-// DEBUG ENDPOINT — resolved ModelArk model IDs
+// DEBUG ENDPOINTS
 // ============================================
+
 app.get('/api/debug-modelark-ids', (req, res) => {
   res.json({
     resolvedModelIds: getModelArkModelIds(),
@@ -3538,17 +3714,23 @@ app.get('/api/debug-modelark-ids', (req, res) => {
   });
 });
 
-// ============================================
-// DEBUG ENDPOINT — scene provider config check
-// ============================================
 app.get('/api/debug-scene-providers', (req, res) => {
+  const providers = SCENE_PROVIDERS.map(p => ({
+    name: p.name,
+    configured: p.enabled(),
+    keyStatus: p.enabled() ? '✅' : '❌'
+  }));
+
   res.json({
-    providers: SCENE_PROVIDERS.map(p => ({ name: p.name, configured: p.enabled() }))
+    providers,
+    totalConfigured: providers.filter(p => p.configured).length,
+    totalProviders: providers.length,
+    klingKeyParts: process.env.KLING_API_KEY ? process.env.KLING_API_KEY.split('.').length : 0
   });
 });
 
 // ============================================
-// UPDATED PRICE CALCULATION ENDPOINT
+// PRICE CALCULATION ENDPOINT
 // ============================================
 
 app.post('/api/calculate-price', (req, res) => {
@@ -3591,8 +3773,7 @@ app.post('/api/calculate-price', (req, res) => {
       ];
 
       serviceName = `AI Photo-to-Video (${duration}s, ${photoCount} photo${photoCount > 1 ? 's' : ''})`;
-    }
-    else if (serviceType === 'image_to_video') {
+    } else if (serviceType === 'image_to_video') {
       if (duration === 5) finalPrice = 300;
       else if (duration === 10) finalPrice = 600;
       else if (duration === 15) finalPrice = 1200;
@@ -3603,8 +3784,7 @@ app.post('/api/calculate-price', (req, res) => {
       ];
 
       serviceName = `AI Image-to-Video (${duration}s)`;
-    }
-    else {
+    } else {
       if (duration === 5) finalPrice = 300;
       else if (duration === 10) finalPrice = 600;
       else if (duration === 15) finalPrice = 1200;
@@ -3729,11 +3909,11 @@ app.get('/api/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
-    version: '1.0.0',
+    version: '2.0.0',
     status: 'running',
     features: [
       'Text-to-Video Generation (Replicate + BytePlus)',
-      'Photo-to-Video Scene Generation (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → BytePlus)',
+      'Photo-to-Video Scene Generation (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → BytePlus → Replicate)',
       'Video Translation with Payment',
       'Email Delivery',
       'Payment Integration (Paystack)',
@@ -3753,7 +3933,6 @@ app.get('/', (req, res) => {
       { path: '/api/free-languages', method: 'GET' },
       { path: '/api/translation-price', method: 'GET' },
       { path: '/api/translate-video', method: 'POST' },
-      { path: '/api/translate-text', method: 'POST' },
       { path: '/api/translations', method: 'GET' },
       { path: '/api/upload-video', method: 'POST' },
       { path: '/api/admin/dashboard', method: 'GET' },
@@ -3812,7 +3991,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Text-to-video: Replicate HappyHorse primary, BytePlus fallback`);
-  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo), BytePlus fallback`);
+  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → BytePlus → Replicate)`);
   console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected (using in-memory fallback)'}`);
   console.log(`📊 Database: ${DATABASE_NAME}`);
   console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
@@ -3828,7 +4007,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Video email delivery enabled ✅`);
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
   console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real API errors)`);
-  console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)'})`);
+  console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')}`);
   console.log(`🧩 Scene providers configured: ${SCENE_PROVIDERS.filter(p => p.enabled()).map(p => p.name).join(', ') || 'NONE'}`);
   console.log(`💰 Replicate credit balance: $${process.env.REPLICATE_BALANCE || '10.00'}`);
 });
