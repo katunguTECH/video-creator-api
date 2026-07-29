@@ -2686,10 +2686,12 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 
 // ============================================
 // ✅ NEW — D-ID PHOTO-TO-VIDEO INTEGRATION
-// Primary provider for /api/generate-photo-video.
-// D-ID is built around animating real human photos (unlike
-// BytePlus/Dreamina, which blocks real faces), and currently
-// running on a free trial (12 credits) — see DID_API_KEY below.
+// Talking-photo fallback for /api/generate-photo-video.
+// D-ID animates the mouth/head of a static photo to speak given text —
+// it does NOT generate new scenes/backgrounds. Scene-generation
+// providers (Kling/Hailuo/Runway/Veo, see below) are tried FIRST;
+// D-ID only runs if all of those fail, as a "make the photo talk"
+// fallback rather than a true scene generator.
 // ============================================
 
 const DID_API_KEY = process.env.DID_API_KEY;
@@ -2762,6 +2764,172 @@ async function generateDidVideo(photoUrl, script, options = {}) {
 
   const result = await pollDidTalk(talkId);
   return result.result_url;
+}
+
+// ============================================
+// ✅ NEW — SCENE-GENERATION PROVIDERS
+// Kling 3.0, MiniMax Hailuo 2.3, Runway Gen-4.5, Google Veo 3.1.
+// Unlike D-ID (talking-photo only), these can actually generate new
+// scenes/backgrounds around the subject photo. Tried in this order:
+// cheapest/free-tier-friendly first, Veo last since it has no free
+// trial on this account and bills from the very first request.
+// ============================================
+
+async function generateKlingVideo(photoUrl, prompt, duration) {
+  const createRes = await fetch('https://api-singapore.klingai.com/v1/videos/image2video', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.KLING_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      model_name: 'kling-v3-0',
+      image: photoUrl,
+      prompt,
+      duration: String(duration <= 5 ? 5 : 10),
+      mode: 'std'
+    })
+  });
+  if (!createRes.ok) throw new Error(`Kling: HTTP ${createRes.status} - ${(await createRes.text()).substring(0, 300)}`);
+  const { data } = await createRes.json();
+  const taskId = data.task_id;
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const pollRes = await fetch(`https://api-singapore.klingai.com/v1/videos/image2video/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${process.env.KLING_API_KEY}` }
+    });
+    const poll = await pollRes.json();
+    if (poll.data?.task_status === 'succeed') return poll.data.task_result.videos[0].url;
+    if (poll.data?.task_status === 'failed') throw new Error(`Kling generation failed: ${poll.data.task_status_msg}`);
+  }
+  throw new Error('Kling: timeout waiting for video');
+}
+
+async function generateHailuoVideo(photoUrl, prompt, duration) {
+  const host = process.env.MINIMAX_API_HOST || 'https://api.minimax.io';
+  const createRes = await fetch(`${host}/v1/video_generation`, {
+    method: 'POST',
+    headers: { 'Authorization': `Bearer ${process.env.MINIMAX_API_KEY}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'MiniMax-Hailuo-2.3',
+      prompt,
+      first_frame_image: photoUrl,
+      duration: duration <= 6 ? 6 : 10,
+      resolution: '1080P'
+    })
+  });
+  if (!createRes.ok) throw new Error(`Hailuo: HTTP ${createRes.status} - ${(await createRes.text()).substring(0, 300)}`);
+  const { task_id } = await createRes.json();
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const pollRes = await fetch(`${host}/v1/query/video_generation?task_id=${task_id}`, {
+      headers: { 'Authorization': `Bearer ${process.env.MINIMAX_API_KEY}` }
+    });
+    const poll = await pollRes.json();
+    if (poll.status === 'Success') {
+      const fileRes = await fetch(`${host}/v1/files/retrieve?file_id=${poll.file_id}`, {
+        headers: { 'Authorization': `Bearer ${process.env.MINIMAX_API_KEY}` }
+      });
+      const file = await fileRes.json();
+      return file.file.download_url;
+    }
+    if (poll.status === 'Fail') throw new Error('Hailuo: generation failed');
+  }
+  throw new Error('Hailuo: timeout waiting for video');
+}
+
+async function generateRunwayVideo(photoUrl, prompt, duration) {
+  const createRes = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${process.env.RUNWAY_API_KEY}`,
+      'Content-Type': 'application/json',
+      'X-Runway-Version': '2024-11-06'
+    },
+    body: JSON.stringify({
+      model: 'gen4_turbo',
+      promptImage: photoUrl,
+      promptText: prompt,
+      ratio: '1280:720',
+      duration: duration <= 5 ? 5 : 10
+    })
+  });
+  if (!createRes.ok) throw new Error(`Runway: HTTP ${createRes.status} - ${(await createRes.text()).substring(0, 300)}`);
+  const { id: taskId } = await createRes.json();
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const pollRes = await fetch(`https://api.dev.runwayml.com/v1/tasks/${taskId}`, {
+      headers: { 'Authorization': `Bearer ${process.env.RUNWAY_API_KEY}`, 'X-Runway-Version': '2024-11-06' }
+    });
+    const poll = await pollRes.json();
+    if (poll.status === 'SUCCEEDED') return poll.output[0];
+    if (poll.status === 'FAILED') throw new Error(`Runway: ${poll.failure || 'generation failed'}`);
+  }
+  throw new Error('Runway: timeout waiting for video');
+}
+
+async function generateVeoVideo(photoUrl, prompt, duration) {
+  const apiKey = process.env.GOOGLE_VEO_API_KEY;
+  const imgRes = await fetch(photoUrl);
+  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+  const imgBase64 = imgBuffer.toString('base64');
+
+  const startRes = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-fast-generate-preview:predictLongRunning?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        instances: [{ prompt, image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' } }],
+        parameters: { durationSeconds: Math.min(duration, 8), aspectRatio: '16:9' }
+      })
+    }
+  );
+  if (!startRes.ok) throw new Error(`Veo: HTTP ${startRes.status} - ${(await startRes.text()).substring(0, 300)}`);
+  const { name: opName } = await startRes.json();
+
+  for (let i = 0; i < 60; i++) {
+    await new Promise(r => setTimeout(r, 5000));
+    const opRes = await fetch(`https://generativelanguage.googleapis.com/v1beta/${opName}?key=${apiKey}`);
+    const op = await opRes.json();
+    if (op.done) {
+      const uri = op.response?.generateVideoResponse?.generatedSamples?.[0]?.video?.uri;
+      if (!uri) throw new Error('Veo: no video URI in completed operation');
+      return `${uri}&key=${apiKey}`;
+    }
+  }
+  throw new Error('Veo: timeout waiting for video');
+}
+
+// Ordered cheapest/free-tier-friendly first; Veo last (no free trial on this account)
+const SCENE_PROVIDERS = [
+  { name: 'kling',  fn: generateKlingVideo,  enabled: () => !!process.env.KLING_API_KEY,      cost: 0.084 },
+  { name: 'hailuo', fn: generateHailuoVideo, enabled: () => !!process.env.MINIMAX_API_KEY,    cost: 0.10 },
+  { name: 'runway', fn: generateRunwayVideo, enabled: () => !!process.env.RUNWAY_API_KEY,     cost: 0.50 },
+  { name: 'veo',    fn: generateVeoVideo,    enabled: () => !!process.env.GOOGLE_VEO_API_KEY, cost: 0.30 }
+];
+
+async function generateSceneVideo(photoUrl, prompt, duration) {
+  const errors = [];
+  for (const providerDef of SCENE_PROVIDERS) {
+    if (!providerDef.enabled()) {
+      errors.push(`${providerDef.name}: not configured`);
+      continue;
+    }
+    try {
+      console.log(`🔄 Trying ${providerDef.name} for scene generation...`);
+      const videoUrl = await providerDef.fn(photoUrl, prompt, duration);
+      console.log(`✅ ${providerDef.name} succeeded!`);
+      return { videoUrl, provider: providerDef.name, cost: providerDef.cost * (duration / 5) };
+    } catch (error) {
+      console.warn(`❌ ${providerDef.name} failed:`, error.message);
+      errors.push(`${providerDef.name}: ${error.message}`);
+    }
+  }
+  throw new Error(`All scene providers failed: ${errors.join(' | ')}`);
 }
 
 function createFallbackVideo(prompt, paymentReference) {
@@ -3030,8 +3198,11 @@ app.post('/api/generate-video', async (req, res) => {
 
 // ============================================
 // PHOTO TO VIDEO GENERATION ENDPOINT
-// ✅ UPDATED — D-ID now tried FIRST (built for real faces, on
-// free trial credits), BytePlus kept as a fallback underneath.
+// ✅ UPDATED — Scene-generation waterfall (Kling → Hailuo → Runway →
+// Veo) now runs FIRST since it can build real scenes/backgrounds
+// around the subject. D-ID (talking-photo only) runs as a fallback
+// if every scene provider fails, followed by BytePlus as the final
+// safety net.
 // ============================================
 
 app.post('/api/generate-photo-video', async (req, res) => {
@@ -3084,29 +3255,42 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    // --- PRIMARY: D-ID (built for real faces, currently on free trial credits) ---
-    const didToken = process.env.DID_API_KEY;
-    if (didToken) {
-      try {
-        videoUrl = await generateDidVideo(
-          photoUrls[0],
-          prompt || 'Hi there! Thanks for checking this out.'
-        );
-        usedModel = 'D-ID Talks';
-        provider = 'd-id';
-        // Trial credits are free — cost is $0 while testing.
-        // Update this once you're on a paid D-ID plan.
-        cost = 0;
-        console.log('✅ D-ID video generated successfully!');
-      } catch (error) {
-        console.warn('❌ D-ID error:', error.message);
-        generationErrors.push(`D-ID: ${error.message}`);
-      }
-    } else {
-      generationErrors.push('D-ID: DID_API_KEY not set');
+    // --- PRIMARY: Scene-generation waterfall (Kling → Hailuo → Runway → Veo) ---
+    try {
+      const sceneResult = await generateSceneVideo(photoUrls[0], prompt || 'A cinematic scene', videoDuration);
+      videoUrl = sceneResult.videoUrl;
+      usedModel = sceneResult.provider;
+      provider = sceneResult.provider;
+      cost = sceneResult.cost;
+      console.log(`✅ Scene video generated via ${sceneResult.provider}!`);
+    } catch (error) {
+      console.warn('❌ Scene-generation waterfall failed:', error.message);
+      generationErrors.push(error.message);
     }
 
-    // --- FALLBACK: BytePlus (only runs if D-ID didn't produce a video) ---
+    // --- FALLBACK 1: D-ID (talking-photo, only if all scene providers failed) ---
+    if (!videoUrl) {
+      const didToken = process.env.DID_API_KEY;
+      if (didToken) {
+        try {
+          videoUrl = await generateDidVideo(
+            photoUrls[0],
+            prompt || 'Hi there! Thanks for checking this out.'
+          );
+          usedModel = 'D-ID Talks';
+          provider = 'd-id';
+          cost = 0;
+          console.log('✅ D-ID video generated successfully!');
+        } catch (error) {
+          console.warn('❌ D-ID error:', error.message);
+          generationErrors.push(`D-ID: ${error.message}`);
+        }
+      } else {
+        generationErrors.push('D-ID: DID_API_KEY not set');
+      }
+    }
+
+    // --- FALLBACK 2: BytePlus (only runs if scene waterfall and D-ID both failed) ---
     if (!videoUrl) {
       const token = process.env.MODELARK_API_KEY;
       if (token) {
@@ -3311,6 +3495,15 @@ app.get('/api/debug-did-config', (req, res) => {
 });
 
 // ============================================
+// DEBUG ENDPOINT — scene provider config check
+// ============================================
+app.get('/api/debug-scene-providers', (req, res) => {
+  res.json({
+    providers: SCENE_PROVIDERS.map(p => ({ name: p.name, configured: p.enabled() }))
+  });
+});
+
+// ============================================
 // UPDATED PRICE CALCULATION ENDPOINT
 // ============================================
 
@@ -3440,7 +3633,8 @@ app.get('/api/test', (req, res) => {
       '/api/test-tts',
       '/api/debug-failed',
       '/api/debug-modelark-ids',
-      '/api/debug-did-config'
+      '/api/debug-did-config',
+      '/api/debug-scene-providers'
     ]
   });
 });
@@ -3463,6 +3657,10 @@ app.get('/api/health', async (req, res) => {
       byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
       byteplus_model_ids: getModelArkModelIds(),
       did_token: process.env.DID_API_KEY ? '✅ Set' : '❌ Not set',
+      kling_token: process.env.KLING_API_KEY ? '✅ Set' : '❌ Not set',
+      hailuo_token: process.env.MINIMAX_API_KEY ? '✅ Set' : '❌ Not set',
+      runway_token: process.env.RUNWAY_API_KEY ? '✅ Set' : '❌ Not set',
+      veo_token: process.env.GOOGLE_VEO_API_KEY ? '✅ Set' : '❌ Not set',
       paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
       email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
       mongodb_connected: isMongoConnected,
@@ -3490,7 +3688,7 @@ app.get('/', (req, res) => {
     status: 'running',
     features: [
       'Text-to-Video Generation',
-      'Photo-to-Video Generation (D-ID primary, BytePlus fallback)',
+      'Photo-to-Video Scene Generation (Kling/Hailuo/Runway/Veo, D-ID + BytePlus fallback)',
       'Video Translation with Payment',
       'Email Delivery',
       'Payment Integration (Paystack)',
@@ -3522,7 +3720,8 @@ app.get('/', (req, res) => {
       { path: '/api/translate-video-free', method: 'POST' },
       { path: '/api/test-tts', method: 'POST' },
       { path: '/api/debug-modelark-ids', method: 'GET' },
-      { path: '/api/debug-did-config', method: 'GET' }
+      { path: '/api/debug-did-config', method: 'GET' },
+      { path: '/api/debug-scene-providers', method: 'GET' }
     ],
     mongodb: {
       connected: isMongoConnected,
@@ -3569,7 +3768,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Text-to-video: Replicate HappyHorse primary, BytePlus fallback`);
-  console.log(`🖼️ Photo-to-video: D-ID primary (real faces), BytePlus fallback`);
+  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Runway → Veo), D-ID + BytePlus fallback`);
   console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected (using in-memory fallback)'}`);
   console.log(`📊 Database: ${DATABASE_NAME}`);
   console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
@@ -3586,5 +3785,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
   console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/D-ID/Mailgun errors)`);
   console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)'})`);
-  console.log(`🧩 D-ID API key: ${process.env.DID_API_KEY ? 'configured' : 'NOT SET — photo-to-video will fall back to BytePlus'}`);
+  console.log(`🧩 D-ID API key: ${process.env.DID_API_KEY ? 'configured' : 'NOT SET'}`);
+  console.log(`🧩 Scene providers configured: ${SCENE_PROVIDERS.filter(p => p.enabled()).map(p => p.name).join(', ') || 'NONE'}`);
 });
