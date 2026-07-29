@@ -27,11 +27,15 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// MONGODB ATLAS CONNECTION - WITH FALLBACK
+// MONGODB ATLAS CONNECTION
 // ============================================
 
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb+srv://henrymunyoki_db_user:Letmeinplease01%21@cluster0.0rbgeoc.mongodb.net/video-creator?retryWrites=true&w=majority&appName=Cluster0';
+const MONGODB_URI = process.env.MONGODB_URI;
 const DATABASE_NAME = process.env.DATABASE_NAME || 'video-creator';
+
+if (!MONGODB_URI) {
+  console.error('❌ MONGODB_URI not set in environment. Set it in Render → Environment.');
+}
 
 console.log('🔑 MongoDB Atlas configured');
 console.log(`📊 Database: ${DATABASE_NAME}`);
@@ -47,6 +51,10 @@ const mongooseOptions = {
 let isMongoConnected = false;
 
 async function connectToMongo() {
+  if (!MONGODB_URI) {
+    console.warn('⚠️ Skipping MongoDB connection: MONGODB_URI not set');
+    return false;
+  }
   try {
     console.log('🔄 Connecting to MongoDB Atlas...');
     await mongoose.connect(MONGODB_URI, mongooseOptions);
@@ -800,12 +808,16 @@ async function redeemCoupon(couponCode, email) {
 // ============================================
 
 cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'y7d1nk2i',
-  api_key: process.env.CLOUDINARY_API_KEY || '289646568483629',
-  api_secret: process.env.CLOUDINARY_API_SECRET || 'XmlwCnuLWkO-xe3BQw-lpl-ELU0'
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
 });
 
-console.log('☁️ Cloudinary configured successfully!');
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.error('❌ Cloudinary env vars not fully set (CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET)');
+} else {
+  console.log('☁️ Cloudinary configured successfully!');
+}
 
 // ============================================
 // GOOGLE CLOUD CONFIGURATION
@@ -2632,35 +2644,10 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
 const failedGenerations = {};
 
 // ============================================
-// ✅ FIXED — CENTRALIZED BYTEPLUS MODEL ID RESOLUTION
-//
-// Resolves the model IDs (or ModelArk endpoint IDs) to try, from the
-// MODELARK_MODEL_IDS env var (comma-separated, in priority order).
-// Setting that env var on Render is still the recommended way to
-// control this — no redeploy needed, just a restart.
-//
-// ⚠️ ROOT CAUSE OF THE 404s: the old defaults here were the *display
-// names* shown on the ModelArk "Model activation" page
-// (Dreamina-Seedance-2.0-mini / Dreamina-Seedance-2.0). Those strings
-// are NOT valid values for the `model` field on the
-// /api/v3/contents/generations/tasks endpoint — BytePlus's REST API
-// needs either:
-//   1) the Model ID from the "Online inference" table, e.g.
-//      dreamina-seedance-2-0-260128 (includes a version/date suffix
-//      that's invisible on the activation page), or
-//   2) the Endpoint ID from that same table, e.g.
-//      ep-m-20260721145303-hf4fp
-//
-// Fix: default to the CONFIRMED WORKING Model ID first, then
-// automatically fall back to the confirmed Endpoint ID for the same
-// model if the Model ID variant ever fails. This means BytePlus works
-// out of the box even without setting MODELARK_MODEL_IDS at all.
-//
-// If/when you find the Model ID for the "-mini" variant in the same
-// ModelArk > Online inference table, just add it via the
-// MODELARK_MODEL_IDS env var (comma-separated) — no code change
-// needed:
-//   MODELARK_MODEL_IDS=dreamina-seedance-2-0-260128,ep-m-20260721145303-hf4fp,dreamina-seedance-2-0-mini-XXXXXX
+// ✅ CENTRALIZED BYTEPLUS MODEL ID RESOLUTION
+// (kept as a fallback provider — see D-ID integration below,
+// which now runs FIRST for photo-to-video since it's built to
+// animate real faces, unlike BytePlus/Dreamina.)
 // ============================================
 function getModelArkModelIds() {
   const raw = process.env.MODELARK_MODEL_IDS;
@@ -2697,12 +2684,95 @@ async function pollDreaminaTask(taskId, token, endpoint) {
   throw new Error('Timeout waiting for Dreamina video generation');
 }
 
+// ============================================
+// ✅ NEW — D-ID PHOTO-TO-VIDEO INTEGRATION
+// Primary provider for /api/generate-photo-video.
+// D-ID is built around animating real human photos (unlike
+// BytePlus/Dreamina, which blocks real faces), and currently
+// running on a free trial (12 credits) — see DID_API_KEY below.
+// ============================================
+
+const DID_API_KEY = process.env.DID_API_KEY;
+const DID_BASE = 'https://api.d-id.com';
+
+async function pollDidTalk(talkId) {
+  let attempts = 0;
+  while (attempts < 60) { // ~5 min max (60 * 5s)
+    await new Promise(resolve => setTimeout(resolve, 5000));
+    try {
+      const res = await fetch(`${DID_BASE}/talks/${talkId}`, {
+        headers: { 'Authorization': `Basic ${DID_API_KEY}` }
+      });
+      if (!res.ok) {
+        const bodyText = await res.text().catch(() => '');
+        console.warn(`⚠️ D-ID poll ${attempts + 1} failed: ${res.status} ${bodyText.substring(0, 300)}`);
+        attempts++;
+        continue;
+      }
+      const data = await res.json();
+      console.log(`⏳ D-ID poll ${attempts + 1}: ${data.status}`);
+      if (data.status === 'done') return data;
+      if (data.status === 'error' || data.status === 'rejected') {
+        throw new Error(data.error?.description || `D-ID talk ${data.status}`);
+      }
+      attempts++;
+    } catch (error) {
+      console.warn(`⚠️ D-ID poll ${attempts + 1} error:`, error.message);
+      attempts++;
+    }
+  }
+  throw new Error('Timeout waiting for D-ID video generation');
+}
+
+async function generateDidVideo(photoUrl, script, options = {}) {
+  if (!DID_API_KEY) throw new Error('DID_API_KEY not set');
+
+  console.log('🔄 Creating D-ID talk...');
+  const createRes = await fetch(`${DID_BASE}/talks`, {
+    method: 'POST',
+    headers: {
+      'Authorization': `Basic ${DID_API_KEY}`,
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      source_url: photoUrl,
+      script: {
+        type: 'text',
+        input: script,
+        provider: {
+          type: 'microsoft',
+          voice_id: options.voiceId || 'en-US-JennyNeural'
+        }
+      },
+      config: {
+        result_format: 'mp4'
+      }
+    })
+  });
+
+  if (!createRes.ok) {
+    const bodyText = await createRes.text().catch(() => '');
+    throw new Error(`D-ID talk creation failed: ${createRes.status} - ${bodyText.substring(0, 300)}`);
+  }
+
+  const createJson = await createRes.json();
+  const talkId = createJson.id;
+  if (!talkId) throw new Error('D-ID talk creation returned no id');
+  console.log('✅ D-ID talk created:', talkId);
+
+  const result = await pollDidTalk(talkId);
+  return result.result_url;
+}
+
 function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 }
 
 // ============================================
 // TEXT TO VIDEO GENERATION ENDPOINT
+// (unchanged — still Replicate primary, BytePlus fallback;
+// D-ID is a talking-photo product and isn't a fit for generic
+// text-to-video prompts)
 // ============================================
 
 app.post('/api/generate-video', async (req, res) => {
@@ -2960,6 +3030,8 @@ app.post('/api/generate-video', async (req, res) => {
 
 // ============================================
 // PHOTO TO VIDEO GENERATION ENDPOINT
+// ✅ UPDATED — D-ID now tried FIRST (built for real faces, on
+// free trial credits), BytePlus kept as a fallback underneath.
 // ============================================
 
 app.post('/api/generate-photo-video', async (req, res) => {
@@ -3012,73 +3084,98 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    const token = process.env.MODELARK_API_KEY;
-    if (token) {
-      const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-      const modelIds = getModelArkModelIds();
-      console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
-
-      for (const modelId of modelIds) {
-        try {
-          console.log(`🔄 Trying BytePlus model: ${modelId}`);
-
-          const content = [
-            { type: 'text', text: prompt || 'Create a video from these photos' },
-            ...photoUrls.map(url => ({
-              type: 'image_url',
-              image_url: { url }
-            }))
-          ];
-
-          const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({
-              model: modelId,
-              content,
-              parameters: {
-                duration: videoDuration,
-                resolution: '720p',
-                ratio: aspectRatio || '16:9',
-                fps: 24,
-                output_sound: 'close',
-                watermark: false
-              }
-            })
-          });
-
-          if (!createResponse.ok) {
-            const bodyText = await createResponse.text().catch(() => '');
-            console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
-            generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
-            continue;
-          }
-
-          const taskData = await createResponse.json();
-          console.log(`✅ BytePlus task created:`, taskData.id);
-
-          const result = await pollDreaminaTask(taskData.id, token, endpoint);
-          videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
-
-          if (videoUrl) {
-            usedModel = modelId;
-            provider = 'byteplus';
-            cost = 0.15 * durationMultiplier;
-            console.log(`✅ BytePlus video generated with ${modelId}!`);
-            break;
-          } else {
-            generationErrors.push(`BytePlus ${modelId}: task succeeded but no video_url in response`);
-          }
-        } catch (err) {
-          console.warn(`❌ BytePlus ${modelId} error:`, err.message);
-          generationErrors.push(`BytePlus ${modelId}: ${err.message}`);
-        }
+    // --- PRIMARY: D-ID (built for real faces, currently on free trial credits) ---
+    const didToken = process.env.DID_API_KEY;
+    if (didToken) {
+      try {
+        videoUrl = await generateDidVideo(
+          photoUrls[0],
+          prompt || 'Hi there! Thanks for checking this out.'
+        );
+        usedModel = 'D-ID Talks';
+        provider = 'd-id';
+        // Trial credits are free — cost is $0 while testing.
+        // Update this once you're on a paid D-ID plan.
+        cost = 0;
+        console.log('✅ D-ID video generated successfully!');
+      } catch (error) {
+        console.warn('❌ D-ID error:', error.message);
+        generationErrors.push(`D-ID: ${error.message}`);
       }
     } else {
-      generationErrors.push('BytePlus: MODELARK_API_KEY not set');
+      generationErrors.push('D-ID: DID_API_KEY not set');
+    }
+
+    // --- FALLBACK: BytePlus (only runs if D-ID didn't produce a video) ---
+    if (!videoUrl) {
+      const token = process.env.MODELARK_API_KEY;
+      if (token) {
+        const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
+        const modelIds = getModelArkModelIds();
+        console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
+
+        for (const modelId of modelIds) {
+          try {
+            console.log(`🔄 Trying BytePlus model: ${modelId}`);
+
+            const content = [
+              { type: 'text', text: prompt || 'Create a video from these photos' },
+              ...photoUrls.map(url => ({
+                type: 'image_url',
+                image_url: { url }
+              }))
+            ];
+
+            const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${token}`
+              },
+              body: JSON.stringify({
+                model: modelId,
+                content,
+                parameters: {
+                  duration: videoDuration,
+                  resolution: '720p',
+                  ratio: aspectRatio || '16:9',
+                  fps: 24,
+                  output_sound: 'close',
+                  watermark: false
+                }
+              })
+            });
+
+            if (!createResponse.ok) {
+              const bodyText = await createResponse.text().catch(() => '');
+              console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
+              generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
+              continue;
+            }
+
+            const taskData = await createResponse.json();
+            console.log(`✅ BytePlus task created:`, taskData.id);
+
+            const result = await pollDreaminaTask(taskData.id, token, endpoint);
+            videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
+
+            if (videoUrl) {
+              usedModel = modelId;
+              provider = 'byteplus';
+              cost = 0.15 * durationMultiplier;
+              console.log(`✅ BytePlus video generated with ${modelId}!`);
+              break;
+            } else {
+              generationErrors.push(`BytePlus ${modelId}: task succeeded but no video_url in response`);
+            }
+          } catch (err) {
+            console.warn(`❌ BytePlus ${modelId} error:`, err.message);
+            generationErrors.push(`BytePlus ${modelId}: ${err.message}`);
+          }
+        }
+      } else {
+        generationErrors.push('BytePlus: MODELARK_API_KEY not set');
+      }
     }
 
     if (!videoUrl) {
@@ -3095,7 +3192,9 @@ app.post('/api/generate-photo-video', async (req, res) => {
       });
     }
 
-    await addApiTransaction('byteplus', cost, 'usage', `Photo-to-video with ${usedModel} (${videoDuration}s)`);
+    if (provider === 'byteplus') {
+      await addApiTransaction('byteplus', cost, 'usage', `Photo-to-video with ${usedModel} (${videoDuration}s)`);
+    }
     await addVideoUsage(
       paymentReference,
       email || 'anonymous',
@@ -3191,9 +3290,6 @@ app.get('/api/debug-failed', (req, res) => {
 
 // ============================================
 // DEBUG ENDPOINT — resolved ModelArk model IDs
-// Hit this in a browser to confirm exactly what model/endpoint IDs the
-// server will send to BytePlus, without needing to trigger a real
-// generation.
 // ============================================
 app.get('/api/debug-modelark-ids', (req, res) => {
   res.json({
@@ -3201,6 +3297,16 @@ app.get('/api/debug-modelark-ids', (req, res) => {
     source: process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)',
     endpoint: process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3',
     tokenConfigured: !!process.env.MODELARK_API_KEY
+  });
+});
+
+// ============================================
+// DEBUG ENDPOINT — D-ID config check
+// ============================================
+app.get('/api/debug-did-config', (req, res) => {
+  res.json({
+    didTokenConfigured: !!process.env.DID_API_KEY,
+    endpoint: DID_BASE
   });
 });
 
@@ -3333,7 +3439,8 @@ app.get('/api/test', (req, res) => {
       '/api/translate-video-free',
       '/api/test-tts',
       '/api/debug-failed',
-      '/api/debug-modelark-ids'
+      '/api/debug-modelark-ids',
+      '/api/debug-did-config'
     ]
   });
 });
@@ -3355,6 +3462,7 @@ app.get('/api/health', async (req, res) => {
       uptime: process.uptime(),
       byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
       byteplus_model_ids: getModelArkModelIds(),
+      did_token: process.env.DID_API_KEY ? '✅ Set' : '❌ Not set',
       paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
       email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
       mongodb_connected: isMongoConnected,
@@ -3382,7 +3490,7 @@ app.get('/', (req, res) => {
     status: 'running',
     features: [
       'Text-to-Video Generation',
-      'Photo-to-Video Generation',
+      'Photo-to-Video Generation (D-ID primary, BytePlus fallback)',
       'Video Translation with Payment',
       'Email Delivery',
       'Payment Integration (Paystack)',
@@ -3413,7 +3521,8 @@ app.get('/', (req, res) => {
       { path: '/api/test-google-cloud', method: 'GET' },
       { path: '/api/translate-video-free', method: 'POST' },
       { path: '/api/test-tts', method: 'POST' },
-      { path: '/api/debug-modelark-ids', method: 'GET' }
+      { path: '/api/debug-modelark-ids', method: 'GET' },
+      { path: '/api/debug-did-config', method: 'GET' }
     ],
     mongodb: {
       connected: isMongoConnected,
@@ -3459,7 +3568,8 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🔊 Google Cloud TTS configured (API key)`);
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
-  console.log(`🎬 Using Replicate HappyHorse as primary, BytePlus as fallback`);
+  console.log(`🎬 Text-to-video: Replicate HappyHorse primary, BytePlus fallback`);
+  console.log(`🖼️ Photo-to-video: D-ID primary (real faces), BytePlus fallback`);
   console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected (using in-memory fallback)'}`);
   console.log(`📊 Database: ${DATABASE_NAME}`);
   console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
@@ -3474,6 +3584,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
   console.log(`📧 Video email delivery enabled ✅`);
   console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
-  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/Mailgun errors)`);
+  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real BytePlus/D-ID/Mailgun errors)`);
   console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')} (source: ${process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)'})`);
+  console.log(`🧩 D-ID API key: ${process.env.DID_API_KEY ? 'configured' : 'NOT SET — photo-to-video will fall back to BytePlus'}`);
 });
