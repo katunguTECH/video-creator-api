@@ -2894,69 +2894,35 @@ async function generateKlingVideo(photoUrl, prompt, duration) {
   throw new Error(`Kling: all hosts failed - ${errors.join(' | ')}`);
 }
 
-// Hailuo API (MiniMax)
+// ---- Hailuo API (MiniMax) ----
 //
-// FIX: MiniMax's /v1/files/upload endpoint rejected purpose:
-// "image_to_video" with "invalid params, invalid file purpose". MiniMax's
-// upload purpose enum is narrower than the video-generation feature names
-// suggest. We now try a short list of candidate purpose values in order
-// and use whichever one the API actually accepts, logging which one
-// worked so the list can be trimmed down once confirmed.
-const HAILUO_UPLOAD_PURPOSES = ['video_generation', 'image_to_video'];
-
-async function uploadHailuoImage(apiKey, host, imgBlob) {
-  const errors = [];
-  for (const purpose of HAILUO_UPLOAD_PURPOSES) {
-    const form = new FormData();
-    form.append('purpose', purpose);
-    form.append('file', imgBlob, 'photo.jpg');
-
-    const uploadRes = await fetch(`${host}/v1/files/upload`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${apiKey}`
-        // Do NOT set Content-Type manually — fetch needs to generate the
-        // multipart boundary itself when given a FormData body.
-      },
-      body: form
-    });
-
-    if (!uploadRes.ok) {
-      const errorText = await uploadRes.text();
-      errors.push(`purpose="${purpose}": HTTP ${uploadRes.status} - ${errorText.substring(0, 200)}`);
-      continue;
-    }
-
-    const uploadData = await uploadRes.json();
-    const fileId = uploadData.file?.file_id;
-
-    if (fileId) {
-      console.log(`✅ Hailuo upload succeeded with purpose="${purpose}"`);
-      return fileId;
-    }
-
-    errors.push(`purpose="${purpose}": no file_id in response - ${JSON.stringify(uploadData).substring(0, 200)}`);
-  }
-
-  throw new Error(`Hailuo: upload failed for all purpose values - ${errors.join(' | ')}`);
-}
-
+// FIX: the previous implementation called POST /v1/files/upload with
+// purpose "video_generation" or "image_to_video" before generation. Neither
+// value is valid — MiniMax's file-upload purpose enum is narrower than the
+// video feature names suggest. Per MiniMax's current docs
+// (https://platform.minimax.io/docs/api-reference/file-management-upload)
+// the ONLY accepted purpose values are:
+//   voice_clone, prompt_audio, t2a_async_input, video_understanding
+// None of those apply to image-to-video input images, which is why every
+// upload attempt returned "invalid params, invalid file purpose" no matter
+// which of the two guessed values was tried.
+//
+// The actual video-generation API
+// (https://platform.minimax.io/docs/api-reference/video-generation-fl2v ,
+// and the equivalent i2v endpoint) does NOT require a separate upload step
+// at all — first_frame_image accepts either a public image URL directly,
+// or a Base64 Data URL (data:image/jpeg;base64,...). So the fix is to drop
+// the upload call entirely and pass the source photo straight through.
 async function generateHailuoVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) throw new Error('Hailuo: MINIMAX_API_KEY not configured');
 
   const host = process.env.MINIMAX_API_HOST || 'https://api.minimax.io';
 
-  // MiniMax's upload endpoint requires an actual multipart/form-data
-  // request with the image bytes attached. Download the photo first,
-  // then upload it as real form-data.
-  const imgRes = await fetch(photoUrl);
-  if (!imgRes.ok) throw new Error(`Hailuo: failed to fetch source photo (HTTP ${imgRes.status})`);
-  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
-  const imgBlob = new Blob([imgBuffer]);
-
-  const fileId = await uploadHailuoImage(apiKey, host, imgBlob);
-
+  // No upload step: MiniMax's video_generation endpoint accepts a public
+  // image URL directly as first_frame_image. Cloudinary URLs (what this
+  // app always passes in) are public, so this "just works" without ever
+  // touching /v1/files/upload.
   const createRes = await fetch(`${host}/v1/video_generation`, {
     method: 'POST',
     headers: {
@@ -2964,12 +2930,11 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      model: 'MiniMax-Hailuo-2.3',
+      model: 'MiniMax-Hailuo-02',
       prompt: prompt || 'Create a cinematic scene',
-      first_frame_image: fileId,
+      first_frame_image: photoUrl,
       duration: duration <= 6 ? 6 : 10,
-      resolution: '1080P',
-      audio_setting: 'none'
+      resolution: '1080P'
     })
   });
 
@@ -2979,6 +2944,7 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
   }
 
   const { task_id } = await createRes.json();
+  if (!task_id) throw new Error('Hailuo: no task_id returned from video_generation');
 
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
@@ -3000,24 +2966,38 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
   throw new Error('Hailuo: timeout waiting for video');
 }
 
-// Kie.ai API
+// ---- Kie.ai API ----
+//
+// FIX: the previous implementation POSTed to /v1/image-to-video, which
+// doesn't exist on Kie's API and returned a 404. Kie.ai actually exposes a
+// single unified job endpoint for every model in its marketplace:
+//   POST https://api.kie.ai/api/v1/jobs/createTask
+//   { "model": "<provider>/image-to-video", "input": { ... } }
+// and a matching unified status endpoint:
+//   GET https://api.kie.ai/api/v1/jobs/recordInfo?taskId=<id>
+// (see https://docs.kie.ai/market/kling/image-to-video and
+// https://docs.kie.ai/market/common/get-task-detail). We now call that
+// endpoint using Kling 2.6 as the underlying model — configurable via
+// KIE_MODEL if a different marketplace model is preferred.
 async function generateKieVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.KIE_API_KEY;
   if (!apiKey) throw new Error('Kie: KIE_API_KEY not configured');
 
-  // Kie.ai uses a different endpoint structure
-  const response = await fetch('https://api.kie.ai/v1/image-to-video', {
+  const model = process.env.KIE_MODEL || 'kling-2.6/image-to-video';
+
+  const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json'
     },
     body: JSON.stringify({
-      image: photoUrl,
-      prompt: prompt || 'Create a cinematic scene',
-      duration: Math.min(duration, 10),
-      resolution: '720p',
-      style: 'cinematic'
+      model,
+      input: {
+        prompt: prompt || 'Create a cinematic scene',
+        image_urls: [photoUrl],
+        duration: Math.min(duration, 10)
+      }
     })
   });
 
@@ -3027,26 +3007,26 @@ async function generateKieVideo(photoUrl, prompt, duration) {
   }
 
   const data = await response.json();
-
-  // Some APIs return video URL directly
-  if (data.video_url) return data.video_url;
-
-  const taskId = data.task_id || data.id;
+  const taskId = data.data?.taskId || data.taskId || data.data?.task_id;
   if (!taskId) {
-    throw new Error('Kie: No task ID or video URL in response');
+    throw new Error(`Kie: no taskId in createTask response - ${JSON.stringify(data).substring(0, 300)}`);
   }
 
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 3000));
-    const pollRes = await fetch(`https://api.kie.ai/v1/task/${taskId}`, {
+    const pollRes = await fetch(`https://api.kie.ai/api/v1/jobs/recordInfo?taskId=${taskId}`, {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     const poll = await pollRes.json();
-    if (poll.status === 'completed' || poll.status === 'succeeded') {
-      return poll.video_url || poll.result?.video_url;
+    const state = poll.data?.state || poll.data?.status;
+    if (state === 'success' || state === 'completed' || state === 'succeeded') {
+      const resultJson = poll.data?.resultJson ? JSON.parse(poll.data.resultJson) : poll.data;
+      const url = resultJson?.resultUrls?.[0] || resultJson?.video_url || poll.data?.video_url;
+      if (!url) throw new Error('Kie: task succeeded but no video URL in response');
+      return url;
     }
-    if (poll.status === 'failed') {
-      throw new Error(`Kie generation failed: ${poll.error || 'Unknown error'}`);
+    if (state === 'fail' || state === 'failed') {
+      throw new Error(`Kie generation failed: ${poll.data?.failMsg || poll.data?.error || 'Unknown error'}`);
     }
   }
   throw new Error('Kie: Timeout waiting for video');
@@ -3095,7 +3075,13 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
   // Create image-to-video project
   const endSeconds = Math.min(Math.max(duration, 5), 60);
 
-  const magicHourResolution = process.env.MAGIC_HOUR_RESOLUTION || '720p';
+  // FIX: the account hitting this API is on a tier where 1080p/720p are
+  // rejected with "422 Resolution 720p not available for your subscription
+  // tier". Per Magic Hour's docs, 480p and 720p require at least the
+  // Creator tier, and 1080p requires Pro/Business — so 480p is the safest
+  // default that works across every paid tier. Override with
+  // MAGIC_HOUR_RESOLUTION once you've confirmed which tier the account is on.
+  const magicHourResolution = process.env.MAGIC_HOUR_RESOLUTION || '480p';
 
   const createRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
     method: 'POST',
@@ -3231,6 +3217,14 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
 // ============================================
 // SCENE PROVIDER ORDER (with cost estimates)
 // ============================================
+// NOTE: BytePlus is intentionally NOT in this list. BytePlus's content
+// filter (InputImageSensitiveContentDetected.PrivacyInformation) rejects
+// real person photos outright, which is exactly the input this waterfall
+// receives most often for photo-to-video. That's a policy rejection, not
+// something a retry or code fix can work around, so BytePlus is removed
+// from the photo-to-video path entirely. It's left in place for
+// text-to-video (/api/generate-video) and video translation, which don't
+// send a source photo and so never hit that filter.
 const SCENE_PROVIDERS = [
   { name: 'kling', fn: generateKlingVideo, enabled: () => {
       const { accessKey, secretKey } = getKlingCredentials();
@@ -3599,7 +3593,9 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    // Try scene generation providers first
+    // Try scene generation providers first (Kling → Hailuo → Kie → Magic Hour → Runway → Veo)
+    // NOTE: BytePlus is deliberately NOT part of the photo-to-video waterfall.
+    // See the comment above SCENE_PROVIDERS for why.
     try {
       const sceneResult = await generateSceneVideo(
         photoUrls[0],
@@ -3616,86 +3612,11 @@ app.post('/api/generate-photo-video', async (req, res) => {
       generationErrors.push(`Scene providers: ${error.message}`);
     }
 
-    // If scene providers failed, try BytePlus
-    if (!videoUrl) {
-      try {
-        const token = process.env.MODELARK_API_KEY;
-        if (token) {
-          const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-          const modelIds = getModelArkModelIds();
-
-          for (const modelId of modelIds) {
-            try {
-              console.log(`🔄 Trying BytePlus model: ${modelId}`);
-
-              // Build content with image and prompt
-              const content = [
-                { type: 'text', text: prompt || 'Create a video from this image' }
-              ];
-
-              // Add each photo URL
-              for (const url of photoUrls) {
-                content.push({
-                  type: 'image_url',
-                  image_url: { url }
-                });
-              }
-
-              const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
-                method: 'POST',
-                headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': `Bearer ${token}`
-                },
-                body: JSON.stringify({
-                  model: modelId,
-                  content,
-                  parameters: {
-                    duration: videoDuration,
-                    resolution: '720p',
-                    ratio: aspectRatio || '16:9',
-                    fps: 24,
-                    output_sound: 'close',
-                    watermark: false
-                  }
-                })
-              });
-
-              if (!createResponse.ok) {
-                const bodyText = await createResponse.text().catch(() => '');
-                console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
-                generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
-                continue;
-              }
-
-              const taskData = await createResponse.json();
-              console.log(`✅ BytePlus task created:`, taskData.id);
-
-              const result = await pollDreaminaTask(taskData.id, token, endpoint);
-              videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
-
-              if (videoUrl) {
-                usedModel = modelId;
-                provider = 'byteplus';
-                cost = 0.15 * durationMultiplier;
-                console.log(`✅ BytePlus video generated with ${modelId}!`);
-                break;
-              }
-            } catch (err) {
-              console.warn(`❌ BytePlus ${modelId} error:`, err.message);
-              generationErrors.push(`BytePlus ${modelId}: ${err.message}`);
-            }
-          }
-        } else {
-          generationErrors.push('BytePlus: MODELARK_API_KEY not set');
-        }
-      } catch (error) {
-        console.warn('❌ BytePlus error:', error.message);
-        generationErrors.push(`BytePlus: ${error.message}`);
-      }
-    }
-
-    // If still no video, try using Replicate as final fallback
+    // If scene providers failed, try using Replicate as final fallback.
+    // FIX: Replicate's stable-video-diffusion schema expects video_length
+    // as a STRING, not a number. The API was rejecting every request with
+    // "input.video_length: Invalid type. Expected: string, given: integer"
+    // before it ever got to actually generating anything.
     if (!videoUrl) {
       try {
         const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
@@ -3714,7 +3635,8 @@ app.post('/api/generate-photo-video', async (req, res) => {
               version: "lucataco/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
               input: {
                 input_image: photoUrls[0],
-                video_length: videoDuration === 5 ? 25 : videoDuration === 10 ? 50 : 75,
+                // FIX: was a number before — this model's schema requires a string.
+                video_length: String(videoDuration === 5 ? 25 : videoDuration === 10 ? 50 : 75),
                 s_conditioning_mode: "both",
                 s_churn: 0.5,
                 s_tmax: 0.1,
@@ -3924,7 +3846,9 @@ app.get('/api/debug-scene-providers', (req, res) => {
     klingAccessKeyConfigured: !!accessKey,
     klingSecretKeyConfigured: !!secretKey,
     klingHosts: getKlingHosts(),
-    hailuoUploadPurposesTried: HAILUO_UPLOAD_PURPOSES
+    kieModel: process.env.KIE_MODEL || 'kling-2.6/image-to-video',
+    magicHourResolution: process.env.MAGIC_HOUR_RESOLUTION || '480p (default)',
+    bytePlusInPhotoToVideo: false
   });
 });
 
@@ -4080,14 +4004,17 @@ app.get('/api/health', async (req, res) => {
       uptime: process.uptime(),
       byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
       byteplus_model_ids: getModelArkModelIds(),
+      byteplus_photo_to_video: '❌ disabled (policy rejections) — active on text-to-video & translation only',
       kling_access_key: klingAccessKey ? '✅ Set' : '❌ Not set',
       kling_secret_key: klingSecretKey ? '✅ Set' : '❌ Not set',
       kling_hosts: getKlingHosts(),
       hailuo_token: process.env.MINIMAX_API_KEY ? '✅ Set' : '❌ Not set',
-      hailuo_upload_purposes: HAILUO_UPLOAD_PURPOSES,
+      hailuo_upload_step: 'removed — first_frame_image sent directly as URL',
       kie_token: process.env.KIE_API_KEY ? '✅ Set' : '❌ Not set',
+      kie_endpoint: 'https://api.kie.ai/api/v1/jobs/createTask',
+      kie_model: process.env.KIE_MODEL || 'kling-2.6/image-to-video',
       magic_hour_token: process.env.MAGIC_HR_API ? '✅ Set' : '❌ Not set',
-      magic_hour_resolution: process.env.MAGIC_HOUR_RESOLUTION || '720p (default)',
+      magic_hour_resolution: process.env.MAGIC_HOUR_RESOLUTION || '480p (default)',
       runway_token: process.env.RUNWAY_API_KEY ? '✅ Set' : '❌ Not set',
       veo_token: process.env.GOOGLE_VEO_API_KEY ? '✅ Set' : '❌ Not set',
       replicate_token: (process.env.REPLICATE_API_TOKEN || '').trim() ? '✅ Set' : '❌ Not set',
@@ -4114,11 +4041,11 @@ app.get('/api/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
-    version: '2.0.2',
+    version: '2.0.3',
     status: 'running',
     features: [
       'Text-to-Video Generation (Replicate + BytePlus)',
-      'Photo-to-Video Scene Generation (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → BytePlus → Replicate)',
+      'Photo-to-Video Scene Generation (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → Replicate)',
       'Video Translation with Payment',
       'Email Delivery',
       'Payment Integration (Paystack)',
@@ -4196,7 +4123,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🎤 Groq transcription configured`);
   console.log(`🎬 FFmpeg configured for video processing`);
   console.log(`🎬 Text-to-video: Replicate HappyHorse primary, BytePlus fallback`);
-  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → BytePlus → Replicate)`);
+  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → Replicate). BytePlus intentionally excluded (policy rejections).`);
   console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected (using in-memory fallback)'}`);
   console.log(`📊 Database: ${DATABASE_NAME}`);
   console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
