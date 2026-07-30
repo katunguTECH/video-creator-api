@@ -933,6 +933,40 @@ if (process.env.GROQ_API_KEY && process.env.GROQ_API_KEY !== 'your_groq_api_key'
 }
 
 // ============================================
+// SCRIPT DERIVATION FOR AUDIO NARRATION
+// ============================================
+async function deriveScriptFromPrompt(visualPrompt, durationSeconds) {
+  if (!groq) {
+    throw new Error('Groq not configured, cannot auto-derive script');
+  }
+
+  const wordBudget = Math.floor(durationSeconds * 2.3);
+
+  const completion = await groq.chat.completions.create({
+    model: 'llama-3.3-70b-versatile',
+    messages: [
+      {
+        role: 'system',
+        content: `You write short spoken narration scripts for AI-generated videos.
+Given a visual description, write what the person in the video would plausibly be saying.
+Rules:
+- Output ONLY the spoken words, no stage directions, no quotes, no formatting.
+- Maximum ${wordBudget} words. Shorter is fine.
+- Match tone to the visual description (e.g. political rally = rousing, casual photo = natural speech).
+- First person, as if the subject is speaking.`
+      },
+      { role: 'user', content: `Visual description: "${visualPrompt}"` }
+    ],
+    max_tokens: 200,
+    temperature: 0.7
+  });
+
+  const script = completion.choices?.[0]?.message?.content?.trim();
+  if (!script) throw new Error('Groq returned no script text');
+  return script;
+}
+
+// ============================================
 // FFMPEG CONFIGURATION
 // ============================================
 
@@ -940,17 +974,45 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 console.log('✅ FFmpeg configured');
 
 // ============================================
+// ADD AUDIO NARRATION TO A SCENE-GENERATED VIDEO
+// ============================================
+async function addAudioToSceneVideo(remoteVideoUrl, script) {
+  const videoId = crypto.randomUUID();
+  const videoPath = path.join(tempDir, `${videoId}.mp4`);
+  const outputPath = path.join(tempDir, `${videoId}_with_audio.mp4`);
+
+  try {
+    console.log('📥 Downloading scene video for audio muxing...');
+    const response = await fetch(remoteVideoUrl);
+    if (!response.ok) throw new Error(`Failed to download scene video: ${response.status}`);
+    const videoBuffer = await response.arrayBuffer();
+    fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
+
+    console.log('🔊 Generating narration audio...');
+    const audioBuffer = await textToSpeech(script, 'en');
+
+    console.log('🎬 Muxing audio onto scene video...');
+    await combineAudioWithVideo(videoPath, audioBuffer, outputPath);
+
+    console.log('☁️ Uploading video-with-audio to Cloudinary...');
+    const uploadResult = await cloudinary.uploader.upload(outputPath, {
+      resource_type: 'video',
+      folder: 'video-creator-uploads',
+      public_id: `${videoId}_narrated`
+    });
+
+    [videoPath, outputPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+
+    return uploadResult.secure_url;
+  } catch (error) {
+    [videoPath, outputPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+    throw error;
+  }
+}
+
+// ============================================
 // REPLICATE TOKEN VALIDATION (STARTUP)
 // ============================================
-// FIX: previously a bad/expired REPLICATE_API_TOKEN only surfaced as a
-// 401 buried deep in a user's failed generation log. This check runs once
-// at boot and calls Replicate's account endpoint so a dead token shows up
-// immediately in the deploy logs, not on someone's first request.
-//
-// NOTE: this validation cannot repair an invalid or revoked token — that
-// requires generating a new one at https://replicate.com/account/api-tokens
-// and updating REPLICATE_API_TOKEN in Render → Environment. This just
-// makes the failure loud and early instead of silent and late.
 async function validateReplicateTokenAtStartup() {
   const rawToken = process.env.REPLICATE_API_TOKEN || '';
   const token = rawToken.trim();
@@ -1921,6 +1983,42 @@ app.post('/api/test-tts', async (req, res) => {
 });
 
 // ============================================
+// TEST AUDIO MUX DEBUG ENDPOINT
+// ============================================
+app.post('/api/test-audio-mux', async (req, res) => {
+  try {
+    const { videoUrl, script } = req.body;
+
+    if (!videoUrl || !script) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both videoUrl and script are required in request body'
+      });
+    }
+
+    console.log('🧪 Testing audio mux pipeline...');
+    console.log('📹 Input Video:', videoUrl);
+    console.log('🎙️ Script:', script);
+
+    const narratedUrl = await addAudioToSceneVideo(videoUrl, script);
+
+    res.json({
+      success: true,
+      narratedUrl: narratedUrl,
+      originalUrl: videoUrl,
+      scriptUsed: script
+    });
+  } catch (error) {
+    console.error('❌ Audio mux test error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
+    });
+  }
+});
+
+// ============================================
 // PAYMENT ENDPOINTS
 // ============================================
 
@@ -2752,34 +2850,12 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 // ============================================
 
 // ---- Kling API ----
-//
-// Kling issues an "AccessKey" + "SecretKey" pair, and you are expected to
-// sign a short-lived JWT yourself (header.payload.signature) using
-// HMAC-SHA256 with the SecretKey.
-//
-// Set these two env vars:
-//   KLING_ACCESS_KEY=<your access key>
-//   KLING_SECRET_KEY=<your secret key>
-//
-// If only KLING_API_KEY is set in the legacy "ak.sk" or "ak:sk" form,
-// we also try to split it automatically as a convenience.
-//
-// FIX: a "1002 access key not found" response with a well-formed JWT
-// usually does NOT mean the key is fake — it means the key was issued
-// against a different regional cluster than the one being called. Kling
-// runs (at least) a Singapore cluster and a global/mainland cluster with
-// separate key registries, and hitting the wrong one for a given key
-// returns exactly this error. Instead of hardcoding one host, we now try
-// every configured host in order and only fail once all of them 401.
-// Set KLING_API_HOST to pin a single host if you know which region your
-// key belongs to.
 function getKlingCredentials() {
   let accessKey = process.env.KLING_ACCESS_KEY;
   let secretKey = process.env.KLING_SECRET_KEY;
 
   if ((!accessKey || !secretKey) && process.env.KLING_API_KEY) {
     const raw = process.env.KLING_API_KEY.trim();
-    // Support "accessKey.secretKey" or "accessKey:secretKey" as a fallback
     const parts = raw.includes(':') ? raw.split(':') : raw.split('.');
     if (parts.length === 2) {
       accessKey = accessKey || parts[0];
@@ -2794,8 +2870,6 @@ function getKlingHosts() {
   if (process.env.KLING_API_HOST) {
     return [process.env.KLING_API_HOST.replace(/\/$/, '')];
   }
-  // Try both known regional clusters — order matters only for latency,
-  // not correctness, since only the host matching the key's region works.
   return [
     'https://api-singapore.klingai.com',
     'https://api.klingai.com'
@@ -2815,11 +2889,10 @@ function generateKlingToken() {
   const now = Math.floor(Date.now() / 1000);
   const payload = {
     iss: accessKey,
-    exp: now + 1800,   // token valid for 30 minutes
-    nbf: now - 5       // valid starting 5 seconds ago (clock skew buffer)
+    exp: now + 1800,
+    nbf: now - 5
   };
 
-  // jsonwebtoken produces a standard 3-part header.payload.signature JWT
   return jwt.sign(payload, secretKey, {
     algorithm: 'HS256',
     header: { alg: 'HS256', typ: 'JWT' }
@@ -2870,7 +2943,7 @@ async function tryKlingHost(host, apiKey, photoUrl, prompt, duration) {
 }
 
 async function generateKlingVideo(photoUrl, prompt, duration) {
-  const apiKey = generateKlingToken(); // freshly signed JWT, always 3 parts
+  const apiKey = generateKlingToken();
   const hosts = getKlingHosts();
   const errors = [];
 
@@ -2883,10 +2956,6 @@ async function generateKlingVideo(photoUrl, prompt, duration) {
     } catch (error) {
       console.warn(`❌ Kling (${host}) failed:`, error.message);
       errors.push(error.message);
-      // Only worth trying the next regional host on an access-key-not-found
-      // style auth failure. Other errors (timeouts, generation failures)
-      // won't be fixed by switching host, but we try anyway since it's cheap
-      // relative to failing the whole waterfall.
       continue;
     }
   }
@@ -2895,34 +2964,12 @@ async function generateKlingVideo(photoUrl, prompt, duration) {
 }
 
 // ---- Hailuo API (MiniMax) ----
-//
-// FIX: the previous implementation called POST /v1/files/upload with
-// purpose "video_generation" or "image_to_video" before generation. Neither
-// value is valid — MiniMax's file-upload purpose enum is narrower than the
-// video feature names suggest. Per MiniMax's current docs
-// (https://platform.minimax.io/docs/api-reference/file-management-upload)
-// the ONLY accepted purpose values are:
-//   voice_clone, prompt_audio, t2a_async_input, video_understanding
-// None of those apply to image-to-video input images, which is why every
-// upload attempt returned "invalid params, invalid file purpose" no matter
-// which of the two guessed values was tried.
-//
-// The actual video-generation API
-// (https://platform.minimax.io/docs/api-reference/video-generation-fl2v ,
-// and the equivalent i2v endpoint) does NOT require a separate upload step
-// at all — first_frame_image accepts either a public image URL directly,
-// or a Base64 Data URL (data:image/jpeg;base64,...). So the fix is to drop
-// the upload call entirely and pass the source photo straight through.
 async function generateHailuoVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) throw new Error('Hailuo: MINIMAX_API_KEY not configured');
 
   const host = process.env.MINIMAX_API_HOST || 'https://api.minimax.io';
 
-  // No upload step: MiniMax's video_generation endpoint accepts a public
-  // image URL directly as first_frame_image. Cloudinary URLs (what this
-  // app always passes in) are public, so this "just works" without ever
-  // touching /v1/files/upload.
   const createRes = await fetch(`${host}/v1/video_generation`, {
     method: 'POST',
     headers: {
@@ -2967,18 +3014,6 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
 }
 
 // ---- Kie.ai API ----
-//
-// FIX: the previous implementation POSTed to /v1/image-to-video, which
-// doesn't exist on Kie's API and returned a 404. Kie.ai actually exposes a
-// single unified job endpoint for every model in its marketplace:
-//   POST https://api.kie.ai/api/v1/jobs/createTask
-//   { "model": "<provider>/image-to-video", "input": { ... } }
-// and a matching unified status endpoint:
-//   GET https://api.kie.ai/api/v1/jobs/recordInfo?taskId=<id>
-// (see https://docs.kie.ai/market/kling/image-to-video and
-// https://docs.kie.ai/market/common/get-task-detail). We now call that
-// endpoint using Kling 2.6 as the underlying model — configurable via
-// KIE_MODEL if a different marketplace model is preferred.
 async function generateKieVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.KIE_API_KEY;
   if (!apiKey) throw new Error('Kie: KIE_API_KEY not configured');
@@ -3042,7 +3077,6 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
     'Content-Type': 'application/json'
   };
 
-  // Get upload URL
   const cleanExt = (photoUrl.split('?')[0].split('.').pop() || 'jpg').toLowerCase();
   const validExtensions = ['png', 'jpg', 'jpeg', 'heic', 'heif', 'webp', 'avif', 'jp2', 'tiff', 'bmp'];
   const extension = validExtensions.includes(cleanExt) ? cleanExt : 'jpg';
@@ -3061,7 +3095,6 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
   const { items } = await uploadUrlRes.json();
   const { upload_url: uploadUrl, file_path: filePath } = items[0];
 
-  // Upload image
   const imgRes = await fetch(photoUrl);
   if (!imgRes.ok) throw new Error(`Magic Hour: failed to fetch source photo (HTTP ${imgRes.status})`);
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
@@ -3072,15 +3105,7 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
     throw new Error(`Magic Hour: HTTP ${putRes.status} - ${errorText.substring(0, 300)}`);
   }
 
-  // Create image-to-video project
   const endSeconds = Math.min(Math.max(duration, 5), 60);
-
-  // FIX: the account hitting this API is on a tier where 1080p/720p are
-  // rejected with "422 Resolution 720p not available for your subscription
-  // tier". Per Magic Hour's docs, 480p and 720p require at least the
-  // Creator tier, and 1080p requires Pro/Business — so 480p is the safest
-  // default that works across every paid tier. Override with
-  // MAGIC_HOUR_RESOLUTION once you've confirmed which tier the account is on.
   const magicHourResolution = process.env.MAGIC_HOUR_RESOLUTION || '480p';
 
   const createRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
@@ -3104,7 +3129,6 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
   const projectId = created.id;
   if (!projectId) throw new Error('Magic Hour: no project id returned');
 
-  // Poll for completion
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
     const pollRes = await fetch(`https://api.magichour.ai/v1/video-projects/${projectId}`, { headers });
@@ -3215,16 +3239,8 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
 }
 
 // ============================================
-// SCENE PROVIDER ORDER (with cost estimates)
+// SCENE PROVIDER ORDER
 // ============================================
-// NOTE: BytePlus is intentionally NOT in this list. BytePlus's content
-// filter (InputImageSensitiveContentDetected.PrivacyInformation) rejects
-// real person photos outright, which is exactly the input this waterfall
-// receives most often for photo-to-video. That's a policy rejection, not
-// something a retry or code fix can work around, so BytePlus is removed
-// from the photo-to-video path entirely. It's left in place for
-// text-to-video (/api/generate-video) and video translation, which don't
-// send a source photo and so never hit that filter.
 const SCENE_PROVIDERS = [
   { name: 'kling', fn: generateKlingVideo, enabled: () => {
       const { accessKey, secretKey } = getKlingCredentials();
@@ -3243,7 +3259,6 @@ const SCENE_PROVIDERS = [
 async function generateSceneVideo(photoUrl, prompt, duration) {
   const errors = [];
 
-  // Try each provider in order
   for (const providerDef of SCENE_PROVIDERS) {
     if (!providerDef.enabled()) {
       errors.push(`${providerDef.name}: not configured`);
@@ -3371,8 +3386,7 @@ app.post('/api/generate-video', async (req, res) => {
         } else {
           const bodyText = await response.text().catch(() => '');
           if (response.status === 401) {
-            console.error('❌ Replicate 401 Unauthorized — REPLICATE_API_TOKEN is invalid/expired. ' +
-              'Regenerate it at https://replicate.com/account/api-tokens and update it in Render → Environment.');
+            console.error('❌ Replicate 401 Unauthorized — REPLICATE_API_TOKEN is invalid/expired.');
           }
           console.warn(`⚠️ Replicate request failed: ${response.status} ${bodyText.substring(0, 500)}`);
           generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
@@ -3539,11 +3553,11 @@ app.post('/api/generate-video', async (req, res) => {
 });
 
 // ============================================
-// PHOTO TO VIDEO GENERATION - FIXED
+// PHOTO TO VIDEO GENERATION - WITH AUDIO NARRATION
 // ============================================
 app.post('/api/generate-photo-video', async (req, res) => {
   try {
-    const { photoUrls, prompt, duration, aspectRatio, paymentReference, email } = req.body;
+    const { photoUrls, prompt, duration, aspectRatio, paymentReference, email, audioScript } = req.body;
     const videoDuration = duration || 5;
 
     console.log('🖼️ Generating photo-to-video...');
@@ -3593,9 +3607,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    // Try scene generation providers first (Kling → Hailuo → Kie → Magic Hour → Runway → Veo)
-    // NOTE: BytePlus is deliberately NOT part of the photo-to-video waterfall.
-    // See the comment above SCENE_PROVIDERS for why.
+    // Try scene generation providers
     try {
       const sceneResult = await generateSceneVideo(
         photoUrls[0],
@@ -3612,19 +3624,12 @@ app.post('/api/generate-photo-video', async (req, res) => {
       generationErrors.push(`Scene providers: ${error.message}`);
     }
 
-    // If scene providers failed, try using Replicate as final fallback.
-    // FIX: Replicate's stable-video-diffusion schema expects video_length
-    // as a STRING, not a number. The API was rejecting every request with
-    // "input.video_length: Invalid type. Expected: string, given: integer"
-    // before it ever got to actually generating anything.
+    // Replicate Fallback
     if (!videoUrl) {
       try {
         const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
         if (replicateToken) {
           console.log('🔄 Trying Replicate as final fallback...');
-          console.log(`🔑 Replicate token present (length: ${replicateToken.length}, prefix: ${replicateToken.substring(0, 3)}...)`);
-
-          // Use photo as first frame for video generation
           const response = await fetch('https://api.replicate.com/v1/predictions', {
             method: 'POST',
             headers: {
@@ -3635,7 +3640,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
               version: "lucataco/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
               input: {
                 input_image: photoUrls[0],
-                // FIX: was a number before — this model's schema requires a string.
                 video_length: String(videoDuration === 5 ? 25 : videoDuration === 10 ? 50 : 75),
                 s_conditioning_mode: "both",
                 s_churn: 0.5,
@@ -3653,8 +3657,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
 
           if (response.ok) {
             const data = await response.json();
-            console.log('✅ Replicate prediction created:', data.id);
-
             let prediction = data;
             let attempts = 0;
             while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < 60) {
@@ -3664,7 +3666,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
               });
               prediction = await pollResponse.json();
               attempts++;
-              console.log(`⏳ Replicate poll ${attempts}: ${prediction.status}`);
             }
 
             if (prediction.status === 'succeeded') {
@@ -3672,16 +3673,11 @@ app.post('/api/generate-photo-video', async (req, res) => {
               usedModel = 'Stable Video Diffusion';
               provider = 'replicate';
               cost = 0.20 * durationMultiplier;
-              console.log('✅ Replicate video generated successfully!');
             } else {
-              generationErrors.push(`Replicate: prediction ended with status "${prediction.status}"`);
+              generationErrors.push(`Replicate: status "${prediction.status}"`);
             }
           } else {
             const bodyText = await response.text().catch(() => '');
-            if (response.status === 401) {
-              console.error('❌ Replicate 401 Unauthorized — REPLICATE_API_TOKEN is invalid/expired. ' +
-                'Regenerate it at https://replicate.com/account/api-tokens and update it in Render → Environment.');
-            }
             generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
           }
         } else {
@@ -3690,6 +3686,34 @@ app.post('/api/generate-photo-video', async (req, res) => {
       } catch (error) {
         console.warn('❌ Replicate final fallback error:', error.message);
         generationErrors.push(`Replicate fallback: ${error.message}`);
+      }
+    }
+
+    // ============================================
+    // ADD AUDIO NARRATION (if we have a real video)
+    // ============================================
+    if (videoUrl) {
+      let finalScript = audioScript && audioScript.trim().length > 0
+        ? audioScript.trim()
+        : null;
+
+      if (!finalScript) {
+        try {
+          finalScript = await deriveScriptFromPrompt(prompt, videoDuration);
+          console.log(`📝 Auto-derived script: "${finalScript}"`);
+        } catch (err) {
+          console.warn('⚠️ Script derivation failed, sending silent video:', err.message);
+        }
+      }
+
+      if (finalScript) {
+        try {
+          const narratedUrl = await addAudioToSceneVideo(videoUrl, finalScript);
+          videoUrl = narratedUrl;
+          console.log('🔊 Audio narration added successfully');
+        } catch (err) {
+          console.warn('⚠️ Audio muxing failed, sending silent video:', err.message);
+        }
       }
     }
 
@@ -3770,6 +3794,42 @@ app.post('/api/generate-photo-video', async (req, res) => {
       isFallback: true,
       canRetry: true,
       note: 'Photo-to-video generation failed. You can retry for free.'
+    });
+  }
+});
+
+// ============================================
+// TEST AUDIO MUX DEBUG ENDPOINT
+// ============================================
+app.post('/api/test-audio-mux', async (req, res) => {
+  try {
+    const { videoUrl, script } = req.body;
+
+    if (!videoUrl || !script) {
+      return res.status(400).json({
+        success: false,
+        error: 'Both videoUrl and script are required in request body'
+      });
+    }
+
+    console.log('🧪 Testing audio mux pipeline...');
+    console.log('📹 Input Video:', videoUrl);
+    console.log('🎙️ Script:', script);
+
+    const narratedUrl = await addAudioToSceneVideo(videoUrl, script);
+
+    res.json({
+      success: true,
+      narratedUrl: narratedUrl,
+      originalUrl: videoUrl,
+      scriptUsed: script
+    });
+  } catch (error) {
+    console.error('❌ Audio mux test error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      stack: error.stack
     });
   }
 });
@@ -3978,6 +4038,7 @@ app.get('/api/test', (req, res) => {
       '/api/test-google-cloud',
       '/api/translate-video-free',
       '/api/test-tts',
+      '/api/test-audio-mux',
       '/api/debug-failed',
       '/api/debug-modelark-ids',
       '/api/debug-scene-providers'
@@ -4049,6 +4110,7 @@ app.get('/', (req, res) => {
     features: [
       'Text-to-Video Generation (Replicate + BytePlus)',
       'Photo-to-Video Scene Generation (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → Replicate)',
+      'Audio Narration Muxing (Google Cloud TTS + Groq auto-derivation)',
       'Video Translation with Payment',
       'Email Delivery',
       'Payment Integration (Paystack)',
@@ -4066,6 +4128,7 @@ app.get('/', (req, res) => {
       { path: '/api/test', method: 'GET' },
       { path: '/api/health', method: 'GET' },
       { path: '/api/generate-video', method: 'POST' },
+      { path: '/api/generate-photo-video', method: 'POST' },
       { path: '/api/calculate-price', method: 'POST' },
       { path: '/api/verify-payment', method: 'POST' },
       { path: '/api/initialize-payment', method: 'POST' },
@@ -4084,6 +4147,7 @@ app.get('/', (req, res) => {
       { path: '/api/test-google-cloud', method: 'GET' },
       { path: '/api/translate-video-free', method: 'POST' },
       { path: '/api/test-tts', method: 'POST' },
+      { path: '/api/test-audio-mux', method: 'POST' },
       { path: '/api/debug-modelark-ids', method: 'GET' },
       { path: '/api/debug-scene-providers', method: 'GET' }
     ],

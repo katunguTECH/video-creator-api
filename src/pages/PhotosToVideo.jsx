@@ -65,6 +65,7 @@ function PhotosToVideo() {
   const [email, setEmail] = useState('katungu1@gmail.com');
   const [photos, setPhotos] = useState([]);
   const [prompt, setPrompt] = useState('');
+  const [audioScript, setAudioScript] = useState('');
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [loading, setLoading] = useState(false);
@@ -205,11 +206,6 @@ function PhotosToVideo() {
     setPhotos(photos.filter(p => p.id !== id));
   };
 
-  // ✅ FIX: The version of inline.js loaded here (https://js.paystack.co/v1/inline.js)
-  // exposes the classic PaystackPop.setup(...) API, not a `new PaystackPop()`
-  // constructor. Calling `new window.PaystackPop()` throws
-  // "PaystackPop is not a constructor" for every user, which is exactly the
-  // error in your console log.
   const openPaystackPopup = (paymentData) => {
     if (typeof window.PaystackPop === 'undefined') {
       console.error('❌ Paystack not ready, waiting...');
@@ -258,17 +254,11 @@ function PhotosToVideo() {
     }
   };
 
-  // ✅ UPDATED: Handle video URL display and forced-download link.
-  // Guards against placeholder/data: URIs — those never get a download
-  // link built for them since browsers block top-frame navigation to
-  // data: URIs anyway (the "Not allowed to navigate top frame to data
-  // URL" error from your console).
   const displayVideo = (url) => {
     console.log('🎬 Displaying video URL:', url);
     setVideoUrl(url);
 
     if (isPlaceholderVideo(url)) {
-      // Nothing real to download — don't create a broken download link.
       return;
     }
 
@@ -404,13 +394,6 @@ function PhotosToVideo() {
     }
   };
 
-  // ✅ UPDATED: Process video, rely on the backend's `emailSent` status,
-  // retry the email send once if the server-side attempt failed, and —
-  // critically — check `data.isFallback` BEFORE treating the response as
-  // a real generated video. Previously the code called displayVideo() on
-  // whatever videoUrl came back, even when the backend was returning its
-  // base64 placeholder image after every BytePlus model failed. That's
-  // why the "video" wasn't downloadable: it was never a video.
   const processPhotoVideo = async (reference) => {
     try {
       setSuccess('🔄 Processing your video... This may take a few moments.');
@@ -447,7 +430,7 @@ function PhotosToVideo() {
 
       console.log('✅ All photos uploaded:', photoUrls);
 
-      // ✅ Generate video
+      // ✅ Generate video with audio script support
       const generateResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-photo-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -457,7 +440,8 @@ function PhotosToVideo() {
           duration: duration,
           aspectRatio: aspectRatio,
           paymentReference: reference,
-          email: email
+          email: email,
+          audioScript: audioScript.trim() || null
         })
       });
 
@@ -472,12 +456,6 @@ function PhotosToVideo() {
 
       if (data.success && data.videoUrl) {
 
-        // ✅ FIX: The backend returns success:true even when generation
-        // failed and it's sending back a fallback placeholder image
-        // (data.isFallback === true / videoUrl starting with "data:").
-        // Detect that case FIRST and show a clear "generation failed,
-        // use your free redo" message instead of a broken video preview
-        // and a download button that can never work.
         if (data.isFallback || isPlaceholderVideo(data.videoUrl)) {
           console.warn('⚠️ Backend returned a fallback placeholder, not a real video.', data.debugErrors);
           setVideoUrl(null);
@@ -488,7 +466,6 @@ function PhotosToVideo() {
           );
           setSuccess('');
 
-          // Still try to generate a redo coupon so the user has a free retry path
           if (reference && !reference.startsWith('TEST-') && !reference.startsWith('REDO-')) {
             try {
               const couponResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-redo-coupon`, {
@@ -515,12 +492,8 @@ function PhotosToVideo() {
           return;
         }
 
-        // ✅ Display the real video on the page (with forced-download link)
         displayVideo(data.videoUrl);
 
-        // ✅ Trust the backend's emailSent flag. Only retry from the
-        // frontend if the server-side send actually failed — avoids
-        // double-sending the same email to every user.
         let emailOk = data.emailSent === true;
         let emailErrorDetail = data.emailError || null;
 
@@ -558,7 +531,6 @@ function PhotosToVideo() {
           setSuccess('✅ Video generated! Download it below. (Email could not be sent — please use the download button.)');
         }
 
-        // ✅ Generate redo coupon
         if (reference && !reference.startsWith('TEST-') && !reference.startsWith('REDO-')) {
           try {
             const couponResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-redo-coupon`, {
@@ -720,6 +692,26 @@ function PhotosToVideo() {
                 rows={4}
                 disabled={loading || redoLoading}
               />
+            </div>
+
+            {/* Speech / Narration Box */}
+            <div className="setting-group">
+              <label>
+                🎙️ Speech / narration text
+                <span style={{ fontWeight: 400, color: '#888', fontSize: '12px', marginLeft: '6px' }}>
+                  (optional — leave blank for auto-generated speech)
+                </span>
+              </label>
+              <textarea
+                value={audioScript}
+                onChange={(e) => setAudioScript(e.target.value)}
+                placeholder="Type the words you want spoken, e.g. 'Fellow Kenyans, the time for change is now...'"
+                rows={3}
+                disabled={loading || redoLoading}
+              />
+              <small style={{ color: '#888', fontSize: '12px' }}>
+                Roughly {Math.floor(duration * 2.3)} words fits a {duration}s video — {audioScript.trim().split(/\s+/).filter(Boolean).length} words so far
+              </small>
             </div>
 
             <div className="setting-group">
