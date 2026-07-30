@@ -2803,17 +2803,28 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
 
   const host = process.env.MINIMAX_API_HOST || 'https://api.minimax.io';
 
-  // First, upload the image
+  // FIX: MiniMax's /v1/files/upload endpoint requires an actual
+  // multipart/form-data request with the image bytes attached — it
+  // rejects a JSON body with a URL reference ("invalid params, request
+  // has no multipart/form-data Content-Type"). Download the photo first,
+  // then upload it as real form-data.
+  const imgRes = await fetch(photoUrl);
+  if (!imgRes.ok) throw new Error(`Hailuo: failed to fetch source photo (HTTP ${imgRes.status})`);
+  const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
+  const imgBlob = new Blob([imgBuffer]);
+
+  const form = new FormData();
+  form.append('purpose', 'image_to_video');
+  form.append('file', imgBlob, 'photo.jpg');
+
   const uploadRes = await fetch(`${host}/v1/files/upload`, {
     method: 'POST',
     headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json'
+      'Authorization': `Bearer ${apiKey}`
+      // Do NOT set Content-Type manually — fetch needs to generate the
+      // multipart boundary itself when given a FormData body.
     },
-    body: JSON.stringify({
-      purpose: 'image_to_video',
-      file: photoUrl
-    })
+    body: form
   });
 
   if (!uploadRes.ok) {
