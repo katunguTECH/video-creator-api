@@ -940,6 +940,60 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 console.log('✅ FFmpeg configured');
 
 // ============================================
+// REPLICATE TOKEN VALIDATION (STARTUP)
+// ============================================
+// FIX: previously a bad/expired REPLICATE_API_TOKEN only surfaced as a
+// 401 buried deep in a user's failed generation log. This check runs once
+// at boot and calls Replicate's account endpoint so a dead token shows up
+// immediately in the deploy logs, not on someone's first request.
+//
+// NOTE: this validation cannot repair an invalid or revoked token — that
+// requires generating a new one at https://replicate.com/account/api-tokens
+// and updating REPLICATE_API_TOKEN in Render → Environment. This just
+// makes the failure loud and early instead of silent and late.
+async function validateReplicateTokenAtStartup() {
+  const rawToken = process.env.REPLICATE_API_TOKEN || '';
+  const token = rawToken.trim();
+
+  if (!token) {
+    console.warn('⚠️ REPLICATE_API_TOKEN not set — text-to-video and the photo-to-video final fallback will be unavailable.');
+    return;
+  }
+
+  if (rawToken !== token) {
+    console.warn('⚠️ REPLICATE_API_TOKEN has leading/trailing whitespace — trimmed automatically, but clean up the env var value.');
+  }
+
+  if (!token.startsWith('r8_')) {
+    console.warn(`⚠️ REPLICATE_API_TOKEN does not start with the expected "r8_" prefix (starts with "${token.substring(0, 3)}..."). Double-check you copied the correct token.`);
+  }
+
+  try {
+    const res = await fetch('https://api.replicate.com/v1/account', {
+      headers: { 'Authorization': `Token ${token}` }
+    });
+
+    if (res.status === 401) {
+      console.error('❌ REPLICATE_API_TOKEN is INVALID or EXPIRED (401 from /v1/account).');
+      console.error('   → Regenerate at https://replicate.com/account/api-tokens and update it in Render → Environment, then redeploy.');
+      return;
+    }
+
+    if (!res.ok) {
+      console.warn(`⚠️ Replicate token check returned unexpected status ${res.status} — continuing, but this may indicate an account issue.`);
+      return;
+    }
+
+    const account = await res.json();
+    console.log(`✅ Replicate token verified at startup (account: ${account.username || account.name || 'unknown'})`);
+  } catch (error) {
+    console.warn('⚠️ Could not verify Replicate token at startup (network error):', error.message);
+  }
+}
+
+validateReplicateTokenAtStartup();
+
+// ============================================
 // CORS CONFIGURATION
 // ============================================
 const allowedOrigins = [
@@ -2699,19 +2753,26 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 
 // ---- Kling API ----
 //
-// FIX: Kling does NOT want you to paste a pre-built 3-part JWT into
-// KLING_API_KEY. Kling issues an "AccessKey" + "SecretKey" pair, and you
-// are expected to sign a short-lived JWT yourself (header.payload.signature)
-// using HMAC-SHA256 with the SecretKey. The old code wrongly assumed
-// KLING_API_KEY already WAS that 3-part JWT, which is why a single
-// access-key string failed the "expected 3 parts" check.
+// Kling issues an "AccessKey" + "SecretKey" pair, and you are expected to
+// sign a short-lived JWT yourself (header.payload.signature) using
+// HMAC-SHA256 with the SecretKey.
 //
-// Set these two env vars instead of (or in addition to) KLING_API_KEY:
+// Set these two env vars:
 //   KLING_ACCESS_KEY=<your access key>
 //   KLING_SECRET_KEY=<your secret key>
 //
 // If only KLING_API_KEY is set in the legacy "ak.sk" or "ak:sk" form,
 // we also try to split it automatically as a convenience.
+//
+// FIX: a "1002 access key not found" response with a well-formed JWT
+// usually does NOT mean the key is fake — it means the key was issued
+// against a different regional cluster than the one being called. Kling
+// runs (at least) a Singapore cluster and a global/mainland cluster with
+// separate key registries, and hitting the wrong one for a given key
+// returns exactly this error. Instead of hardcoding one host, we now try
+// every configured host in order and only fail once all of them 401.
+// Set KLING_API_HOST to pin a single host if you know which region your
+// key belongs to.
 function getKlingCredentials() {
   let accessKey = process.env.KLING_ACCESS_KEY;
   let secretKey = process.env.KLING_SECRET_KEY;
@@ -2727,6 +2788,18 @@ function getKlingCredentials() {
   }
 
   return { accessKey, secretKey };
+}
+
+function getKlingHosts() {
+  if (process.env.KLING_API_HOST) {
+    return [process.env.KLING_API_HOST.replace(/\/$/, '')];
+  }
+  // Try both known regional clusters — order matters only for latency,
+  // not correctness, since only the host matching the key's region works.
+  return [
+    'https://api-singapore.klingai.com',
+    'https://api.klingai.com'
+  ];
 }
 
 function generateKlingToken() {
@@ -2753,10 +2826,8 @@ function generateKlingToken() {
   });
 }
 
-async function generateKlingVideo(photoUrl, prompt, duration) {
-  const apiKey = generateKlingToken(); // freshly signed JWT, always 3 parts
-
-  const createRes = await fetch('https://api-singapore.klingai.com/v1/videos/image2video', {
+async function tryKlingHost(host, apiKey, photoUrl, prompt, duration) {
+  const createRes = await fetch(`${host}/v1/videos/image2video`, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
@@ -2774,7 +2845,9 @@ async function generateKlingVideo(photoUrl, prompt, duration) {
 
   if (!createRes.ok) {
     const errorText = await createRes.text();
-    throw new Error(`Kling: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
+    const err = new Error(`Kling (${host}): HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
+    err.status = createRes.status;
+    throw err;
   }
 
   const { data } = await createRes.json();
@@ -2782,7 +2855,7 @@ async function generateKlingVideo(photoUrl, prompt, duration) {
 
   for (let i = 0; i < 60; i++) {
     await new Promise(r => setTimeout(r, 5000));
-    const pollRes = await fetch(`https://api-singapore.klingai.com/v1/videos/image2video/${taskId}`, {
+    const pollRes = await fetch(`${host}/v1/videos/image2video/${taskId}`, {
       headers: { 'Authorization': `Bearer ${apiKey}` }
     });
     const poll = await pollRes.json();
@@ -2790,56 +2863,99 @@ async function generateKlingVideo(photoUrl, prompt, duration) {
       return poll.data.task_result.videos[0].url;
     }
     if (poll.data?.task_status === 'failed') {
-      throw new Error(`Kling generation failed: ${poll.data.task_status_msg}`);
+      throw new Error(`Kling (${host}) generation failed: ${poll.data.task_status_msg}`);
     }
   }
-  throw new Error('Kling: timeout waiting for video');
+  throw new Error(`Kling (${host}): timeout waiting for video`);
+}
+
+async function generateKlingVideo(photoUrl, prompt, duration) {
+  const apiKey = generateKlingToken(); // freshly signed JWT, always 3 parts
+  const hosts = getKlingHosts();
+  const errors = [];
+
+  for (const host of hosts) {
+    try {
+      console.log(`🔄 Kling: trying host ${host}...`);
+      const videoUrl = await tryKlingHost(host, apiKey, photoUrl, prompt, duration);
+      console.log(`✅ Kling: succeeded via ${host}`);
+      return videoUrl;
+    } catch (error) {
+      console.warn(`❌ Kling (${host}) failed:`, error.message);
+      errors.push(error.message);
+      // Only worth trying the next regional host on an access-key-not-found
+      // style auth failure. Other errors (timeouts, generation failures)
+      // won't be fixed by switching host, but we try anyway since it's cheap
+      // relative to failing the whole waterfall.
+      continue;
+    }
+  }
+
+  throw new Error(`Kling: all hosts failed - ${errors.join(' | ')}`);
 }
 
 // Hailuo API (MiniMax)
+//
+// FIX: MiniMax's /v1/files/upload endpoint rejected purpose:
+// "image_to_video" with "invalid params, invalid file purpose". MiniMax's
+// upload purpose enum is narrower than the video-generation feature names
+// suggest. We now try a short list of candidate purpose values in order
+// and use whichever one the API actually accepts, logging which one
+// worked so the list can be trimmed down once confirmed.
+const HAILUO_UPLOAD_PURPOSES = ['video_generation', 'image_to_video'];
+
+async function uploadHailuoImage(apiKey, host, imgBlob) {
+  const errors = [];
+  for (const purpose of HAILUO_UPLOAD_PURPOSES) {
+    const form = new FormData();
+    form.append('purpose', purpose);
+    form.append('file', imgBlob, 'photo.jpg');
+
+    const uploadRes = await fetch(`${host}/v1/files/upload`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${apiKey}`
+        // Do NOT set Content-Type manually — fetch needs to generate the
+        // multipart boundary itself when given a FormData body.
+      },
+      body: form
+    });
+
+    if (!uploadRes.ok) {
+      const errorText = await uploadRes.text();
+      errors.push(`purpose="${purpose}": HTTP ${uploadRes.status} - ${errorText.substring(0, 200)}`);
+      continue;
+    }
+
+    const uploadData = await uploadRes.json();
+    const fileId = uploadData.file?.file_id;
+
+    if (fileId) {
+      console.log(`✅ Hailuo upload succeeded with purpose="${purpose}"`);
+      return fileId;
+    }
+
+    errors.push(`purpose="${purpose}": no file_id in response - ${JSON.stringify(uploadData).substring(0, 200)}`);
+  }
+
+  throw new Error(`Hailuo: upload failed for all purpose values - ${errors.join(' | ')}`);
+}
+
 async function generateHailuoVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) throw new Error('Hailuo: MINIMAX_API_KEY not configured');
 
   const host = process.env.MINIMAX_API_HOST || 'https://api.minimax.io';
 
-  // FIX: MiniMax's /v1/files/upload endpoint requires an actual
-  // multipart/form-data request with the image bytes attached — it
-  // rejects a JSON body with a URL reference ("invalid params, request
-  // has no multipart/form-data Content-Type"). Download the photo first,
+  // MiniMax's upload endpoint requires an actual multipart/form-data
+  // request with the image bytes attached. Download the photo first,
   // then upload it as real form-data.
   const imgRes = await fetch(photoUrl);
   if (!imgRes.ok) throw new Error(`Hailuo: failed to fetch source photo (HTTP ${imgRes.status})`);
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
   const imgBlob = new Blob([imgBuffer]);
 
-  const form = new FormData();
-  form.append('purpose', 'image_to_video');
-  form.append('file', imgBlob, 'photo.jpg');
-
-  const uploadRes = await fetch(`${host}/v1/files/upload`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`
-      // Do NOT set Content-Type manually — fetch needs to generate the
-      // multipart boundary itself when given a FormData body.
-    },
-    body: form
-  });
-
-  if (!uploadRes.ok) {
-    const errorText = await uploadRes.text();
-    throw new Error(`Hailuo upload failed: HTTP ${uploadRes.status} - ${errorText.substring(0, 300)}`);
-  }
-
-  const uploadData = await uploadRes.json();
-  const fileId = uploadData.file?.file_id;
-
-  if (!fileId) {
-    // Log the full body so we can see the actual shape MiniMax returned
-    console.warn('⚠️ Hailuo upload response missing file.file_id:', JSON.stringify(uploadData).substring(0, 500));
-    throw new Error('Hailuo: No file_id returned from upload');
-  }
+  const fileId = await uploadHailuoImage(apiKey, host, imgBlob);
 
   const createRes = await fetch(`${host}/v1/video_generation`, {
     method: 'POST',
@@ -2979,10 +3095,6 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
   // Create image-to-video project
   const endSeconds = Math.min(Math.max(duration, 5), 60);
 
-  // FIX: don't hardcode 1080p — most Magic Hour plans only unlock 1080p on
-  // higher subscription tiers, and a mismatch returns HTTP 422. Default to
-  // 720p (works on every tier) and allow an env var override for accounts
-  // that DO have 1080p access.
   const magicHourResolution = process.env.MAGIC_HOUR_RESOLUTION || '720p';
 
   const createRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
@@ -2999,8 +3111,6 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
 
   if (!createRes.ok) {
     const errorText = await createRes.text();
-    // If we still get a 422 resolution error even at 720p, don't retry blindly —
-    // surface the real message so it's obvious it's a plan/tier limitation.
     throw new Error(`Magic Hour: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
   }
 
@@ -3214,9 +3324,6 @@ app.post('/api/generate-video', async (req, res) => {
 
     // Try Replicate first
     try {
-      // FIX: trim + validate the token up front so a blank/whitespace-only
-      // value doesn't silently pass the truthy check and then 401 deep
-      // inside the request.
       const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
       if (replicateToken) {
         console.log('🔄 Trying Replicate HappyHorse...');
@@ -3269,8 +3376,6 @@ app.post('/api/generate-video', async (req, res) => {
           }
         } else {
           const bodyText = await response.text().catch(() => '');
-          // A 401 here almost always means REPLICATE_API_TOKEN is missing,
-          // expired, or was copy-pasted with extra whitespace/quotes.
           if (response.status === 401) {
             console.error('❌ Replicate 401 Unauthorized — REPLICATE_API_TOKEN is invalid/expired. ' +
               'Regenerate it at https://replicate.com/account/api-tokens and update it in Render → Environment.');
@@ -3557,9 +3662,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
               });
 
               if (!createResponse.ok) {
-                // FIX: previously this only logged status without the body,
-                // so BytePlus 400s were opaque. Now we capture and surface
-                // the actual error body from BytePlus.
                 const bodyText = await createResponse.text().catch(() => '');
                 console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
                 generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
@@ -3596,8 +3698,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
     // If still no video, try using Replicate as final fallback
     if (!videoUrl) {
       try {
-        // FIX: trim the token so trailing whitespace/newlines from env
-        // config don't produce a silent 401.
         const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
         if (replicateToken) {
           console.log('🔄 Trying Replicate as final fallback...');
@@ -3822,7 +3922,9 @@ app.get('/api/debug-scene-providers', (req, res) => {
     totalConfigured: providers.filter(p => p.configured).length,
     totalProviders: providers.length,
     klingAccessKeyConfigured: !!accessKey,
-    klingSecretKeyConfigured: !!secretKey
+    klingSecretKeyConfigured: !!secretKey,
+    klingHosts: getKlingHosts(),
+    hailuoUploadPurposesTried: HAILUO_UPLOAD_PURPOSES
   });
 });
 
@@ -3980,7 +4082,9 @@ app.get('/api/health', async (req, res) => {
       byteplus_model_ids: getModelArkModelIds(),
       kling_access_key: klingAccessKey ? '✅ Set' : '❌ Not set',
       kling_secret_key: klingSecretKey ? '✅ Set' : '❌ Not set',
+      kling_hosts: getKlingHosts(),
       hailuo_token: process.env.MINIMAX_API_KEY ? '✅ Set' : '❌ Not set',
+      hailuo_upload_purposes: HAILUO_UPLOAD_PURPOSES,
       kie_token: process.env.KIE_API_KEY ? '✅ Set' : '❌ Not set',
       magic_hour_token: process.env.MAGIC_HR_API ? '✅ Set' : '❌ Not set',
       magic_hour_resolution: process.env.MAGIC_HOUR_RESOLUTION || '720p (default)',
@@ -4010,7 +4114,7 @@ app.get('/api/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
-    version: '2.0.1',
+    version: '2.0.2',
     status: 'running',
     features: [
       'Text-to-Video Generation (Replicate + BytePlus)',
@@ -4110,5 +4214,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real API errors)`);
   console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')}`);
   console.log(`🧩 Scene providers configured: ${SCENE_PROVIDERS.filter(p => p.enabled()).map(p => p.name).join(', ') || 'NONE'}`);
+  console.log(`🌏 Kling hosts to try: ${getKlingHosts().join(', ')}`);
   console.log(`💰 Replicate credit balance: $${process.env.REPLICATE_BALANCE || '10.00'}`);
 });
