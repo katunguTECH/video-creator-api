@@ -52,10 +52,63 @@ function Home() {
       {/* CTA Button */}
       <button
         onClick={() => navigate('/create')}
-        className="bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-12 rounded-full text-xl transition-all transform hover:scale-105"
+        className="bg-pink-500 hover:bg-pink-600 text-white font-bold py-4 px-12 rounded-full text-xl transition-all transform hover:scale-105 mb-12"
       >
         Start Creating
       </button>
+
+      {/* ============================================ */}
+      {/* CONTACT SECTION */}
+      {/* ============================================ */}
+      <div className="w-full max-w-4xl border-t border-white/20 pt-8 mt-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 text-center">
+          
+          {/* Sales Email */}
+          <div className="bg-white/5 rounded-xl p-4 hover:bg-white/10 transition-all">
+            <div className="text-2xl mb-2">💼</div>
+            <h4 className="font-semibold text-sm uppercase tracking-wider text-gray-400">Sales</h4>
+            <a 
+              href="mailto:sales@katareel.com" 
+              className="text-white hover:text-pink-400 transition-colors text-sm"
+            >
+              sales@katareel.com
+            </a>
+          </div>
+
+          {/* Support Email */}
+          <div className="bg-white/5 rounded-xl p-4 hover:bg-white/10 transition-all">
+            <div className="text-2xl mb-2">🛠️</div>
+            <h4 className="font-semibold text-sm uppercase tracking-wider text-gray-400">Support</h4>
+            <a 
+              href="mailto:support@katareel.com" 
+              className="text-white hover:text-pink-400 transition-colors text-sm"
+            >
+              support@katareel.com
+            </a>
+          </div>
+
+          {/* WhatsApp */}
+          <div className="bg-white/5 rounded-xl p-4 hover:bg-white/10 transition-all">
+            <div className="text-2xl mb-2">💬</div>
+            <h4 className="font-semibold text-sm uppercase tracking-wider text-gray-400">WhatsApp</h4>
+            <a 
+              href="https://wa.me/254710440648" 
+              target="_blank" 
+              rel="noopener noreferrer"
+              className="text-white hover:text-green-400 transition-colors text-sm flex items-center justify-center gap-2"
+            >
+              <span>+254 710 440 648</span>
+              <span className="text-green-400">📱</span>
+            </a>
+          </div>
+
+        </div>
+
+        {/* Footer Note */}
+        <p className="text-center text-gray-500 text-xs mt-4">
+          © {new Date().getFullYear()} VidAI Creator. All rights reserved.
+        </p>
+      </div>
 
     </div>
   );

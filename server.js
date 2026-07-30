@@ -4038,6 +4038,9 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
+// ============================================
+// ROOT ENDPOINT WITH CONTACT INFORMATION
+// ============================================
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
@@ -4053,6 +4056,12 @@ app.get('/', (req, res) => {
       'Multi-language Support',
       'MongoDB Atlas Database'
     ],
+    contact: {
+      sales: 'sales@katareel.com',
+      support: 'support@katareel.com',
+      whatsapp: '+254710440648',
+      whatsappLink: 'https://wa.me/254710440648'
+    },
     endpoints: [
       { path: '/api/test', method: 'GET' },
       { path: '/api/health', method: 'GET' },
