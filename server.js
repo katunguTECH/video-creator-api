@@ -18,6 +18,7 @@ const Groq = require('groq-sdk');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -2696,16 +2697,64 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 // SCENE GENERATION PROVIDERS
 // ============================================
 
-// Kling API
-async function generateKlingVideo(photoUrl, prompt, duration) {
-  const apiKey = process.env.KLING_API_KEY;
-  if (!apiKey) throw new Error('Kling: KLING_API_KEY not configured');
+// ---- Kling API ----
+//
+// FIX: Kling does NOT want you to paste a pre-built 3-part JWT into
+// KLING_API_KEY. Kling issues an "AccessKey" + "SecretKey" pair, and you
+// are expected to sign a short-lived JWT yourself (header.payload.signature)
+// using HMAC-SHA256 with the SecretKey. The old code wrongly assumed
+// KLING_API_KEY already WAS that 3-part JWT, which is why a single
+// access-key string failed the "expected 3 parts" check.
+//
+// Set these two env vars instead of (or in addition to) KLING_API_KEY:
+//   KLING_ACCESS_KEY=<your access key>
+//   KLING_SECRET_KEY=<your secret key>
+//
+// If only KLING_API_KEY is set in the legacy "ak.sk" or "ak:sk" form,
+// we also try to split it automatically as a convenience.
+function getKlingCredentials() {
+  let accessKey = process.env.KLING_ACCESS_KEY;
+  let secretKey = process.env.KLING_SECRET_KEY;
 
-  // Ensure API key has proper format (3 parts)
-  const parts = apiKey.split('.');
-  if (parts.length !== 3) {
-    throw new Error(`Kling: API key format invalid - expected 3 parts, got ${parts.length}`);
+  if ((!accessKey || !secretKey) && process.env.KLING_API_KEY) {
+    const raw = process.env.KLING_API_KEY.trim();
+    // Support "accessKey.secretKey" or "accessKey:secretKey" as a fallback
+    const parts = raw.includes(':') ? raw.split(':') : raw.split('.');
+    if (parts.length === 2) {
+      accessKey = accessKey || parts[0];
+      secretKey = secretKey || parts[1];
+    }
   }
+
+  return { accessKey, secretKey };
+}
+
+function generateKlingToken() {
+  const { accessKey, secretKey } = getKlingCredentials();
+
+  if (!accessKey || !secretKey) {
+    throw new Error(
+      'Kling: missing credentials. Set KLING_ACCESS_KEY and KLING_SECRET_KEY ' +
+      '(or KLING_API_KEY as "accessKey:secretKey") in your environment.'
+    );
+  }
+
+  const now = Math.floor(Date.now() / 1000);
+  const payload = {
+    iss: accessKey,
+    exp: now + 1800,   // token valid for 30 minutes
+    nbf: now - 5       // valid starting 5 seconds ago (clock skew buffer)
+  };
+
+  // jsonwebtoken produces a standard 3-part header.payload.signature JWT
+  return jwt.sign(payload, secretKey, {
+    algorithm: 'HS256',
+    header: { alg: 'HS256', typ: 'JWT' }
+  });
+}
+
+async function generateKlingVideo(photoUrl, prompt, duration) {
+  const apiKey = generateKlingToken(); // freshly signed JWT, always 3 parts
 
   const createRes = await fetch('https://api-singapore.klingai.com/v1/videos/image2video', {
     method: 'POST',
@@ -2776,6 +2825,8 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
   const fileId = uploadData.file?.file_id;
 
   if (!fileId) {
+    // Log the full body so we can see the actual shape MiniMax returned
+    console.warn('⚠️ Hailuo upload response missing file.file_id:', JSON.stringify(uploadData).substring(0, 500));
     throw new Error('Hailuo: No file_id returned from upload');
   }
 
@@ -2917,13 +2968,19 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
   // Create image-to-video project
   const endSeconds = Math.min(Math.max(duration, 5), 60);
 
+  // FIX: don't hardcode 1080p — most Magic Hour plans only unlock 1080p on
+  // higher subscription tiers, and a mismatch returns HTTP 422. Default to
+  // 720p (works on every tier) and allow an env var override for accounts
+  // that DO have 1080p access.
+  const magicHourResolution = process.env.MAGIC_HOUR_RESOLUTION || '720p';
+
   const createRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
     method: 'POST',
     headers,
     body: JSON.stringify({
       name: `photo-to-video-${Date.now()}`,
       end_seconds: endSeconds,
-      resolution: '1080p', // Use 1080p instead of 720p
+      resolution: magicHourResolution,
       assets: { image_file_path: filePath },
       style: { prompt: prompt || 'A cinematic scene' }
     })
@@ -2931,6 +2988,8 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
 
   if (!createRes.ok) {
     const errorText = await createRes.text();
+    // If we still get a 422 resolution error even at 720p, don't retry blindly —
+    // surface the real message so it's obvious it's a plan/tier limitation.
     throw new Error(`Magic Hour: HTTP ${createRes.status} - ${errorText.substring(0, 300)}`);
   }
 
@@ -3052,7 +3111,10 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
 // SCENE PROVIDER ORDER (with cost estimates)
 // ============================================
 const SCENE_PROVIDERS = [
-  { name: 'kling', fn: generateKlingVideo, enabled: () => !!process.env.KLING_API_KEY, cost: 0.084 },
+  { name: 'kling', fn: generateKlingVideo, enabled: () => {
+      const { accessKey, secretKey } = getKlingCredentials();
+      return !!accessKey && !!secretKey;
+    }, cost: 0.084 },
   { name: 'hailuo', fn: generateHailuoVideo, enabled: () => !!process.env.MINIMAX_API_KEY, cost: 0.10 },
   { name: 'kie', fn: generateKieVideo, enabled: () => !!process.env.KIE_API_KEY, cost: 0.06 },
   { name: 'magic_hour', fn: generateMagicHourVideo, enabled: () => !!process.env.MAGIC_HR_API, cost: 0.04 },
@@ -3141,9 +3203,14 @@ app.post('/api/generate-video', async (req, res) => {
 
     // Try Replicate first
     try {
-      const replicateToken = process.env.REPLICATE_API_TOKEN;
+      // FIX: trim + validate the token up front so a blank/whitespace-only
+      // value doesn't silently pass the truthy check and then 401 deep
+      // inside the request.
+      const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
       if (replicateToken) {
         console.log('🔄 Trying Replicate HappyHorse...');
+        console.log(`🔑 Replicate token present (length: ${replicateToken.length}, prefix: ${replicateToken.substring(0, 3)}...)`);
+
         const response = await fetch('https://api.replicate.com/v1/predictions', {
           method: 'POST',
           headers: {
@@ -3191,6 +3258,12 @@ app.post('/api/generate-video', async (req, res) => {
           }
         } else {
           const bodyText = await response.text().catch(() => '');
+          // A 401 here almost always means REPLICATE_API_TOKEN is missing,
+          // expired, or was copy-pasted with extra whitespace/quotes.
+          if (response.status === 401) {
+            console.error('❌ Replicate 401 Unauthorized — REPLICATE_API_TOKEN is invalid/expired. ' +
+              'Regenerate it at https://replicate.com/account/api-tokens and update it in Render → Environment.');
+          }
           console.warn(`⚠️ Replicate request failed: ${response.status} ${bodyText.substring(0, 500)}`);
           generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
         }
@@ -3473,9 +3546,12 @@ app.post('/api/generate-photo-video', async (req, res) => {
               });
 
               if (!createResponse.ok) {
+                // FIX: previously this only logged status without the body,
+                // so BytePlus 400s were opaque. Now we capture and surface
+                // the actual error body from BytePlus.
                 const bodyText = await createResponse.text().catch(() => '');
-                console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status}`);
-                generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status}`);
+                console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
+                generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
                 continue;
               }
 
@@ -3509,9 +3585,12 @@ app.post('/api/generate-photo-video', async (req, res) => {
     // If still no video, try using Replicate as final fallback
     if (!videoUrl) {
       try {
-        const replicateToken = process.env.REPLICATE_API_TOKEN;
+        // FIX: trim the token so trailing whitespace/newlines from env
+        // config don't produce a silent 401.
+        const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
         if (replicateToken) {
           console.log('🔄 Trying Replicate as final fallback...');
+          console.log(`🔑 Replicate token present (length: ${replicateToken.length}, prefix: ${replicateToken.substring(0, 3)}...)`);
 
           // Use photo as first frame for video generation
           const response = await fetch('https://api.replicate.com/v1/predictions', {
@@ -3566,7 +3645,11 @@ app.post('/api/generate-photo-video', async (req, res) => {
             }
           } else {
             const bodyText = await response.text().catch(() => '');
-            generationErrors.push(`Replicate: HTTP ${response.status}`);
+            if (response.status === 401) {
+              console.error('❌ Replicate 401 Unauthorized — REPLICATE_API_TOKEN is invalid/expired. ' +
+                'Regenerate it at https://replicate.com/account/api-tokens and update it in Render → Environment.');
+            }
+            generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
           }
         } else {
           generationErrors.push('Replicate: REPLICATE_API_TOKEN not set');
@@ -3721,11 +3804,14 @@ app.get('/api/debug-scene-providers', (req, res) => {
     keyStatus: p.enabled() ? '✅' : '❌'
   }));
 
+  const { accessKey, secretKey } = getKlingCredentials();
+
   res.json({
     providers,
     totalConfigured: providers.filter(p => p.configured).length,
     totalProviders: providers.length,
-    klingKeyParts: process.env.KLING_API_KEY ? process.env.KLING_API_KEY.split('.').length : 0
+    klingAccessKeyConfigured: !!accessKey,
+    klingSecretKeyConfigured: !!secretKey
   });
 });
 
@@ -3872,6 +3958,8 @@ app.get('/api/health', async (req, res) => {
     const totalVideos = isMongoConnected && VideoUsage ? await VideoUsage.countDocuments() : memoryStore.videoUsages.length;
     const totalTranslations = isMongoConnected && Translation ? await Translation.countDocuments() : memoryStore.translations.length;
 
+    const { accessKey: klingAccessKey, secretKey: klingSecretKey } = getKlingCredentials();
+
     res.json({
       status: 'healthy',
       timestamp: new Date().toISOString(),
@@ -3879,13 +3967,15 @@ app.get('/api/health', async (req, res) => {
       uptime: process.uptime(),
       byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
       byteplus_model_ids: getModelArkModelIds(),
-      kling_token: process.env.KLING_API_KEY ? '✅ Set' : '❌ Not set',
+      kling_access_key: klingAccessKey ? '✅ Set' : '❌ Not set',
+      kling_secret_key: klingSecretKey ? '✅ Set' : '❌ Not set',
       hailuo_token: process.env.MINIMAX_API_KEY ? '✅ Set' : '❌ Not set',
       kie_token: process.env.KIE_API_KEY ? '✅ Set' : '❌ Not set',
       magic_hour_token: process.env.MAGIC_HR_API ? '✅ Set' : '❌ Not set',
+      magic_hour_resolution: process.env.MAGIC_HOUR_RESOLUTION || '720p (default)',
       runway_token: process.env.RUNWAY_API_KEY ? '✅ Set' : '❌ Not set',
       veo_token: process.env.GOOGLE_VEO_API_KEY ? '✅ Set' : '❌ Not set',
-      replicate_token: process.env.REPLICATE_API_TOKEN ? '✅ Set' : '❌ Not set',
+      replicate_token: (process.env.REPLICATE_API_TOKEN || '').trim() ? '✅ Set' : '❌ Not set',
       paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
       email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
       mongodb_connected: isMongoConnected,
@@ -3909,7 +3999,7 @@ app.get('/api/health', async (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
-    version: '2.0.0',
+    version: '2.0.1',
     status: 'running',
     features: [
       'Text-to-Video Generation (Replicate + BytePlus)',
