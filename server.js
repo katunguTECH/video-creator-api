@@ -28,7 +28,7 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// MONGODB ATLAS CONNECTION - UPDATED WITH BETTER LOGGING
+// MONGODB ATLAS CONNECTION
 // ============================================
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -2361,7 +2361,7 @@ app.get('/api/admin/payments', async (req, res) => {
 });
 
 // ============================================
-// ADMIN DASHBOARD ENDPOINTS
+// ENHANCED ADMIN DASHBOARD ENDPOINT
 // ============================================
 
 app.get('/api/admin/dashboard', async (req, res) => {
@@ -2370,8 +2370,8 @@ app.get('/api/admin/dashboard', async (req, res) => {
     const revenue = await getRevenueByService();
     const usage = await getVideoUsage();
     const visits = await getSiteVisits();
-    const activity = await getRecentActivity(10);
-    const payments = await getUserPayments(10);
+    const activity = await getRecentActivity(20);
+    const payments = await getUserPayments(20);
     const translations = isMongoConnected && Translation ? await Translation.countDocuments() : memoryStore.translations.length;
 
     let totalDuration = 0;
@@ -2388,30 +2388,201 @@ app.get('/api/admin/dashboard', async (req, res) => {
     }
     const avgDuration = totalVideos > 0 ? Math.round(totalDuration / totalVideos) : 0;
 
+    // Get service-specific stats
+    let serviceStats = {
+      textToVideo: { count: 0, revenue: 0 },
+      photoToVideo: { count: 0, revenue: 0 },
+      translation: { count: 0, revenue: 0 },
+      musicCaptions: { count: 0, revenue: 0 }
+    };
+
+    if (isMongoConnected && Revenue && VideoUsage) {
+      // Revenue by service
+      const revenueByService = await Revenue.aggregate([
+        { $group: { _id: '$serviceType', total: { $sum: '$amount' }, count: { $sum: 1 } } }
+      ]);
+      
+      revenueByService.forEach(item => {
+        const key = item._id;
+        if (serviceStats[key]) {
+          serviceStats[key].revenue = item.total || 0;
+          serviceStats[key].count = item.count || 0;
+        }
+      });
+
+      // Video counts by service
+      const videoCounts = await VideoUsage.aggregate([
+        { $group: { _id: '$videoType', count: { $sum: 1 } } }
+      ]);
+      
+      videoCounts.forEach(item => {
+        const typeMap = {
+          'text-to-video': 'textToVideo',
+          'photo-to-video': 'photoToVideo',
+          'translation': 'translation',
+          'music-captions': 'musicCaptions'
+        };
+        const key = typeMap[item._id];
+        if (key && serviceStats[key]) {
+          serviceStats[key].count = item.count || 0;
+        }
+      });
+    }
+
+    // Get unique users
+    let users = [];
+    if (isMongoConnected && UserPayment) {
+      users = await UserPayment.aggregate([
+        { $group: { 
+          _id: '$email', 
+          totalSpent: { $sum: '$amount' },
+          lastPayment: { $max: '$createdAt' },
+          paymentCount: { $sum: 1 }
+        }},
+        { $sort: { totalSpent: -1 } },
+        { $limit: 50 }
+      ]);
+      
+      users = users.map(u => ({
+        email: u._id,
+        totalSpent: u.totalSpent || 0,
+        videoCount: 0,
+        joined: u.lastPayment ? new Date(u.lastPayment).toLocaleDateString() : 'N/A',
+        lastActivity: u.lastPayment ? new Date(u.lastPayment).toLocaleDateString() : 'N/A'
+      }));
+
+      const userVideos = await VideoUsage.aggregate([
+        { $group: { _id: '$userEmail', count: { $sum: 1 } } }
+      ]);
+      
+      const videoMap = {};
+      userVideos.forEach(v => {
+        videoMap[v._id] = v.count;
+      });
+      
+      users = users.map(u => ({
+        ...u,
+        videoCount: videoMap[u.email] || 0
+      }));
+    }
+
+    // Get visit statistics
+    let visitStats = {
+      total: visits || 0,
+      today: 0,
+      week: 0,
+      month: 0,
+      daily: [],
+      weekly: [],
+      monthly: []
+    };
+
+    if (isMongoConnected && SiteVisit) {
+      const now = new Date();
+      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+      const weekAgo = new Date(today);
+      weekAgo.setDate(weekAgo.getDate() - 7);
+      const monthAgo = new Date(today);
+      monthAgo.setDate(monthAgo.getDate() - 30);
+
+      visitStats.today = await SiteVisit.countDocuments({ createdAt: { $gte: today } });
+      visitStats.week = await SiteVisit.countDocuments({ createdAt: { $gte: weekAgo } });
+      visitStats.month = await SiteVisit.countDocuments({ createdAt: { $gte: monthAgo } });
+
+      // Daily visits (last 7 days)
+      const dailyVisits = [];
+      for (let i = 6; i >= 0; i--) {
+        const day = new Date(today);
+        day.setDate(day.getDate() - i);
+        const nextDay = new Date(day);
+        nextDay.setDate(nextDay.getDate() + 1);
+        const count = await SiteVisit.countDocuments({
+          createdAt: { $gte: day, $lt: nextDay }
+        });
+        dailyVisits.push({
+          date: day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
+          visits: count
+        });
+      }
+      visitStats.daily = dailyVisits;
+
+      // Weekly visits (last 4 weeks)
+      const weeklyVisits = [];
+      for (let i = 3; i >= 0; i--) {
+        const weekStart = new Date(today);
+        weekStart.setDate(weekStart.getDate() - (i * 7 + 7));
+        const weekEnd = new Date(weekStart);
+        weekEnd.setDate(weekEnd.getDate() + 7);
+        const count = await SiteVisit.countDocuments({
+          createdAt: { $gte: weekStart, $lt: weekEnd }
+        });
+        weeklyVisits.push({
+          week: `Week ${4 - i}`,
+          visits: count
+        });
+      }
+      visitStats.weekly = weeklyVisits;
+
+      // Monthly visits (last 6 months)
+      const monthlyVisits = [];
+      for (let i = 5; i >= 0; i--) {
+        const monthStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
+        const monthEnd = new Date(today.getFullYear(), today.getMonth() - i + 1, 1);
+        const count = await SiteVisit.countDocuments({
+          createdAt: { $gte: monthStart, $lt: monthEnd }
+        });
+        monthlyVisits.push({
+          month: monthStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
+          visits: count
+        });
+      }
+      visitStats.monthly = monthlyVisits;
+    }
+
+    // Get Music & Captions stats
+    let musicCaptionsRevenue = 0;
+    let musicCaptionsCount = 0;
+    if (isMongoConnected && Revenue) {
+      const musicStats = await Revenue.aggregate([
+        { $match: { serviceType: 'music-captions' } },
+        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
+      ]);
+      if (musicStats.length > 0) {
+        musicCaptionsRevenue = musicStats[0].total || 0;
+        musicCaptionsCount = musicStats[0].count || 0;
+      }
+    }
+
     res.json({
       credits: balances,
       revenue: {
         total: Math.round(revenue.total) || 0,
         textToVideo: Math.round(revenue.textToVideo) || 0,
         photoToVideo: Math.round(revenue.photoToVideo) || 0,
-        translation: Math.round(revenue.translation) || 0
+        translation: Math.round(revenue.translation) || 0,
+        musicCaptions: Math.round(musicCaptionsRevenue) || 0
       },
       usage: {
         totalVideos: usage.totalVideos || 0,
         textToVideo: usage.textToVideo || 0,
         photoToVideo: usage.photoToVideo || 0,
         translation: usage.translation || 0,
+        musicCaptions: musicCaptionsCount || 0,
         avgDuration: avgDuration
       },
-      visits: {
-        total: visits || 0,
-        today: 0,
-        week: 0,
-        month: 0
-      },
-      recentActivity: activity,
+      visits: visitStats,
+      recentActivity: activity.map(a => ({
+        ...a,
+        service: a.details ? 
+          (a.details.includes('Text') ? 'text-to-video' :
+           a.details.includes('Photo') ? 'photo-to-video' :
+           a.details.includes('Translation') ? 'translation' :
+           a.details.includes('Music') ? 'music-captions' : 'general') : 'general'
+      })),
       recentPayments: payments,
       translations: translations || 0,
+      users: users || [],
+      serviceStats: serviceStats,
       mongodb: {
         connected: isMongoConnected,
         database: DATABASE_NAME
@@ -3444,7 +3615,7 @@ app.post('/api/generate-video', async (req, res) => {
 });
 
 // ============================================
-// PHOTO TO VIDEO GENERATION - FIXED
+// PHOTO TO VIDEO GENERATION
 // ============================================
 app.post('/api/generate-photo-video', async (req, res) => {
   try {
