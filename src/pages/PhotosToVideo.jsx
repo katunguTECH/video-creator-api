@@ -34,17 +34,6 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
   throw lastError || new Error('Max retries exceeded');
 };
 
-// ✅ FIX: Cloudinary URLs are a different origin than katareel.com, so the
-// HTML `download` attribute is silently ignored by browsers on cross-origin
-// links — it just opens the video instead of downloading it. Cloudinary's
-// `fl_attachment` flag forces the server to send it as a real attachment,
-// which works for every user regardless of browser.
-//
-// ✅ FIX #2: Guard against `data:` URIs (the base64 fallback placeholder
-// image the backend returns when generation fails). Browsers block
-// top-frame navigation to data: URIs entirely ("Not allowed to navigate
-// top frame to data URL"), so trying to build a download link for one
-// does nothing when clicked. We only rewrite/return real http(s) URLs.
 const getDownloadUrl = (url) => {
   if (!url) return url;
   if (url.startsWith('data:')) return null;
@@ -54,8 +43,6 @@ const getDownloadUrl = (url) => {
   return url;
 };
 
-// ✅ Helper to detect the base64 fallback placeholder / any non-playable
-// data URI so we never show it to the user as if it were their real video.
 const isPlaceholderVideo = (url) => {
   return !url || url.startsWith('data:');
 };
@@ -66,6 +53,7 @@ function PhotosToVideo() {
   const [photos, setPhotos] = useState([]);
   const [prompt, setPrompt] = useState('');
   const [audioScript, setAudioScript] = useState('');
+  const [voiceGender, setVoiceGender] = useState('MALE');
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState('16:9');
   const [loading, setLoading] = useState(false);
@@ -85,7 +73,7 @@ function PhotosToVideo() {
   const [redoLoading, setRedoLoading] = useState(false);
   const [savedCoupon, setSavedCoupon] = useState('');
 
-  // ✅ Load Paystack script on component mount
+  // Load Paystack script on component mount
   useEffect(() => {
     const loadPaystack = () => {
       if (typeof window.PaystackPop !== 'undefined') {
@@ -268,7 +256,7 @@ function PhotosToVideo() {
       if (!downloadHref) return;
 
       const downloadLink = document.createElement('a');
-      downloadLink.href = downloadHref; // fl_attachment forces a real download
+      downloadLink.href = downloadHref;
       downloadLink.className = 'download-btn';
       downloadLink.innerHTML = '📥 Download Video';
       downloadLink.style.cssText = `
@@ -430,7 +418,7 @@ function PhotosToVideo() {
 
       console.log('✅ All photos uploaded:', photoUrls);
 
-      // ✅ Generate video with audio script support
+      // Generate video
       const generateResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-photo-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -441,7 +429,8 @@ function PhotosToVideo() {
           aspectRatio: aspectRatio,
           paymentReference: reference,
           email: email,
-          audioScript: audioScript.trim() || null
+          audioScript: audioScript.trim() || null,
+          voiceGender: voiceGender
         })
       });
 
@@ -694,7 +683,7 @@ function PhotosToVideo() {
               />
             </div>
 
-            {/* Speech / Narration Box */}
+            {/* Speech / Narration Text */}
             <div className="setting-group">
               <label>
                 🎙️ Speech / narration text
@@ -705,13 +694,27 @@ function PhotosToVideo() {
               <textarea
                 value={audioScript}
                 onChange={(e) => setAudioScript(e.target.value)}
-                placeholder="Type the words you want spoken, e.g. 'Fellow Kenyans, the time for change is now...'"
+                placeholder="Type the words you want spoken, e.g. 'God is good all the time...'"
                 rows={3}
                 disabled={loading || redoLoading}
               />
               <small style={{ color: '#888', fontSize: '12px' }}>
                 Roughly {Math.floor(duration * 2.3)} words fits a {duration}s video — {audioScript.trim().split(/\s+/).filter(Boolean).length} words so far
               </small>
+            </div>
+
+            {/* Voice Gender Selection */}
+            <div className="setting-group">
+              <label>🎙️ Narration Voice Character</label>
+              <select
+                value={voiceGender}
+                onChange={(e) => setVoiceGender(e.target.value)}
+                disabled={loading || redoLoading}
+              >
+                <option value="MALE">Male Voice (Deep / Natural)</option>
+                <option value="FEMALE">Female Voice</option>
+                <option value="NEUTRAL">Neutral Voice</option>
+              </select>
             </div>
 
             <div className="setting-group">
@@ -893,8 +896,9 @@ function PhotosToVideo() {
             <ul>
               <li>📤 Upload a photo (JPG, PNG, WEBP)</li>
               <li>📝 Describe what you want the AI to generate</li>
+              <li>🎙️ Select voice character (Male, Female, Neutral)</li>
               <li>💰 Complete payment via Paystack</li>
-              <li>📥 Download your AI-generated video</li>
+              <li>📥 Download your AI-generated video with speech</li>
               <li>🔄 Use your redo coupon for free regeneration</li>
               <li>🔒 All AI generations are secure and private</li>
             </ul>

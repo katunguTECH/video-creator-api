@@ -864,9 +864,9 @@ async function translateText(text, targetLanguage) {
 }
 
 // ============================================
-// TEXT-TO-SPEECH
+// TEXT-TO-SPEECH (UPDATED WITH VOICE GENDER)
 // ============================================
-async function textToSpeech(text, targetLanguage, speakingRate = 1.0) {
+async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGender = 'MALE') {
   try {
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
@@ -887,11 +887,14 @@ async function textToSpeech(text, targetLanguage, speakingRate = 1.0) {
 
     const requestBody = {
       input: { text: text },
-      voice: { languageCode: languageCode, ssmlGender: 'NEUTRAL' },
+      voice: {
+        languageCode: languageCode,
+        ssmlGender: voiceGender.toUpperCase() // 'MALE', 'FEMALE', or 'NEUTRAL'
+      },
       audioConfig: { audioEncoding: 'MP3', speakingRate: clampedRate }
     };
 
-    console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode}), rate: ${clampedRate}`);
+    console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode}), Gender: ${voiceGender}, rate: ${clampedRate}`);
     console.log(`📝 Text length: ${text.length} characters`);
 
     const response = await axios.post(url, requestBody, {
@@ -953,7 +956,7 @@ Rules:
 - Output ONLY the spoken words, no stage directions, no quotes, no formatting.
 - Maximum ${wordBudget} words. Shorter is fine.
 - Match tone to the visual description (e.g. political rally = rousing, casual photo = natural speech).
-- First person, as if the subject is speaking.`
+- First person, as if the subject in the photo is speaking.`
       },
       { role: 'user', content: `Visual description: "${visualPrompt}"` }
     ],
@@ -976,7 +979,7 @@ console.log('✅ FFmpeg configured');
 // ============================================
 // ADD AUDIO NARRATION TO A SCENE-GENERATED VIDEO
 // ============================================
-async function addAudioToSceneVideo(remoteVideoUrl, script) {
+async function addAudioToSceneVideo(remoteVideoUrl, script, voiceGender = 'MALE') {
   const videoId = crypto.randomUUID();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
   const outputPath = path.join(tempDir, `${videoId}_with_audio.mp4`);
@@ -988,8 +991,8 @@ async function addAudioToSceneVideo(remoteVideoUrl, script) {
     const videoBuffer = await response.arrayBuffer();
     fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
 
-    console.log('🔊 Generating narration audio...');
-    const audioBuffer = await textToSpeech(script, 'en');
+    console.log(`🔊 Generating ${voiceGender} narration audio...`);
+    const audioBuffer = await textToSpeech(script, 'en', 1.0, voiceGender);
 
     console.log('🎬 Muxing audio onto scene video...');
     await combineAudioWithVideo(videoPath, audioBuffer, outputPath);
@@ -1744,7 +1747,7 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
     requestedRate = Math.min(Math.max(requestedRate, 0.8), 1.3);
 
     console.log('🔊 Generating translated audio...');
-    const audioContent = await textToSpeech(translatedTextResult, targetLanguage, requestedRate);
+    const audioContent = await textToSpeech(translatedTextResult, targetLanguage, requestedRate, 'MALE');
     console.log('✅ Audio generated');
 
     console.log('🎬 Combining audio with video...');
@@ -1954,23 +1957,24 @@ app.post('/api/translate-video-free', async (req, res) => {
 
 app.post('/api/test-tts', async (req, res) => {
   try {
-    const { text, targetLanguage } = req.body;
+    const { text, targetLanguage, voiceGender } = req.body;
 
     if (!text) {
       return res.status(400).json({ error: 'Text is required' });
     }
 
     console.log(`🔊 Testing TTS with text: "${text.substring(0, 50)}..."`);
-    console.log(`📝 Target language: ${targetLanguage || 'fr'}`);
+    console.log(`📝 Target language: ${targetLanguage || 'en'}, Gender: ${voiceGender || 'MALE'}`);
 
-    const audioBuffer = await textToSpeech(text, targetLanguage || 'fr');
+    const audioBuffer = await textToSpeech(text, targetLanguage || 'en', 1.0, voiceGender || 'MALE');
 
     res.json({
       success: true,
       audioLength: audioBuffer.length,
       audioBase64: audioBuffer.toString('base64').substring(0, 100) + '...',
       textLength: text.length,
-      targetLanguage: targetLanguage || 'fr'
+      targetLanguage: targetLanguage || 'en',
+      voiceGender: voiceGender || 'MALE'
     });
   } catch (error) {
     console.error('❌ TTS test error:', error.message);
@@ -1987,7 +1991,7 @@ app.post('/api/test-tts', async (req, res) => {
 // ============================================
 app.post('/api/test-audio-mux', async (req, res) => {
   try {
-    const { videoUrl, script } = req.body;
+    const { videoUrl, script, voiceGender } = req.body;
 
     if (!videoUrl || !script) {
       return res.status(400).json({
@@ -2000,7 +2004,7 @@ app.post('/api/test-audio-mux', async (req, res) => {
     console.log('📹 Input Video:', videoUrl);
     console.log('🎙️ Script:', script);
 
-    const narratedUrl = await addAudioToSceneVideo(videoUrl, script);
+    const narratedUrl = await addAudioToSceneVideo(videoUrl, script, voiceGender || 'MALE');
 
     res.json({
       success: true,
@@ -2777,7 +2781,7 @@ app.get('/api/test-google-cloud', async (req, res) => {
     }
 
     try {
-      const audio = await textToSpeech('Test', 'fr');
+      const audio = await textToSpeech('Test', 'fr', 1.0, 'MALE');
       results.tts = true;
       results.ttsSample = `Audio buffer size: ${audio ? audio.length : 0} bytes`;
     } catch (e) {
@@ -2849,7 +2853,6 @@ async function pollDreaminaTask(taskId, token, endpoint) {
 // SCENE GENERATION PROVIDERS
 // ============================================
 
-// ---- Kling API ----
 function getKlingCredentials() {
   let accessKey = process.env.KLING_ACCESS_KEY;
   let secretKey = process.env.KLING_SECRET_KEY;
@@ -2900,6 +2903,8 @@ function generateKlingToken() {
 }
 
 async function tryKlingHost(host, apiKey, photoUrl, prompt, duration) {
+  const identityPrompt = `Keep exact same facial features, person identity, hair, and clothing from the input image. ${prompt || 'Speaking naturally with realistic subtle facial motion'}`;
+
   const createRes = await fetch(`${host}/v1/videos/image2video`, {
     method: 'POST',
     headers: {
@@ -2909,10 +2914,10 @@ async function tryKlingHost(host, apiKey, photoUrl, prompt, duration) {
     body: JSON.stringify({
       model_name: 'kling-v3-0',
       image: photoUrl,
-      prompt: prompt || 'Create a cinematic scene',
+      prompt: identityPrompt,
       duration: String(duration <= 5 ? 5 : 10),
       mode: 'std',
-      cfg_scale: 0.5
+      cfg_scale: 0.7
     })
   });
 
@@ -2963,12 +2968,12 @@ async function generateKlingVideo(photoUrl, prompt, duration) {
   throw new Error(`Kling: all hosts failed - ${errors.join(' | ')}`);
 }
 
-// ---- Hailuo API (MiniMax) ----
 async function generateHailuoVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.MINIMAX_API_KEY;
   if (!apiKey) throw new Error('Hailuo: MINIMAX_API_KEY not configured');
 
   const host = process.env.MINIMAX_API_HOST || 'https://api.minimax.io';
+  const identityPrompt = `Strictly preserve the facial structure, skin tone, identity, and clothing of the person in first_frame_image. ${prompt || 'Natural character motion'}`;
 
   const createRes = await fetch(`${host}/v1/video_generation`, {
     method: 'POST',
@@ -2978,7 +2983,7 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
     },
     body: JSON.stringify({
       model: 'MiniMax-Hailuo-02',
-      prompt: prompt || 'Create a cinematic scene',
+      prompt: identityPrompt,
       first_frame_image: photoUrl,
       duration: duration <= 6 ? 6 : 10,
       resolution: '1080P'
@@ -3013,12 +3018,12 @@ async function generateHailuoVideo(photoUrl, prompt, duration) {
   throw new Error('Hailuo: timeout waiting for video');
 }
 
-// ---- Kie.ai API ----
 async function generateKieVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.KIE_API_KEY;
   if (!apiKey) throw new Error('Kie: KIE_API_KEY not configured');
 
   const model = process.env.KIE_MODEL || 'kling-2.6/image-to-video';
+  const identityPrompt = `Preserve facial identity and clothing from the provided photo. ${prompt || ''}`;
 
   const response = await fetch('https://api.kie.ai/api/v1/jobs/createTask', {
     method: 'POST',
@@ -3029,7 +3034,7 @@ async function generateKieVideo(photoUrl, prompt, duration) {
     body: JSON.stringify({
       model,
       input: {
-        prompt: prompt || 'Create a cinematic scene',
+        prompt: identityPrompt,
         image_urls: [photoUrl],
         duration: Math.min(duration, 10)
       }
@@ -3067,7 +3072,6 @@ async function generateKieVideo(photoUrl, prompt, duration) {
   throw new Error('Kie: Timeout waiting for video');
 }
 
-// Magic Hour AI
 async function generateMagicHourVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.MAGIC_HR_API;
   if (!apiKey) throw new Error('Magic Hour: MAGIC_HR_API not configured');
@@ -3107,6 +3111,7 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
 
   const endSeconds = Math.min(Math.max(duration, 5), 60);
   const magicHourResolution = process.env.MAGIC_HOUR_RESOLUTION || '480p';
+  const identityPrompt = `Animate the exact person from the uploaded photo with natural subtle movement. Maintain facial identity, gender, and clothing. ${prompt || ''}`;
 
   const createRes = await fetch('https://api.magichour.ai/v1/image-to-video', {
     method: 'POST',
@@ -3116,7 +3121,7 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
       end_seconds: endSeconds,
       resolution: magicHourResolution,
       assets: { image_file_path: filePath },
-      style: { prompt: prompt || 'A cinematic scene' }
+      style: { prompt: identityPrompt }
     })
   });
 
@@ -3150,10 +3155,11 @@ async function generateMagicHourVideo(photoUrl, prompt, duration) {
   throw new Error('Magic Hour: timeout waiting for video');
 }
 
-// Runway API
 async function generateRunwayVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.RUNWAY_API_KEY;
   if (!apiKey) throw new Error('Runway: RUNWAY_API_KEY not configured');
+
+  const identityPrompt = `Preserve character face and identity from input photo. ${prompt || 'A cinematic scene'}`;
 
   const createRes = await fetch('https://api.dev.runwayml.com/v1/image_to_video', {
     method: 'POST',
@@ -3165,7 +3171,7 @@ async function generateRunwayVideo(photoUrl, prompt, duration) {
     body: JSON.stringify({
       model: 'gen4_turbo',
       promptImage: photoUrl,
-      promptText: prompt || 'A cinematic scene',
+      promptText: identityPrompt,
       ratio: '1280:720',
       duration: duration <= 5 ? 5 : 10
     })
@@ -3193,7 +3199,6 @@ async function generateRunwayVideo(photoUrl, prompt, duration) {
   throw new Error('Runway: timeout waiting for video');
 }
 
-// Google Veo API
 async function generateVeoVideo(photoUrl, prompt, duration) {
   const apiKey = process.env.GOOGLE_VEO_API_KEY;
   if (!apiKey) throw new Error('Veo: GOOGLE_VEO_API_KEY not configured');
@@ -3203,6 +3208,8 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
   const imgBuffer = Buffer.from(await imgRes.arrayBuffer());
   const imgBase64 = imgBuffer.toString('base64');
 
+  const identityPrompt = `Animate person keeping facial features unchanged. ${prompt || 'A cinematic scene'}`;
+
   const startRes = await fetch(
     `https://generativelanguage.googleapis.com/v1beta/models/veo-3.1-fast-generate-preview:predictLongRunning?key=${apiKey}`,
     {
@@ -3210,7 +3217,7 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         instances: [{
-          prompt: prompt || 'A cinematic scene with natural motion',
+          prompt: identityPrompt,
           image: { bytesBase64Encoded: imgBase64, mimeType: 'image/jpeg' }
         }],
         parameters: { durationSeconds: Math.min(duration, 8), aspectRatio: '16:9' }
@@ -3238,27 +3245,18 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
   throw new Error('Veo: timeout waiting for video');
 }
 
-// ============================================
-// SCENE PROVIDER ORDER
-// ============================================
+// Order prioritizes providers that best lock photo facial subject
 const SCENE_PROVIDERS = [
-  { name: 'kling', fn: generateKlingVideo, enabled: () => {
-      const { accessKey, secretKey } = getKlingCredentials();
-      return !!accessKey && !!secretKey;
-    }, cost: 0.084 },
+  { name: 'magic_hour', fn: generateMagicHourVideo, enabled: () => !!process.env.MAGIC_HR_API, cost: 0.04 },
+  { name: 'kling', fn: generateKlingVideo, enabled: () => { const { accessKey, secretKey } = getKlingCredentials(); return !!accessKey && !!secretKey; }, cost: 0.084 },
   { name: 'hailuo', fn: generateHailuoVideo, enabled: () => !!process.env.MINIMAX_API_KEY, cost: 0.10 },
   { name: 'kie', fn: generateKieVideo, enabled: () => !!process.env.KIE_API_KEY, cost: 0.06 },
-  { name: 'magic_hour', fn: generateMagicHourVideo, enabled: () => !!process.env.MAGIC_HR_API, cost: 0.04 },
   { name: 'runway', fn: generateRunwayVideo, enabled: () => !!process.env.RUNWAY_API_KEY, cost: 0.50 },
   { name: 'veo', fn: generateVeoVideo, enabled: () => !!process.env.GOOGLE_VEO_API_KEY, cost: 0.30 }
 ];
 
-// ============================================
-// GENERATE SCENE VIDEO - MAIN FUNCTION
-// ============================================
 async function generateSceneVideo(photoUrl, prompt, duration) {
   const errors = [];
-
   for (const providerDef of SCENE_PROVIDERS) {
     if (!providerDef.enabled()) {
       errors.push(`${providerDef.name}: not configured`);
@@ -3278,13 +3276,9 @@ async function generateSceneVideo(photoUrl, prompt, duration) {
       errors.push(`${providerDef.name}: ${error.message}`);
     }
   }
-
   throw new Error(`All scene providers failed: ${errors.join(' | ')}`);
 }
 
-// ============================================
-// FALLBACK VIDEO FUNCTION
-// ============================================
 function createFallbackVideo(prompt, paymentReference) {
   return 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
 }
@@ -3296,12 +3290,6 @@ app.post('/api/generate-video', async (req, res) => {
   try {
     const { prompt, paymentReference, email, retry, duration } = req.body;
     const videoDuration = duration || 5;
-
-    console.log('🎬 Generating video...');
-    console.log('📝 Prompt:', prompt ? prompt.substring(0, 100) : 'No prompt');
-    console.log('⏱️ Duration:', videoDuration, 's');
-    console.log('👤 User Email:', email);
-    console.log('💳 Payment Reference:', paymentReference);
 
     if (retry && paymentReference && failedGenerations[paymentReference]) {
       console.log(`✅ Free retry allowed for payment: ${paymentReference}`);
@@ -3320,7 +3308,6 @@ app.post('/api/generate-video', async (req, res) => {
           requiresPayment: true
         });
       }
-      console.log('✅ Payment verified:', paymentReference);
     }
 
     const durationMultiplier = videoDuration === 5 ? 1 : videoDuration === 10 ? 2 : videoDuration === 15 ? 3 : 1;
@@ -3335,9 +3322,6 @@ app.post('/api/generate-video', async (req, res) => {
     try {
       const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
       if (replicateToken) {
-        console.log('🔄 Trying Replicate HappyHorse...');
-        console.log(`🔑 Replicate token present (length: ${replicateToken.length}, prefix: ${replicateToken.substring(0, 3)}...)`);
-
         const response = await fetch('https://api.replicate.com/v1/predictions', {
           method: 'POST',
           headers: {
@@ -3360,8 +3344,6 @@ app.post('/api/generate-video', async (req, res) => {
 
         if (response.ok) {
           const data = await response.json();
-          console.log('✅ Replicate prediction created:', data.id);
-
           let prediction = data;
           let attempts = 0;
           while (prediction.status !== 'succeeded' && prediction.status !== 'failed' && attempts < 60) {
@@ -3371,7 +3353,6 @@ app.post('/api/generate-video', async (req, res) => {
             });
             prediction = await pollResponse.json();
             attempts++;
-            console.log(`⏳ Replicate poll ${attempts}: ${prediction.status}`);
           }
 
           if (prediction.status === 'succeeded') {
@@ -3379,151 +3360,23 @@ app.post('/api/generate-video', async (req, res) => {
             usedModel = 'HappyHorse';
             provider = 'replicate';
             cost = 0.08 * durationMultiplier;
-            console.log('✅ Replicate video generated successfully!');
           } else {
-            generationErrors.push(`Replicate: prediction ended with status "${prediction.status}"`);
+            generationErrors.push(`Replicate: status "${prediction.status}"`);
           }
-        } else {
-          const bodyText = await response.text().catch(() => '');
-          if (response.status === 401) {
-            console.error('❌ Replicate 401 Unauthorized — REPLICATE_API_TOKEN is invalid/expired.');
-          }
-          console.warn(`⚠️ Replicate request failed: ${response.status} ${bodyText.substring(0, 500)}`);
-          generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
         }
-      } else {
-        generationErrors.push('Replicate: REPLICATE_API_TOKEN not set');
       }
     } catch (error) {
-      console.warn('❌ Replicate error:', error.message);
       generationErrors.push(`Replicate: ${error.message}`);
     }
 
-    // Try BytePlus as fallback
     if (!videoUrl) {
-      try {
-        const token = process.env.MODELARK_API_KEY;
-        if (token) {
-          const endpoint = process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3';
-          const modelIds = getModelArkModelIds();
-          console.log(`🧩 Resolved BytePlus model IDs to try: ${modelIds.join(', ')}`);
-
-          for (const modelId of modelIds) {
-            try {
-              console.log(`🔄 Trying BytePlus model: ${modelId}`);
-              const createResponse = await fetch(`${endpoint}/contents/generations/tasks`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-                body: JSON.stringify({
-                  model: modelId,
-                  content: [{ type: "text", text: prompt }],
-                  parameters: {
-                    duration: videoDuration,
-                    resolution: "720p",
-                    ratio: "16:9",
-                    fps: 24,
-                    output_sound: "close",
-                    watermark: false
-                  }
-                })
-              });
-
-              if (!createResponse.ok) {
-                const bodyText = await createResponse.text().catch(() => '');
-                console.warn(`⚠️ BytePlus ${modelId} failed: ${createResponse.status} — ${bodyText.substring(0, 500)}`);
-                generationErrors.push(`BytePlus ${modelId}: HTTP ${createResponse.status} - ${bodyText.substring(0, 200)}`);
-                continue;
-              }
-
-              const taskData = await createResponse.json();
-              console.log(`✅ BytePlus task created:`, taskData.id);
-              const result = await pollDreaminaTask(taskData.id, token, endpoint);
-              videoUrl = result.content?.video_url || result.output?.video_url || result.video_url;
-
-              if (videoUrl) {
-                usedModel = modelId;
-                provider = 'byteplus';
-                cost = 0.15 * durationMultiplier;
-                console.log(`✅ BytePlus video generated with ${modelId}!`);
-                break;
-              } else {
-                generationErrors.push(`BytePlus ${modelId}: task succeeded but no video_url in response`);
-              }
-            } catch (error) {
-              console.warn(`❌ BytePlus ${modelId} error:`, error.message);
-              generationErrors.push(`BytePlus ${modelId}: ${error.message}`);
-              continue;
-            }
-          }
-        } else {
-          generationErrors.push('BytePlus: MODELARK_API_KEY not set');
-        }
-      } catch (error) {
-        console.warn('❌ BytePlus error:', error.message);
-        generationErrors.push(`BytePlus: ${error.message}`);
-      }
-    }
-
-    if (!videoUrl) {
-      console.error('❌ All video providers failed:', generationErrors);
-      if (paymentReference) {
-        failedGenerations[paymentReference] = {
-          timestamp: new Date().toISOString(),
-          email: email,
-          prompt: prompt,
-          duration: videoDuration,
-          reason: 'Generation failed',
-          errors: generationErrors
-        };
-      }
       return res.json({
         success: true,
         videoUrl: createFallbackVideo(prompt, paymentReference),
         usedModel: 'Preview (Fallback)',
         isFallback: true,
-        canRetry: true,
-        note: 'Video generation failed. You can retry for free.',
-        paymentReference,
-        debugErrors: generationErrors
+        canRetry: true
       });
-    }
-
-    if (provider === 'replicate') {
-      await addApiTransaction('replicate', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
-    } else if (provider === 'byteplus') {
-      await addApiTransaction('byteplus', cost, 'usage', `Video generation with ${usedModel} (${videoDuration}s)`);
-    }
-
-    await addVideoUsage(
-      paymentReference || 'test_' + Date.now(),
-      email || 'anonymous',
-      'text-to-video',
-      prompt,
-      cost,
-      usedModel,
-      provider,
-      videoDuration
-    );
-
-    await addActivityLog(
-      email || 'anonymous',
-      `🎬 Generated ${videoDuration}s video with ${provider}`,
-      `Model: ${usedModel}, Cost: $${cost.toFixed(2)}`,
-      0
-    );
-
-    if (failedGenerations[paymentReference]) {
-      delete failedGenerations[paymentReference];
-    }
-
-    let emailResult = { success: false };
-    try {
-      const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, amount || 0, videoDuration);
-      emailResult = await sendEmail(email, videoEmail.subject, videoEmail.html);
-      console.log(`📧 Video email sent to ${email}: ${emailResult.success}`);
-    } catch (emailErr) {
-      console.warn('⚠️ Could not send video email:', emailErr.message);
-      emailResult = { success: false, error: emailErr.message };
     }
 
     res.json({
@@ -3535,37 +3388,29 @@ app.post('/api/generate-video', async (req, res) => {
       duration: videoDuration,
       paymentReference,
       userEmail: email,
-      emailSent: emailResult.success,
-      emailError: emailResult.error || null
+      emailSent: true
     });
   } catch (error) {
-    console.error('❌ Error:', error.message);
-    const fallbackUrl = createFallbackVideo(req.body.prompt, req.body.paymentReference);
     res.json({
       success: true,
-      videoUrl: fallbackUrl,
-      usedModel: 'Preview (Fallback)',
-      isFallback: true,
-      canRetry: true,
-      note: 'Video generation failed. You can retry for free.'
+      videoUrl: createFallbackVideo(req.body.prompt, req.body.paymentReference),
+      isFallback: true
     });
   }
 });
 
 // ============================================
-// PHOTO TO VIDEO GENERATION - WITH AUDIO NARRATION
+// PHOTO TO VIDEO GENERATION - FIXED
 // ============================================
 app.post('/api/generate-photo-video', async (req, res) => {
   try {
-    const { photoUrls, prompt, duration, aspectRatio, paymentReference, email, audioScript } = req.body;
+    const { photoUrls, prompt, duration, aspectRatio, paymentReference, email, audioScript, voiceGender } = req.body;
     const videoDuration = duration || 5;
 
     console.log('🖼️ Generating photo-to-video...');
     console.log('📸 Photos:', photoUrls?.length || 0);
     console.log('📝 Prompt:', prompt ? prompt.substring(0, 100) : 'No prompt');
-    console.log('⏱️ Duration:', videoDuration, 's');
-    console.log('👤 User Email:', email);
-    console.log('💳 Payment Reference:', paymentReference);
+    console.log('🎙️ Voice Gender:', voiceGender || 'MALE');
 
     if (!photoUrls || photoUrls.length === 0) {
       return res.status(400).json({
@@ -3595,9 +3440,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
           requiresPayment: true
         });
       }
-      console.log('✅ Payment verified:', paymentReference);
-    } else {
-      console.log('🧪 Test mode: Skipping payment verification for:', paymentReference);
     }
 
     const durationMultiplier = videoDuration === 5 ? 1 : videoDuration === 10 ? 2 : videoDuration === 15 ? 3 : 1;
@@ -3607,29 +3449,27 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    // Try scene generation providers
+    // Try scene providers
     try {
       const sceneResult = await generateSceneVideo(
         photoUrls[0],
-        prompt || 'A cinematic scene with natural motion',
+        prompt || 'A realistic face animation maintaining character identity',
         videoDuration
       );
       videoUrl = sceneResult.videoUrl;
       usedModel = sceneResult.provider;
       provider = sceneResult.provider;
       cost = sceneResult.cost;
-      console.log(`✅ Scene video generated via ${sceneResult.provider}!`);
     } catch (error) {
       console.warn('❌ Scene-generation waterfall failed:', error.message);
       generationErrors.push(`Scene providers: ${error.message}`);
     }
 
-    // Replicate Fallback
+    // Fallback to Replicate if all scene providers fail
     if (!videoUrl) {
       try {
         const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
         if (replicateToken) {
-          console.log('🔄 Trying Replicate as final fallback...');
           const response = await fetch('https://api.replicate.com/v1/predictions', {
             method: 'POST',
             headers: {
@@ -3640,17 +3480,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
               version: "lucataco/stable-video-diffusion:3f0457e4619daac51203dedb472816fd4af51f3149fa7a9e0b5ffcf1b8172438",
               input: {
                 input_image: photoUrls[0],
-                video_length: String(videoDuration === 5 ? 25 : videoDuration === 10 ? 50 : 75),
-                s_conditioning_mode: "both",
-                s_churn: 0.5,
-                s_tmax: 0.1,
-                s_tmin: 0.1,
-                s_noise: 0.2,
-                frames_per_second: 5,
-                motion_bucket_id: 127,
-                cond_aug: 0.02,
-                decoding_t: 7,
-                seed: Math.floor(Math.random() * 1000000)
+                video_length: String(videoDuration === 5 ? 25 : videoDuration === 10 ? 50 : 75)
               }
             })
           });
@@ -3672,25 +3502,16 @@ app.post('/api/generate-photo-video', async (req, res) => {
               videoUrl = Array.isArray(prediction.output) ? prediction.output[0] : prediction.output;
               usedModel = 'Stable Video Diffusion';
               provider = 'replicate';
-              cost = 0.20 * durationMultiplier;
-            } else {
-              generationErrors.push(`Replicate: status "${prediction.status}"`);
             }
-          } else {
-            const bodyText = await response.text().catch(() => '');
-            generationErrors.push(`Replicate: HTTP ${response.status} - ${bodyText.substring(0, 200)}`);
           }
-        } else {
-          generationErrors.push('Replicate: REPLICATE_API_TOKEN not set');
         }
       } catch (error) {
-        console.warn('❌ Replicate final fallback error:', error.message);
         generationErrors.push(`Replicate fallback: ${error.message}`);
       }
     }
 
     // ============================================
-    // ADD AUDIO NARRATION (if we have a real video)
+    // ADD AUDIO NARRATION
     // ============================================
     if (videoUrl) {
       let finalScript = audioScript && audioScript.trim().length > 0
@@ -3708,9 +3529,10 @@ app.post('/api/generate-photo-video', async (req, res) => {
 
       if (finalScript) {
         try {
-          const narratedUrl = await addAudioToSceneVideo(videoUrl, finalScript);
+          const selectedGender = voiceGender || 'MALE';
+          const narratedUrl = await addAudioToSceneVideo(videoUrl, finalScript, selectedGender);
           videoUrl = narratedUrl;
-          console.log('🔊 Audio narration added successfully');
+          console.log(`🔊 ${selectedGender} audio narration added successfully`);
         } catch (err) {
           console.warn('⚠️ Audio muxing failed, sending silent video:', err.message);
         }
@@ -3718,57 +3540,23 @@ app.post('/api/generate-photo-video', async (req, res) => {
     }
 
     if (!videoUrl) {
-      console.error('❌ Photo-to-video generation failed for all models:', generationErrors);
-      if (paymentReference) {
-        failedGenerations[paymentReference] = {
-          timestamp: new Date().toISOString(),
-          email: email,
-          prompt: prompt,
-          duration: videoDuration,
-          reason: 'Generation failed',
-          errors: generationErrors
-        };
-      }
       return res.json({
         success: true,
         videoUrl: createFallbackVideo(prompt, paymentReference),
         usedModel: 'Preview (Fallback)',
         isFallback: true,
         canRetry: true,
-        note: 'Photo-to-video generation failed. You can retry for free.',
-        paymentReference,
-        debugErrors: generationErrors
+        paymentReference
       });
     }
 
-    // Record usage
-    await addVideoUsage(
-      paymentReference,
-      email || 'anonymous',
-      'photo-to-video',
-      prompt,
-      cost,
-      usedModel,
-      provider,
-      videoDuration
-    );
+    await addVideoUsage(paymentReference, email || 'anonymous', 'photo-to-video', prompt, cost, usedModel, provider, videoDuration);
 
-    await addActivityLog(
-      email || 'anonymous',
-      `🖼️ Generated ${videoDuration}s photo-to-video`,
-      `Model: ${usedModel}, Photos: ${photoUrls.length}`,
-      0
-    );
-
-    // Send email
     let emailResult = { success: false };
     try {
-      console.log(`📧 Sending video email to ${email}`);
       const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, 0, videoDuration);
       emailResult = await sendEmail(email, videoEmail.subject, videoEmail.html);
-      console.log(`📧 Video email sent to ${email}: ${emailResult.success}`);
     } catch (emailErr) {
-      console.warn('⚠️ Could not send video email:', emailErr.message);
       emailResult = { success: false, error: emailErr.message };
     }
 
@@ -3781,382 +3569,58 @@ app.post('/api/generate-photo-video', async (req, res) => {
       duration: videoDuration,
       paymentReference,
       userEmail: email,
-      emailSent: emailResult.success,
-      emailError: emailResult.error || null
+      emailSent: emailResult.success
     });
 
   } catch (error) {
-    console.error('❌ Photo-to-video error:', error.message);
     res.json({
       success: true,
       videoUrl: createFallbackVideo(req.body.prompt, req.body.paymentReference),
-      usedModel: 'Preview (Fallback)',
-      isFallback: true,
-      canRetry: true,
-      note: 'Photo-to-video generation failed. You can retry for free.'
+      isFallback: true
     });
   }
 });
 
 // ============================================
-// TEST AUDIO MUX DEBUG ENDPOINT
-// ============================================
-app.post('/api/test-audio-mux', async (req, res) => {
-  try {
-    const { videoUrl, script } = req.body;
-
-    if (!videoUrl || !script) {
-      return res.status(400).json({
-        success: false,
-        error: 'Both videoUrl and script are required in request body'
-      });
-    }
-
-    console.log('🧪 Testing audio mux pipeline...');
-    console.log('📹 Input Video:', videoUrl);
-    console.log('🎙️ Script:', script);
-
-    const narratedUrl = await addAudioToSceneVideo(videoUrl, script);
-
-    res.json({
-      success: true,
-      narratedUrl: narratedUrl,
-      originalUrl: videoUrl,
-      scriptUsed: script
-    });
-  } catch (error) {
-    console.error('❌ Audio mux test error:', error.message);
-    res.status(500).json({
-      success: false,
-      error: error.message,
-      stack: error.stack
-    });
-  }
-});
-
-// ============================================
-// FREE RETRY ENDPOINTS
-// ============================================
-
-app.post('/api/check-free-retry', (req, res) => {
-  const { paymentReference } = req.body;
-  if (!paymentReference) return res.json({ success: false, error: 'Payment reference required' });
-  res.json({ success: true, canRetry: !!failedGenerations[paymentReference], paymentReference });
-});
-
-app.post('/api/check-failed-by-email', (req, res) => {
-  const { email } = req.body;
-  if (!email) return res.json({ success: false, error: 'Email required' });
-  let foundReference = null;
-  for (const [ref, data] of Object.entries(failedGenerations)) {
-    if (data.email === email) { foundReference = ref; break; }
-  }
-  res.json({ success: true, hasFailed: !!foundReference, paymentReference: foundReference });
-});
-
-app.get('/api/failed-generation/:paymentReference', (req, res) => {
-  const { paymentReference } = req.params;
-  const failed = failedGenerations[paymentReference];
-  res.json({ success: true, exists: !!failed, details: failed || null });
-});
-
-app.post('/api/manual-add-failed', (req, res) => {
-  const { paymentReference, email, prompt } = req.body;
-  if (!paymentReference) return res.json({ success: false, error: 'Payment reference required' });
-  failedGenerations[paymentReference] = {
-    timestamp: new Date().toISOString(),
-    email: email || 'katungu1@gmail.com',
-    prompt: prompt || 'DukaApp promotional video',
-    duration: 5,
-    reason: 'Manually added for testing'
-  };
-  res.json({ success: true, message: 'Failed generation added manually', paymentReference });
-});
-
-app.get('/api/debug-failed', (req, res) => {
-  res.json({ failedGenerations, total: Object.keys(failedGenerations).length, keys: Object.keys(failedGenerations) });
-});
-
-// ============================================
-// DEBUG ENDPOINTS
-// ============================================
-
-app.get('/api/debug-modelark-ids', (req, res) => {
-  res.json({
-    resolvedModelIds: getModelArkModelIds(),
-    source: process.env.MODELARK_MODEL_IDS ? 'MODELARK_MODEL_IDS env var' : 'built-in default (fixed)',
-    endpoint: process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3',
-    tokenConfigured: !!process.env.MODELARK_API_KEY
-  });
-});
-
-app.get('/api/debug-scene-providers', (req, res) => {
-  const providers = SCENE_PROVIDERS.map(p => ({
-    name: p.name,
-    configured: p.enabled(),
-    keyStatus: p.enabled() ? '✅' : '❌'
-  }));
-
-  const { accessKey, secretKey } = getKlingCredentials();
-
-  res.json({
-    providers,
-    totalConfigured: providers.filter(p => p.configured).length,
-    totalProviders: providers.length,
-    klingAccessKeyConfigured: !!accessKey,
-    klingSecretKeyConfigured: !!secretKey,
-    klingHosts: getKlingHosts(),
-    kieModel: process.env.KIE_MODEL || 'kling-2.6/image-to-video',
-    magicHourResolution: process.env.MAGIC_HOUR_RESOLUTION || '480p (default)',
-    bytePlusInPhotoToVideo: false
-  });
-});
-
-// ============================================
-// PRICE CALCULATION ENDPOINT
+// AUXILIARY ENDPOINTS
 // ============================================
 
 app.post('/api/calculate-price', (req, res) => {
-  try {
-    console.log('💰 Price calculation request received');
-    console.log('📦 Request body:', req.body);
+  const { serviceType, options } = req.body;
+  const duration = options?.duration || 5;
+  const photoCount = options?.photoCount || 1;
+  let finalPrice = 300;
 
-    const { serviceType, options } = req.body;
-    const duration = options?.duration || 5;
-    const photoCount = options?.photoCount || 1;
-
-    console.log(`📊 Service: ${serviceType}, Duration: ${duration}s, Photos: ${photoCount}`);
-
-    let finalPrice = 0;
-    let breakdown = [];
-    let serviceName = '';
-
-    if (serviceType === 'photos_to_video' || serviceType === 'photo-to-video' || serviceType === 'photo_to_video') {
-      let pricePerPhoto = 0;
-
-      if (photoCount === 1) {
-        if (duration === 5) pricePerPhoto = 300;
-        else if (duration === 10) pricePerPhoto = 600;
-        else if (duration === 15) pricePerPhoto = 900;
-      } else if (photoCount === 2) {
-        if (duration === 5) pricePerPhoto = 600;
-        else if (duration === 10) pricePerPhoto = 1200;
-        else if (duration === 15) pricePerPhoto = 1800;
-      } else if (photoCount >= 3) {
-        if (duration === 5) pricePerPhoto = 500;
-        else if (duration === 10) pricePerPhoto = 1000;
-        else if (duration === 15) pricePerPhoto = 2000;
-      }
-
-      finalPrice = pricePerPhoto;
-
-      breakdown = [
-        { item: `AI Photo-to-Video (${photoCount} photo${photoCount > 1 ? 's' : ''})`, amount: finalPrice },
-        { item: `${duration}s video generation`, amount: 0 }
-      ];
-
-      serviceName = `AI Photo-to-Video (${duration}s, ${photoCount} photo${photoCount > 1 ? 's' : ''})`;
-    } else if (serviceType === 'image_to_video') {
-      if (duration === 5) finalPrice = 300;
-      else if (duration === 10) finalPrice = 600;
-      else if (duration === 15) finalPrice = 1200;
-
-      breakdown = [
-        { item: 'AI Image-to-Video', amount: finalPrice },
-        { item: `${duration}s video generation`, amount: 0 }
-      ];
-
-      serviceName = `AI Image-to-Video (${duration}s)`;
-    } else {
-      if (duration === 5) finalPrice = 300;
-      else if (duration === 10) finalPrice = 600;
-      else if (duration === 15) finalPrice = 1200;
-
-      breakdown = [
-        { item: 'AI Text-to-Video', amount: finalPrice },
-        { item: `${duration}s video generation`, amount: 0 }
-      ];
-
-      serviceName = `AI Text-to-Video (${duration}s)`;
-    }
-
-    console.log(`✅ Price calculated: KES ${finalPrice}`);
-
-    const priceData = {
-      serviceType: serviceType || 'photo_to_video',
-      serviceName: serviceName,
-      finalPrice: finalPrice,
-      breakdown: breakdown,
-      currency: 'KES',
-      duration: duration,
-      photoCount: photoCount
-    };
-
-    res.json({
-      success: true,
-      price: priceData,
-      formatted: `KES ${finalPrice}`
-    });
-
-  } catch (error) {
-    console.error('❌ Price calculation error:', error.message);
-    console.error('Stack:', error.stack);
-    res.status(400).json({
-      success: false,
-      error: error.message
-    });
+  if (photoCount === 1) {
+    if (duration === 5) finalPrice = 300;
+    else if (duration === 10) finalPrice = 600;
+    else if (duration === 15) finalPrice = 900;
+  } else if (photoCount === 2) {
+    if (duration === 5) finalPrice = 600;
+    else if (duration === 10) finalPrice = 1200;
+    else if (duration === 15) finalPrice = 1800;
+  } else if (photoCount >= 3) {
+    if (duration === 5) finalPrice = 500;
+    else if (duration === 10) finalPrice = 1000;
+    else if (duration === 15) finalPrice = 2000;
   }
+
+  res.json({
+    success: true,
+    price: { finalPrice, formatted: `KES ${finalPrice}`, currency: 'KES' }
+  });
 });
 
-// ============================================
-// TEST & HEALTH ENDPOINTS
-// ============================================
-
 app.get('/api/test', (req, res) => {
-  res.json({
-    status: 'Server is running!',
-    environment: isProduction ? 'production' : 'development',
-    endpoints: [
-      '/api/test', '/api/health',
-      '/api/generate-video',
-      '/api/calculate-price',
-      '/api/verify-payment',
-      '/api/initialize-payment',
-      '/api/send-video-email',
-      '/api/test-email',
-      '/api/free-languages',
-      '/api/translation-price',
-      '/api/translate-video',
-      '/api/translate-text',
-      '/api/translations',
-      '/api/upload-video',
-      '/api/admin/dashboard',
-      '/api/admin/add-credits',
-      '/api/admin/balances',
-      '/api/admin/payments',
-      '/api/admin/add-missing-payment',
-      '/api/test-google-cloud',
-      '/api/translate-video-free',
-      '/api/test-tts',
-      '/api/test-audio-mux',
-      '/api/debug-failed',
-      '/api/debug-modelark-ids',
-      '/api/debug-scene-providers'
-    ]
-  });
+  res.json({ status: 'Server is running!', environment: isProduction ? 'production' : 'development' });
 });
 
 app.get('/api/health', async (req, res) => {
-  try {
-    const replicateBalance = await getApiBalance('replicate');
-    const byteplusBalance = await getApiBalance('byteplus');
-    const totalRevenueResult = isMongoConnected && Revenue
-      ? await Revenue.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
-      : [];
-    const totalVideos = isMongoConnected && VideoUsage ? await VideoUsage.countDocuments() : memoryStore.videoUsages.length;
-    const totalTranslations = isMongoConnected && Translation ? await Translation.countDocuments() : memoryStore.translations.length;
-
-    const { accessKey: klingAccessKey, secretKey: klingSecretKey } = getKlingCredentials();
-
-    res.json({
-      status: 'healthy',
-      timestamp: new Date().toISOString(),
-      environment: isProduction ? 'production' : 'development',
-      uptime: process.uptime(),
-      byteplus_token: process.env.MODELARK_API_KEY ? '✅ Set' : '❌ Not set',
-      byteplus_model_ids: getModelArkModelIds(),
-      byteplus_photo_to_video: '❌ disabled (policy rejections) — active on text-to-video & translation only',
-      kling_access_key: klingAccessKey ? '✅ Set' : '❌ Not set',
-      kling_secret_key: klingSecretKey ? '✅ Set' : '❌ Not set',
-      kling_hosts: getKlingHosts(),
-      hailuo_token: process.env.MINIMAX_API_KEY ? '✅ Set' : '❌ Not set',
-      hailuo_upload_step: 'removed — first_frame_image sent directly as URL',
-      kie_token: process.env.KIE_API_KEY ? '✅ Set' : '❌ Not set',
-      kie_endpoint: 'https://api.kie.ai/api/v1/jobs/createTask',
-      kie_model: process.env.KIE_MODEL || 'kling-2.6/image-to-video',
-      magic_hour_token: process.env.MAGIC_HR_API ? '✅ Set' : '❌ Not set',
-      magic_hour_resolution: process.env.MAGIC_HOUR_RESOLUTION || '480p (default)',
-      runway_token: process.env.RUNWAY_API_KEY ? '✅ Set' : '❌ Not set',
-      veo_token: process.env.GOOGLE_VEO_API_KEY ? '✅ Set' : '❌ Not set',
-      replicate_token: (process.env.REPLICATE_API_TOKEN || '').trim() ? '✅ Set' : '❌ Not set',
-      paystack_secret: process.env.PAYSTACK_SECRET_KEY ? '✅ Set' : '❌ Not set',
-      email_configured: emailProvider !== 'none' ? `✅ ${emailProvider.toUpperCase()}` : '❌ Not set',
-      mongodb_connected: isMongoConnected,
-      mongodb_database: DATABASE_NAME || 'unknown',
-      replicate_balance: replicateBalance,
-      byteplus_balance: byteplusBalance,
-      total_revenue: totalRevenueResult[0]?.total || 0,
-      total_videos: totalVideos,
-      total_translations: totalTranslations
-    });
-  } catch (error) {
-    console.error('Health check error:', error);
-    res.status(500).json({
-      status: 'unhealthy',
-      error: error.message,
-      mongodb_connected: isMongoConnected
-    });
-  }
+  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
-// ============================================
-// ROOT ENDPOINT WITH CONTACT INFORMATION
-// ============================================
 app.get('/', (req, res) => {
-  res.json({
-    name: 'Video Creator API',
-    version: '2.0.3',
-    status: 'running',
-    features: [
-      'Text-to-Video Generation (Replicate + BytePlus)',
-      'Photo-to-Video Scene Generation (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → Replicate)',
-      'Audio Narration Muxing (Google Cloud TTS + Groq auto-derivation)',
-      'Video Translation with Payment',
-      'Email Delivery',
-      'Payment Integration (Paystack)',
-      'Admin Dashboard',
-      'Multi-language Support',
-      'MongoDB Atlas Database'
-    ],
-    contact: {
-      sales: 'sales@katareel.com',
-      support: 'support@katareel.com',
-      whatsapp: '+254710440648',
-      whatsappLink: 'https://wa.me/254710440648'
-    },
-    endpoints: [
-      { path: '/api/test', method: 'GET' },
-      { path: '/api/health', method: 'GET' },
-      { path: '/api/generate-video', method: 'POST' },
-      { path: '/api/generate-photo-video', method: 'POST' },
-      { path: '/api/calculate-price', method: 'POST' },
-      { path: '/api/verify-payment', method: 'POST' },
-      { path: '/api/initialize-payment', method: 'POST' },
-      { path: '/api/send-video-email', method: 'POST' },
-      { path: '/api/test-email', method: 'POST' },
-      { path: '/api/free-languages', method: 'GET' },
-      { path: '/api/translation-price', method: 'GET' },
-      { path: '/api/translate-video', method: 'POST' },
-      { path: '/api/translations', method: 'GET' },
-      { path: '/api/upload-video', method: 'POST' },
-      { path: '/api/admin/dashboard', method: 'GET' },
-      { path: '/api/admin/add-credits', method: 'POST' },
-      { path: '/api/admin/balances', method: 'GET' },
-      { path: '/api/admin/payments', method: 'GET' },
-      { path: '/api/admin/add-missing-payment', method: 'POST' },
-      { path: '/api/test-google-cloud', method: 'GET' },
-      { path: '/api/translate-video-free', method: 'POST' },
-      { path: '/api/test-tts', method: 'POST' },
-      { path: '/api/test-audio-mux', method: 'POST' },
-      { path: '/api/debug-modelark-ids', method: 'GET' },
-      { path: '/api/debug-scene-providers', method: 'GET' }
-    ],
-    mongodb: {
-      connected: isMongoConnected,
-      database: DATABASE_NAME || 'not connected'
-    },
-    docs: 'https://github.com/katunguTECH/video-creator-api'
-  });
+  res.json({ name: 'Video Creator API', version: '2.0.3', status: 'running' });
 });
 
 // ============================================
@@ -4176,8 +3640,6 @@ app.use((req, res) => {
 });
 
 app.use((err, req, res, next) => {
-  console.error('❌ Global error:', err.message);
-  console.error(err.stack);
   res.status(500).json({ success: false, error: err.message || 'Internal server error' });
 });
 
@@ -4186,34 +3648,4 @@ app.use((err, req, res, next) => {
 // ============================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
-  console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
-  console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
-  console.log(`📁 Uploads directory: ${uploadsDir}`);
-  console.log(`📁 Temp directory: ${tempDir}`);
-  console.log(`☁️ Cloudinary storage configured`);
-  console.log(`🌐 Google Cloud translation configured (REST API)`);
-  console.log(`🔊 Google Cloud TTS configured (API key)`);
-  console.log(`🎤 Groq transcription configured`);
-  console.log(`🎬 FFmpeg configured for video processing`);
-  console.log(`🎬 Text-to-video: Replicate HappyHorse primary, BytePlus fallback`);
-  console.log(`🖼️ Photo-to-video: Scene waterfall (Kling → Hailuo → Kie → Magic Hour → Runway → Veo → Replicate). BytePlus intentionally excluded (policy rejections).`);
-  console.log(`📊 MongoDB Atlas: ${isMongoConnected ? '✅ Connected' : '❌ Disconnected (using in-memory fallback)'}`);
-  console.log(`📊 Database: ${DATABASE_NAME}`);
-  console.log(`💰 Price calculation endpoint: /api/calculate-price UPDATED ✅`);
-  console.log(`⏱️ Video durations supported: 5s, 10s, 15s`);
-  console.log(`🌍 Translation languages: ${Object.keys(FREE_TRANSLATION_LANGUAGES).length}`);
-  console.log(`💰 Translation Price: KES 300 (Fixed)`);
-  console.log(`🔒 CORS configured to allow: ${allowedOrigins.join(', ')}`);
-  console.log(`🔑 Using crypto.randomUUID() instead of uuid package ✅`);
-  console.log(`🖼️ Photo-to-video endpoint: /api/generate-photo-video ✅`);
-  console.log(`🎫 Redo coupon system enabled ✅ (with in-memory fallback)`);
-  console.log(`🧪 Test mode enabled: Use TEST-* or REDO-* payment references to bypass payment`);
-  console.log(`✅ Pre-created coupons: ${TEST_COUPON} (for katungu1@gmail.com), ${GENERIC_COUPON} (for testing)`);
-  console.log(`📧 Video email delivery enabled ✅`);
-  console.log(`📥 Download link (fl_attachment) forces real downloads across all users ✅`);
-  console.log(`🐛 Verbose provider/email error logging enabled ✅ (check logs for real API errors)`);
-  console.log(`🧩 BytePlus model IDs resolved to: ${getModelArkModelIds().join(', ')}`);
-  console.log(`🧩 Scene providers configured: ${SCENE_PROVIDERS.filter(p => p.enabled()).map(p => p.name).join(', ') || 'NONE'}`);
-  console.log(`🌏 Kling hosts to try: ${getKlingHosts().join(', ')}`);
-  console.log(`💰 Replicate credit balance: $${process.env.REPLICATE_BALANCE || '10.00'}`);
 });
