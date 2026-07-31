@@ -1,4 +1,4 @@
-// MusicCaptions.js - New page for adding music and captions
+// MusicCaptions.js - Updated with Paystack Integration
 
 import React, { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -9,6 +9,7 @@ function MusicCaptions() {
   const [videoUrl, setVideoUrl] = useState(location.state?.videoUrl || '');
   const [isUploading, setIsUploading] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [isInitializingPayment, setIsInitializingPayment] = useState(false);
   const [captionText, setCaptionText] = useState('');
   const [captions, setCaptions] = useState([]);
   const [musicFile, setMusicFile] = useState(null);
@@ -22,7 +23,10 @@ function MusicCaptions() {
   const [error, setError] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [email, setEmail] = useState('');
+  const [paymentStatus, setPaymentStatus] = useState(null); // 'pending', 'success', 'failed'
   const fileInputRef = useRef(null);
+
+  const MUSIC_CAPTIONS_PRICE = 200;
 
   const captionStyles = {
     subtle: 'bg-black/40 text-white text-center px-4 py-2 rounded-lg',
@@ -31,6 +35,21 @@ function MusicCaptions() {
     classic: 'bg-white/90 text-black text-center px-4 py-2 rounded',
     karaoke: 'bg-black/50 text-yellow-300 text-center px-4 py-2 rounded-lg font-bold'
   };
+
+  // Check for payment success from URL params
+  React.useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const paymentSuccess = params.get('payment');
+    const ref = params.get('reference');
+    
+    if (paymentSuccess === 'success' && ref) {
+      setPaymentReference(ref);
+      setPaymentStatus('success');
+      setError('');
+      // Clear the URL params
+      navigate('/music-captions', { replace: true });
+    }
+  }, [location, navigate]);
 
   const handleVideoUpload = async (event) => {
     const file = event.target.files[0];
@@ -94,36 +113,102 @@ function MusicCaptions() {
     setCaptions([]);
   };
 
-  const handleProcess = async () => {
+  // Initialize Paystack Payment
+  const handleInitializePayment = async () => {
+    if (!email) {
+      setError('Please enter your email address');
+      return;
+    }
+
     if (!videoUrl) {
       setError('Please upload or provide a video URL first');
       return;
     }
 
-    if (!paymentReference) {
-      setError('Payment reference is required');
-      return;
-    }
-
-    setIsProcessing(true);
+    setIsInitializingPayment(true);
     setError('');
-    setResultVideoUrl('');
-    setIsProcessingComplete(false);
 
     try {
+      const response = await fetch('/api/initialize-music-captions-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email,
+          amount: MUSIC_CAPTIONS_PRICE,
+        }),
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        // Store the reference
+        setPaymentReference(data.reference);
+        setPaymentStatus('pending');
+        
+        // Redirect to Paystack payment page
+        if (data.authorization_url) {
+          window.location.href = data.authorization_url;
+        } else {
+          // Test mode - process directly
+          setPaymentStatus('success');
+          handleProcessVideo(data.reference);
+        }
+      } else {
+        setError(data.error || 'Payment initialization failed. Please try again.');
+      }
+    } catch (err) {
+      setError('Payment error: ' + err.message);
+    } finally {
+      setIsInitializingPayment(false);
+    }
+  };
+
+  // Process video after successful payment
+  const handleProcessVideo = async (reference) => {
+    setIsProcessing(true);
+    setError('');
+
+    try {
+      // Verify payment first
+      const verifyResponse = await fetch('/api/verify-payment', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          reference: reference,
+          email: email,
+          amount: MUSIC_CAPTIONS_PRICE,
+          serviceType: 'music-captions',
+          paymentMethod: 'card',
+          duration: 5
+        }),
+      });
+
+      const verifyData = await verifyResponse.json();
+      
+      if (!verifyData.success) {
+        setError('Payment verification failed. Please try again.');
+        setIsProcessing(false);
+        return;
+      }
+
+      // Now process the video with music and captions
       const requestBody = {
         videoUrl,
         captions: captions,
-        musicUrl: musicUrl || musicFile ? URL.createObjectURL(musicFile) : null,
+        musicUrl: musicUrl || (musicFile ? URL.createObjectURL(musicFile) : null),
         musicVolume: musicVolume / 100,
         captionStyle,
         captionPosition,
         captionFontSize,
-        paymentReference,
-        email: email || 'anonymous@user.com'
+        paymentReference: reference,
+        email: email
       };
 
-      const response = await fetch('/api/add-music-captions', {
+      const processResponse = await fetch('/api/add-music-captions', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -131,39 +216,30 @@ function MusicCaptions() {
         body: JSON.stringify(requestBody),
       });
 
-      const data = await response.json();
+      const processData = await processResponse.json();
       
-      if (data.success) {
-        setResultVideoUrl(data.resultVideoUrl);
+      if (processData.success) {
+        setResultVideoUrl(processData.resultVideoUrl);
         setIsProcessingComplete(true);
+        setPaymentStatus('success');
         setError('');
-        
-        // Send email if provided
-        if (email && data.resultVideoUrl) {
-          try {
-            await fetch('/api/send-video-email', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({
-                email,
-                videoUrl: data.resultVideoUrl,
-                prompt: 'Video with music and captions',
-                amount: '200',
-                duration: '5'
-              })
-            });
-          } catch (emailErr) {
-            console.warn('Email send failed:', emailErr);
-          }
-        }
       } else {
-        setError(data.error || 'Processing failed');
+        setError(processData.error || 'Processing failed');
       }
     } catch (err) {
       setError('Processing error: ' + err.message);
     } finally {
       setIsProcessing(false);
     }
+  };
+
+  // Manual payment reference input (for testing)
+  const handleManualProcess = async () => {
+    if (!paymentReference) {
+      setError('Please enter a payment reference');
+      return;
+    }
+    await handleProcessVideo(paymentReference);
   };
 
   const handleDownload = () => {
@@ -186,6 +262,19 @@ function MusicCaptions() {
           <h1 className="text-3xl font-bold">🎵 Music & Captions</h1>
           <div className="w-20"></div>
         </div>
+
+        {/* Payment Status Banner */}
+        {paymentStatus === 'success' && (
+          <div className="bg-green-500/20 border border-green-500 rounded-lg p-4 mb-6 text-green-300">
+            ✅ Payment successful! Your video is being processed.
+          </div>
+        )}
+
+        {paymentStatus === 'pending' && (
+          <div className="bg-yellow-500/20 border border-yellow-500 rounded-lg p-4 mb-6 text-yellow-300">
+            ⏳ Payment in progress. Please complete the payment on the Paystack page.
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
           {/* Left Column - Inputs */}
@@ -248,17 +337,7 @@ function MusicCaptions() {
               <h2 className="text-lg font-semibold mb-4">💳 Payment & Delivery</h2>
               <div className="space-y-3">
                 <div>
-                  <label className="text-sm text-gray-400">Payment Reference</label>
-                  <input
-                    type="text"
-                    value={paymentReference}
-                    onChange={(e) => setPaymentReference(e.target.value)}
-                    placeholder="Enter your payment reference"
-                    className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
-                  />
-                </div>
-                <div>
-                  <label className="text-sm text-gray-400">Email (for delivery)</label>
+                  <label className="text-sm text-gray-400">Email (for delivery & payment)</label>
                   <input
                     type="email"
                     value={email}
@@ -267,8 +346,54 @@ function MusicCaptions() {
                     className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
                   />
                 </div>
+                
+                {/* Payment Button */}
+                <button
+                  onClick={handleInitializePayment}
+                  disabled={isInitializingPayment || !email || !videoUrl}
+                  className={`w-full py-3 rounded-lg font-bold text-lg transition-all ${
+                    isInitializingPayment || !email || !videoUrl
+                      ? 'bg-gray-600 cursor-not-allowed'
+                      : 'bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700'
+                  }`}
+                >
+                  {isInitializingPayment ? '⏳ Initializing...' : `💰 Pay KES ${MUSIC_CAPTIONS_PRICE} with Paystack`}
+                </button>
+
+                {/* OR Divider */}
+                <div className="flex items-center gap-4">
+                  <div className="flex-1 border-t border-white/20"></div>
+                  <span className="text-gray-400 text-sm">OR</span>
+                  <div className="flex-1 border-t border-white/20"></div>
+                </div>
+
+                {/* Manual Payment Reference (for testing) */}
+                <div>
+                  <label className="text-sm text-gray-400">Payment Reference (if already paid)</label>
+                  <input
+                    type="text"
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="Enter payment reference"
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
+                  />
+                  <button
+                    onClick={handleManualProcess}
+                    disabled={isProcessing || !paymentReference || !videoUrl}
+                    className={`w-full mt-2 py-2 rounded-lg font-semibold text-sm transition-all ${
+                      isProcessing || !paymentReference || !videoUrl
+                        ? 'bg-gray-600 cursor-not-allowed'
+                        : 'bg-blue-500 hover:bg-blue-600'
+                    }`}
+                  >
+                    {isProcessing ? '⏳ Processing...' : 'Verify & Process with Reference'}
+                  </button>
+                </div>
+
                 <div className="text-sm text-gray-400 bg-white/5 p-3 rounded-lg">
-                  💰 Price: KES 200 (Music + Captions)
+                  💰 Price: KES {MUSIC_CAPTIONS_PRICE} (Music + Captions)
+                  <br />
+                  <span className="text-xs text-gray-500">✓ Secure payment via Paystack</span>
                 </div>
               </div>
             </div>
@@ -437,25 +562,6 @@ function MusicCaptions() {
                 </div>
               )}
             </div>
-
-            {/* Process Button */}
-            <button
-              onClick={handleProcess}
-              disabled={isProcessing || !videoUrl || !paymentReference}
-              className={`w-full py-4 rounded-xl font-bold text-lg transition-all transform hover:scale-105 ${
-                isProcessing || !videoUrl || !paymentReference
-                  ? 'bg-gray-600 cursor-not-allowed'
-                  : 'bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600'
-              }`}
-            >
-              {isProcessing ? '⏳ Processing...' : '🎬 Add Music & Captions'}
-            </button>
-
-            {error && (
-              <div className="bg-red-500/20 border border-red-500 rounded-lg p-3 text-red-300 text-sm">
-                ❌ {error}
-              </div>
-            )}
           </div>
         </div>
 
@@ -483,12 +589,19 @@ function MusicCaptions() {
                   setCaptions([]);
                   setMusicFile(null);
                   setMusicUrl('');
+                  setPaymentStatus(null);
                 }}
                 className="bg-purple-500 hover:bg-purple-600 px-6 py-2 rounded-lg transition-colors"
               >
                 🔄 Start Over
               </button>
             </div>
+          </div>
+        )}
+
+        {error && (
+          <div className="mt-4 bg-red-500/20 border border-red-500 rounded-lg p-3 text-red-300 text-sm">
+            ❌ {error}
           </div>
         )}
       </div>
