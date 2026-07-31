@@ -1260,7 +1260,8 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
   const serviceLabels = {
     'textToVideo': 'Text to Video',
     'photoToVideo': 'Photos to Video',
-    'translation': 'Video Translation'
+    'translation': 'Video Translation',
+    'music-captions': 'Music & Captions'
   };
 
   return {
@@ -1798,7 +1799,7 @@ app.post('/api/translate-video', async (req, res) => {
 
     console.log('🌐 Translation request received:');
     console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
-    console.log(`   Target Language: ${targetLanguage} (${FREE_TRANSLATION_LANGUAGES[targetLanguage] || targetLanguage})`);
+    console.log(`   Target Language: ${targetLanguage}`);
     console.log(`   User Email: ${email}`);
     console.log(`   Payment Reference: ${paymentReference}`);
 
@@ -2147,7 +2148,7 @@ app.post('/api/verify-payment', async (req, res) => {
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-      const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
+      const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
 
       await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
@@ -2178,7 +2179,7 @@ app.post('/api/verify-payment', async (req, res) => {
     console.log('📦 Paystack verification response:', data);
 
     if (data.status && data.data.status === 'success') {
-      const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation' };
+      const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
 
@@ -3582,6 +3583,381 @@ app.post('/api/generate-photo-video', async (req, res) => {
 });
 
 // ============================================
+// ADD MUSIC & CAPTIONS TO VIDEO
+// ============================================
+
+// Helper: Format timestamp for SRT
+function formatTimestamp(seconds) {
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.floor((seconds % 3600) / 60);
+  const secs = Math.floor(seconds % 60);
+  const millis = Math.floor((seconds % 1) * 1000);
+  return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(secs).padStart(2, '0')},${String(millis).padStart(3, '0')}`;
+}
+
+app.post('/api/add-music-captions', async (req, res) => {
+  try {
+    const {
+      videoUrl,
+      captions,
+      musicUrl,
+      musicVolume,
+      captionStyle,
+      captionPosition,
+      captionFontSize,
+      paymentReference,
+      email
+    } = req.body;
+
+    console.log('🎬 Adding music and captions to video...');
+    console.log(`📹 Video URL: ${videoUrl?.substring(0, 50)}...`);
+    console.log(`📝 Captions: ${captions?.length || 0}`);
+    console.log(`🎵 Music: ${musicUrl ? 'Yes' : 'No'}`);
+    console.log(`💳 Payment Reference: ${paymentReference}`);
+
+    // Validate payment
+    if (!paymentReference) {
+      return res.status(402).json({
+        success: false,
+        error: 'Payment required. Please pay KES 200 for music & captions.',
+        requiresPayment: true,
+        price: 200
+      });
+    }
+
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      return res.status(402).json({
+        success: false,
+        error: 'Invalid or expired payment.',
+        requiresPayment: true,
+        price: 200
+      });
+    }
+
+    if (!videoUrl) {
+      return res.status(400).json({
+        success: false,
+        error: 'Video URL is required'
+      });
+    }
+
+    const videoId = crypto.randomUUID();
+    const videoPath = path.join(tempDir, `${videoId}.mp4`);
+    const outputPath = path.join(tempDir, `${videoId}_with_music_captions.mp4`);
+    const tempAudioPath = path.join(tempDir, `${videoId}_music.mp3`);
+    const subtitlePath = path.join(tempDir, `${videoId}.srt`);
+
+    try {
+      // 1. Download input video
+      console.log('📥 Downloading video...');
+      const response = await fetch(videoUrl);
+      if (!response.ok) throw new Error(`Failed to download video: ${response.status}`);
+      const videoBuffer = await response.arrayBuffer();
+      fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
+
+      // Build FFmpeg command - start with video
+      let ffmpegCommand = ffmpeg(videoPath);
+
+      // 2. Add music if provided
+      if (musicUrl) {
+        console.log('🎵 Adding background music...');
+        const musicResponse = await fetch(musicUrl);
+        if (musicResponse.ok) {
+          const musicBuffer = await musicResponse.arrayBuffer();
+          fs.writeFileSync(tempAudioPath, Buffer.from(musicBuffer));
+
+          const volume = (musicVolume || 70) / 100;
+          ffmpegCommand = ffmpegCommand
+            .input(tempAudioPath)
+            .audioFilters([
+              `volume=${volume}`,
+              'amix=inputs=2:duration=shortest'
+            ]);
+        }
+      }
+
+      // 3. Add captions/subtitles
+      if (captions && captions.length > 0) {
+        console.log('📝 Adding captions...');
+        
+        // Generate SRT from captions
+        let srtContent = '';
+        captions.forEach((caption, index) => {
+          const startTime = index * 1.5;
+          const endTime = startTime + 1.5;
+          const start = formatTimestamp(startTime);
+          const end = formatTimestamp(endTime);
+          srtContent += `${index + 1}\n${start} --> ${end}\n${caption.text}\n\n`;
+        });
+
+        fs.writeFileSync(subtitlePath, srtContent);
+
+        // Style configuration for subtitles
+        let styleOptions = [
+          'force_style=FontName=Arial',
+          `FontSize=${captionFontSize || 24}`,
+          'PrimaryColour=&HFFFFFF&',
+          'BorderStyle=3',
+          'Outline=2',
+          'Shadow=1'
+        ];
+
+        // Position
+        if (captionPosition === 'top') {
+          styleOptions.push('MarginV=20');
+          styleOptions.push('Alignment=6');
+        } else if (captionPosition === 'center') {
+          styleOptions.push('Alignment=5');
+        } else { // bottom
+          styleOptions.push('MarginV=50');
+          styleOptions.push('Alignment=2');
+        }
+
+        // Style specific settings
+        if (captionStyle === 'bold') {
+          styleOptions.push('Bold=1');
+        }
+        if (captionStyle === 'neon') {
+          styleOptions.push('PrimaryColour=&HFF69B4&');
+          styleOptions.push('OutlineColour=&HFF1493&');
+          styleOptions.push('Outline=3');
+        }
+        if (captionStyle === 'classic') {
+          styleOptions.push('PrimaryColour=&H000000&');
+          styleOptions.push('BackColour=&HFFFFFF&');
+          styleOptions.push('BorderStyle=4');
+        }
+        if (captionStyle === 'karaoke') {
+          styleOptions.push('PrimaryColour=&HFFFF00&');
+          styleOptions.push('OutlineColour=&HFF0000&');
+          styleOptions.push('Outline=2');
+        }
+
+        const styleString = styleOptions.join(',');
+        
+        ffmpegCommand = ffmpegCommand
+          .input(subtitlePath)
+          .outputOptions([
+            `-c:v libx264`,
+            `-preset medium`,
+            `-crf 23`,
+            `-c:a aac`,
+            `-b:a 128k`,
+            `-vf subtitles=${subtitlePath}:${styleString}`,
+            `-map 0:v:0`,
+            `-map 0:a:0`
+          ]);
+      }
+
+      // 4. Execute FFmpeg
+      console.log('🎬 Processing video with music and captions...');
+      await new Promise((resolve, reject) => {
+        ffmpegCommand
+          .output(outputPath)
+          .on('end', resolve)
+          .on('error', reject)
+          .run();
+      });
+
+      console.log('✅ Video processing complete');
+
+      // 5. Upload to Cloudinary
+      console.log('☁️ Uploading to Cloudinary...');
+      const uploadResult = await cloudinary.uploader.upload(outputPath, {
+        resource_type: 'video',
+        folder: 'video-creator-uploads',
+        public_id: `${videoId}_with_music_captions`
+      });
+
+      // 6. Cleanup temp files
+      [videoPath, outputPath, tempAudioPath, subtitlePath].forEach(f => {
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+      });
+
+      // 7. Log activity
+      await addActivityLog(
+        email || 'anonymous',
+        '🎵 Added Music & Captions',
+        `Captions: ${captions?.length || 0}, Music: ${musicUrl ? 'Yes' : 'No'}`,
+        200
+      );
+      await addRevenue(videoId, email || 'anonymous', 200, 'music-captions', paymentReference, 'card');
+      await addUserPayment(email || 'anonymous', 200, 'card', 'music-captions', paymentReference);
+      await addVideoUsage(paymentReference, email || 'anonymous', 'music-captions', captions?.map(c => c.text).join(' ') || 'Music & Captions', 200, 'FFmpeg', 'custom', 5);
+
+      // 8. Send email if provided
+      if (email) {
+        try {
+          const downloadUrl = uploadResult.secure_url.includes('/upload/')
+            ? uploadResult.secure_url.replace('/upload/', '/upload/fl_attachment/')
+            : uploadResult.secure_url;
+
+          const emailHtml = `
+            <!DOCTYPE html>
+            <html>
+            <head>
+              <style>
+                body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+                .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px; color: white; }
+                .content { padding: 20px; }
+                .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
+                .video-container video { width: 100%; max-height: 400px; }
+                .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
+                .details { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 15px 0; }
+              </style>
+            </head>
+            <body>
+              <div class="header">
+                <h1>🎵 Your Video with Music & Captions is Ready!</h1>
+              </div>
+              <div class="content">
+                <p>Hi there,</p>
+                <p>Your video has been enhanced with music and captions! 🎉</p>
+                
+                <div class="details">
+                  <h3>📝 Video Details:</h3>
+                  <p><strong>Captions:</strong> ${captions?.length || 0} caption(s)</p>
+                  <p><strong>Music:</strong> ${musicUrl ? '✅ Added' : '❌ No music'}</p>
+                  <p><strong>Style:</strong> ${captionStyle || 'subtle'}</p>
+                  <p><strong>Position:</strong> ${captionPosition || 'bottom'}</p>
+                </div>
+
+                <div class="video-container">
+                  <video controls>
+                    <source src="${uploadResult.secure_url}" type="video/mp4">
+                    Your browser does not support the video tag.
+                  </video>
+                </div>
+
+                <div style="text-align: center; margin: 20px 0;">
+                  <a href="${downloadUrl}" class="button">⬇️ Download Video</a>
+                </div>
+
+                <p style="font-size: 12px; color: #666;">
+                  Or copy this link: <br>
+                  <a href="${uploadResult.secure_url}" style="word-break: break-all;">${uploadResult.secure_url}</a>
+                </p>
+
+                <p>Thank you for using VidAI Creator! 🚀</p>
+                <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+              </div>
+            </body>
+            </html>
+          `;
+
+          await sendEmail(email, '🎵 Your Video with Music & Captions is Ready!', emailHtml);
+          console.log(`📧 Email sent to ${email}`);
+        } catch (emailErr) {
+          console.warn('⚠️ Email send failed:', emailErr.message);
+        }
+      }
+
+      res.json({
+        success: true,
+        resultVideoUrl: uploadResult.secure_url,
+        message: 'Music and captions added successfully!',
+        paymentReference,
+        captionsCount: captions?.length || 0,
+        hasMusic: !!musicUrl
+      });
+
+    } catch (error) {
+      console.error('❌ Processing error:', error.message);
+      // Cleanup on error
+      [videoPath, outputPath, tempAudioPath, subtitlePath].forEach(f => {
+        if (fs.existsSync(f)) fs.unlinkSync(f);
+      });
+      throw error;
+    }
+
+  } catch (error) {
+    console.error('❌ Music & Captions error:', error.message);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Failed to add music and captions'
+    });
+  }
+});
+
+// ============================================
+// INITIALIZE MUSIC & CAPTIONS PAYMENT
+// ============================================
+
+app.post('/api/initialize-music-captions-payment', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const amount = 200; // KES 200 for music & captions
+
+    console.log('💰 Initializing Music & Captions payment...');
+    console.log('📧 Email:', email);
+    console.log('💰 Amount:', amount);
+
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
+      // Test mode
+      const reference = 'MUSIC-TEST-' + Date.now();
+      console.log('⚠️ Using test mode, reference:', reference);
+      return res.json({
+        success: true,
+        reference: reference,
+        authorization_url: 'https://www.katareel.com/music-captions?payment=success',
+        amount: amount,
+        currency: 'KES',
+        testMode: true
+      });
+    }
+
+    const response = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: email,
+        amount: amount * 100,
+        metadata: {
+          serviceType: 'music-captions',
+          amount: amount,
+          custom_fields: [
+            { display_name: "Service", variable_name: "service", value: "Music & Captions" },
+            { display_name: "Amount", variable_name: "amount", value: `${amount} KES` }
+          ]
+        },
+        callback_url: process.env.FRONTEND_URL + '/music-captions?payment=success'
+      })
+    });
+
+    const data = await response.json();
+    
+    if (data.status) {
+      console.log('✅ Payment initialized successfully!');
+      console.log('📝 Reference:', data.data.reference);
+      res.json({
+        success: true,
+        reference: data.data.reference,
+        authorization_url: data.data.authorization_url,
+        amount: amount,
+        currency: 'KES'
+      });
+    } else {
+      console.error('❌ Paystack error:', data.message);
+      res.status(400).json({
+        success: false,
+        error: data.message || 'Payment initialization failed'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Payment init error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
 // AUXILIARY ENDPOINTS
 // ============================================
 
@@ -3620,7 +3996,7 @@ app.get('/api/health', async (req, res) => {
 });
 
 app.get('/', (req, res) => {
-  res.json({ name: 'Video Creator API', version: '2.0.3', status: 'running' });
+  res.json({ name: 'Video Creator API', version: '2.0.4', status: 'running' });
 });
 
 // ============================================

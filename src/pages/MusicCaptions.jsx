@@ -1,0 +1,499 @@
+// MusicCaptions.js - New page for adding music and captions
+
+import React, { useState, useRef } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+
+function MusicCaptions() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [videoUrl, setVideoUrl] = useState(location.state?.videoUrl || '');
+  const [isUploading, setIsUploading] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [captionText, setCaptionText] = useState('');
+  const [captions, setCaptions] = useState([]);
+  const [musicFile, setMusicFile] = useState(null);
+  const [musicUrl, setMusicUrl] = useState('');
+  const [musicVolume, setMusicVolume] = useState(70);
+  const [captionStyle, setCaptionStyle] = useState('subtle');
+  const [captionPosition, setCaptionPosition] = useState('bottom');
+  const [captionFontSize, setCaptionFontSize] = useState(24);
+  const [resultVideoUrl, setResultVideoUrl] = useState('');
+  const [isProcessingComplete, setIsProcessingComplete] = useState(false);
+  const [error, setError] = useState('');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [email, setEmail] = useState('');
+  const fileInputRef = useRef(null);
+
+  const captionStyles = {
+    subtle: 'bg-black/40 text-white text-center px-4 py-2 rounded-lg',
+    bold: 'bg-black/70 text-white text-center px-6 py-3 rounded-xl font-bold',
+    neon: 'bg-transparent text-pink-400 text-center px-4 py-2 drop-shadow-[0_0_10px_rgba(236,72,153,0.5)] font-bold',
+    classic: 'bg-white/90 text-black text-center px-4 py-2 rounded',
+    karaoke: 'bg-black/50 text-yellow-300 text-center px-4 py-2 rounded-lg font-bold'
+  };
+
+  const handleVideoUpload = async (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    setError('');
+
+    const formData = new FormData();
+    formData.append('video', file);
+
+    try {
+      const response = await fetch('/api/upload-video', {
+        method: 'POST',
+        body: formData,
+      });
+
+      const data = await response.json();
+      if (data.success) {
+        setVideoUrl(data.videoUrl);
+        setResultVideoUrl('');
+        setIsProcessingComplete(false);
+      } else {
+        setError(data.error || 'Upload failed');
+      }
+    } catch (err) {
+      setError('Upload error: ' + err.message);
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  const handleMusicUpload = (event) => {
+    const file = event.target.files[0];
+    if (!file) return;
+    setMusicFile(file);
+    setMusicUrl(URL.createObjectURL(file));
+  };
+
+  const handleAddCaption = () => {
+    if (!captionText.trim()) return;
+    
+    const newCaption = {
+      id: Date.now(),
+      text: captionText.trim(),
+      timestamp: captions.length === 0 ? 0 : captions[captions.length - 1].timestamp + 1,
+      style: captionStyle,
+      position: captionPosition,
+      fontSize: captionFontSize
+    };
+    
+    setCaptions([...captions, newCaption]);
+    setCaptionText('');
+  };
+
+  const handleRemoveCaption = (id) => {
+    setCaptions(captions.filter(c => c.id !== id));
+  };
+
+  const handleClearCaptions = () => {
+    setCaptions([]);
+  };
+
+  const handleProcess = async () => {
+    if (!videoUrl) {
+      setError('Please upload or provide a video URL first');
+      return;
+    }
+
+    if (!paymentReference) {
+      setError('Payment reference is required');
+      return;
+    }
+
+    setIsProcessing(true);
+    setError('');
+    setResultVideoUrl('');
+    setIsProcessingComplete(false);
+
+    try {
+      const requestBody = {
+        videoUrl,
+        captions: captions,
+        musicUrl: musicUrl || musicFile ? URL.createObjectURL(musicFile) : null,
+        musicVolume: musicVolume / 100,
+        captionStyle,
+        captionPosition,
+        captionFontSize,
+        paymentReference,
+        email: email || 'anonymous@user.com'
+      };
+
+      const response = await fetch('/api/add-music-captions', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestBody),
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setResultVideoUrl(data.resultVideoUrl);
+        setIsProcessingComplete(true);
+        setError('');
+        
+        // Send email if provided
+        if (email && data.resultVideoUrl) {
+          try {
+            await fetch('/api/send-video-email', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                email,
+                videoUrl: data.resultVideoUrl,
+                prompt: 'Video with music and captions',
+                amount: '200',
+                duration: '5'
+              })
+            });
+          } catch (emailErr) {
+            console.warn('Email send failed:', emailErr);
+          }
+        }
+      } else {
+        setError(data.error || 'Processing failed');
+      }
+    } catch (err) {
+      setError('Processing error: ' + err.message);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDownload = () => {
+    if (resultVideoUrl) {
+      window.open(resultVideoUrl, '_blank');
+    }
+  };
+
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white p-6">
+      <div className="max-w-6xl mx-auto">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <button
+            onClick={() => navigate('/')}
+            className="text-white/70 hover:text-white transition-colors text-sm flex items-center gap-2"
+          >
+            ← Back to Home
+          </button>
+          <h1 className="text-3xl font-bold">🎵 Music & Captions</h1>
+          <div className="w-20"></div>
+        </div>
+
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          {/* Left Column - Inputs */}
+          <div className="space-y-6">
+            {/* Video Input */}
+            <div className="bg-white/10 rounded-xl p-6">
+              <h2 className="text-lg font-semibold mb-4">📹 Your Video</h2>
+              
+              <div className="border-2 border-dashed border-white/20 rounded-lg p-6 text-center hover:border-white/40 transition-all">
+                <input
+                  type="file"
+                  accept="video/*"
+                  onChange={handleVideoUpload}
+                  className="hidden"
+                  id="video-upload"
+                  ref={fileInputRef}
+                />
+                <label
+                  htmlFor="video-upload"
+                  className="cursor-pointer block"
+                >
+                  {isUploading ? (
+                    <div className="text-gray-400">⏳ Uploading...</div>
+                  ) : videoUrl ? (
+                    <div className="text-green-400">✅ Video uploaded</div>
+                  ) : (
+                    <div>
+                      <div className="text-4xl mb-2">📤</div>
+                      <div className="text-gray-300">Click to upload video</div>
+                      <div className="text-gray-500 text-sm">MP4, MOV, AVI, WEBM</div>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              {videoUrl && (
+                <div className="mt-3">
+                  <video
+                    src={videoUrl}
+                    controls
+                    className="w-full rounded-lg max-h-48 bg-black"
+                  />
+                </div>
+              )}
+
+              <div className="mt-3">
+                <label className="text-sm text-gray-400">Or enter video URL</label>
+                <input
+                  type="text"
+                  value={videoUrl}
+                  onChange={(e) => setVideoUrl(e.target.value)}
+                  placeholder="https://example.com/video.mp4"
+                  className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500 mt-1"
+                />
+              </div>
+            </div>
+
+            {/* Payment & Email */}
+            <div className="bg-white/10 rounded-xl p-6">
+              <h2 className="text-lg font-semibold mb-4">💳 Payment & Delivery</h2>
+              <div className="space-y-3">
+                <div>
+                  <label className="text-sm text-gray-400">Payment Reference</label>
+                  <input
+                    type="text"
+                    value={paymentReference}
+                    onChange={(e) => setPaymentReference(e.target.value)}
+                    placeholder="Enter your payment reference"
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+                <div>
+                  <label className="text-sm text-gray-400">Email (for delivery)</label>
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    placeholder="your@email.com"
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
+                  />
+                </div>
+                <div className="text-sm text-gray-400 bg-white/5 p-3 rounded-lg">
+                  💰 Price: KES 200 (Music + Captions)
+                </div>
+              </div>
+            </div>
+
+            {/* Music Upload */}
+            <div className="bg-white/10 rounded-xl p-6">
+              <h2 className="text-lg font-semibold mb-4">🎵 Background Music</h2>
+              
+              <div className="border-2 border-dashed border-white/20 rounded-lg p-6 text-center hover:border-white/40 transition-all">
+                <input
+                  type="file"
+                  accept="audio/*"
+                  onChange={handleMusicUpload}
+                  className="hidden"
+                  id="music-upload"
+                />
+                <label htmlFor="music-upload" className="cursor-pointer block">
+                  {musicFile ? (
+                    <div className="text-green-400">✅ {musicFile.name}</div>
+                  ) : (
+                    <div>
+                      <div className="text-3xl mb-2">🎶</div>
+                      <div className="text-gray-300">Click to upload background music</div>
+                      <div className="text-gray-500 text-sm">MP3, WAV, M4A</div>
+                    </div>
+                  )}
+                </label>
+              </div>
+
+              {musicFile && (
+                <div className="mt-3">
+                  <audio controls className="w-full">
+                    <source src={musicUrl} type={musicFile.type} />
+                  </audio>
+                  
+                  <div className="mt-2">
+                    <label className="text-sm text-gray-400">Music Volume: {musicVolume}%</label>
+                    <input
+                      type="range"
+                      min="0"
+                      max="100"
+                      value={musicVolume}
+                      onChange={(e) => setMusicVolume(parseInt(e.target.value))}
+                      className="w-full accent-pink-500"
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Right Column - Captions */}
+          <div className="space-y-6">
+            <div className="bg-white/10 rounded-xl p-6">
+              <h2 className="text-lg font-semibold mb-4">📝 Captions</h2>
+              
+              <div className="flex gap-2 mb-4">
+                <input
+                  type="text"
+                  value={captionText}
+                  onChange={(e) => setCaptionText(e.target.value)}
+                  placeholder="Enter caption text..."
+                  className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
+                  onKeyPress={(e) => e.key === 'Enter' && handleAddCaption()}
+                />
+                <button
+                  onClick={handleAddCaption}
+                  className="bg-pink-500 hover:bg-pink-600 px-4 py-2 rounded-lg transition-colors"
+                >
+                  Add
+                </button>
+              </div>
+
+              {/* Caption Settings */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div>
+                  <label className="text-sm text-gray-400">Style</label>
+                  <select
+                    value={captionStyle}
+                    onChange={(e) => setCaptionStyle(e.target.value)}
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-pink-500"
+                  >
+                    <option value="subtle">Subtle</option>
+                    <option value="bold">Bold</option>
+                    <option value="neon">Neon</option>
+                    <option value="classic">Classic</option>
+                    <option value="karaoke">Karaoke</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="text-sm text-gray-400">Position</label>
+                  <select
+                    value={captionPosition}
+                    onChange={(e) => setCaptionPosition(e.target.value)}
+                    className="w-full bg-white/10 border border-white/20 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-pink-500"
+                  >
+                    <option value="bottom">Bottom</option>
+                    <option value="center">Center</option>
+                    <option value="top">Top</option>
+                  </select>
+                </div>
+                <div className="col-span-2">
+                  <label className="text-sm text-gray-400">Font Size: {captionFontSize}px</label>
+                  <input
+                    type="range"
+                    min="16"
+                    max="48"
+                    value={captionFontSize}
+                    onChange={(e) => setCaptionFontSize(parseInt(e.target.value))}
+                    className="w-full accent-pink-500"
+                  />
+                </div>
+              </div>
+
+              {/* Captions List */}
+              <div className="space-y-2 max-h-60 overflow-y-auto">
+                {captions.length === 0 ? (
+                  <div className="text-gray-500 text-sm text-center py-4">
+                    No captions added yet
+                  </div>
+                ) : (
+                  captions.map((caption) => (
+                    <div
+                      key={caption.id}
+                      className="flex items-center justify-between bg-white/5 rounded-lg p-3"
+                    >
+                      <div className="flex-1">
+                        <div className="text-sm">{caption.text}</div>
+                        <div className="text-xs text-gray-400">
+                          {caption.style} • {caption.position} • {caption.fontSize}px
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveCaption(caption.id)}
+                        className="text-red-400 hover:text-red-300 ml-2"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {captions.length > 0 && (
+                <button
+                  onClick={handleClearCaptions}
+                  className="text-red-400 hover:text-red-300 text-sm mt-2"
+                >
+                  Clear all captions
+                </button>
+              )}
+
+              {/* Preview */}
+              {videoUrl && captions.length > 0 && (
+                <div className="mt-4 relative rounded-lg overflow-hidden bg-black/50">
+                  <video
+                    src={videoUrl}
+                    className="w-full max-h-48 object-cover"
+                    muted
+                  />
+                  <div className={`absolute inset-0 flex items-center ${captionPosition === 'bottom' ? 'justify-end pb-4' : captionPosition === 'top' ? 'items-start pt-4' : 'items-center'} px-4 pointer-events-none`}>
+                    <div className={captionStyles[captionStyle] || captionStyles.subtle} style={{ fontSize: `${captionFontSize}px` }}>
+                      {captions[captions.length - 1]?.text || 'Preview'}
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Process Button */}
+            <button
+              onClick={handleProcess}
+              disabled={isProcessing || !videoUrl || !paymentReference}
+              className={`w-full py-4 rounded-xl font-bold text-lg transition-all transform hover:scale-105 ${
+                isProcessing || !videoUrl || !paymentReference
+                  ? 'bg-gray-600 cursor-not-allowed'
+                  : 'bg-gradient-to-r from-pink-500 to-purple-500 hover:from-pink-600 hover:to-purple-600'
+              }`}
+            >
+              {isProcessing ? '⏳ Processing...' : '🎬 Add Music & Captions'}
+            </button>
+
+            {error && (
+              <div className="bg-red-500/20 border border-red-500 rounded-lg p-3 text-red-300 text-sm">
+                ❌ {error}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Result */}
+        {resultVideoUrl && (
+          <div className="mt-8 bg-white/10 rounded-xl p-6">
+            <h2 className="text-xl font-bold mb-4">✅ Video Ready!</h2>
+            <video
+              src={resultVideoUrl}
+              controls
+              className="w-full rounded-lg max-h-96 bg-black"
+              autoPlay
+            />
+            <div className="flex gap-4 mt-4">
+              <button
+                onClick={handleDownload}
+                className="bg-green-500 hover:bg-green-600 px-6 py-2 rounded-lg transition-colors"
+              >
+                ⬇️ Download
+              </button>
+              <button
+                onClick={() => {
+                  setVideoUrl(resultVideoUrl);
+                  setResultVideoUrl('');
+                  setCaptions([]);
+                  setMusicFile(null);
+                  setMusicUrl('');
+                }}
+                className="bg-purple-500 hover:bg-purple-600 px-6 py-2 rounded-lg transition-colors"
+              >
+                🔄 Start Over
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default MusicCaptions;

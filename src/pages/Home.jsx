@@ -1,4 +1,6 @@
-import React from 'react';
+// Home.js - Updated with Music & Captions functionality
+
+import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 function Home() {
@@ -29,10 +31,12 @@ function Home() {
           <p className="text-gray-400 text-sm">Upload photos and create a slideshow</p>
         </div>
         
-        <div className="bg-white/10 rounded-2xl p-6 text-center hover:bg-white/20 transition-all cursor-pointer" onClick={() => navigate('/create')}>
+        {/* UPDATED: Music & Captions Card - Now navigates to dedicated page */}
+        <div className="bg-gradient-to-r from-pink-500/30 to-purple-500/30 rounded-2xl p-6 text-center hover:from-pink-500/50 hover:to-purple-500/50 transition-all cursor-pointer border border-white/20" onClick={() => navigate('/music-captions')}>
           <div className="text-4xl mb-3">🎵</div>
           <h3 className="font-bold text-lg mb-1">Music & Captions</h3>
-          <p className="text-gray-400 text-sm">Add music and captions to make it pop</p>
+          <p className="text-gray-300 text-sm">Add music and captions to make it pop</p>
+          <span className="inline-block mt-2 text-xs bg-pink-500/50 px-3 py-1 rounded-full">NEW</span>
         </div>
         
         <div className="bg-white/10 rounded-2xl p-6 text-center hover:bg-white/20 transition-all cursor-pointer" onClick={() => navigate('/translate')}>
