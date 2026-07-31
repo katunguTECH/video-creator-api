@@ -28,7 +28,7 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// MONGODB ATLAS CONNECTION
+// MONGODB ATLAS CONNECTION - UPDATED WITH BETTER LOGGING
 // ============================================
 
 const MONGODB_URI = process.env.MONGODB_URI;
@@ -36,20 +36,23 @@ const DATABASE_NAME = process.env.DATABASE_NAME || 'video-creator';
 
 if (!MONGODB_URI) {
   console.error('❌ MONGODB_URI not set in environment. Set it in Render → Environment.');
+} else {
+  const maskedUri = MONGODB_URI.replace(/\/\/[^:]+:[^@]+@/, '//****:****@');
+  console.log('🔑 MongoDB Atlas configured');
+  console.log(`📡 Connection string: ${maskedUri}`);
+  console.log(`📊 Database: ${DATABASE_NAME}`);
 }
 
-console.log('🔑 MongoDB Atlas configured');
-console.log(`📊 Database: ${DATABASE_NAME}`);
+let isMongoConnected = false;
 
 const mongooseOptions = {
   useNewUrlParser: true,
   useUnifiedTopology: true,
   serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
-  family: 4
+  family: 4,
+  dbName: DATABASE_NAME
 };
-
-let isMongoConnected = false;
 
 async function connectToMongo() {
   if (!MONGODB_URI) {
@@ -58,37 +61,110 @@ async function connectToMongo() {
   }
   try {
     console.log('🔄 Connecting to MongoDB Atlas...');
+    
     await mongoose.connect(MONGODB_URI, mongooseOptions);
+    
     const dbName = mongoose.connection.db?.databaseName || DATABASE_NAME;
     console.log('✅ MongoDB Atlas connected successfully!');
     console.log(`   Database: ${dbName}`);
     console.log(`   Host: ${mongoose.connection.host}`);
+    console.log(`   Connection State: ${mongoose.connection.readyState}`);
     isMongoConnected = true;
+    
+    setTimeout(initializeDatabase, 1000);
     return true;
   } catch (error) {
     console.error('❌ MongoDB connection error:', error.message);
+    if (error.code === 'ENOTFOUND') {
+      console.error('   ⚠️ DNS resolution failed - check your connection string hostname');
+    } else if (error.message.includes('bad auth')) {
+      console.error('   ⚠️ Authentication failed - check your username and password');
+    } else if (error.message.includes('not whitelisted')) {
+      console.error('   ⚠️ IP not whitelisted - add 0.0.0.0/0 to MongoDB Atlas IP Access List');
+    } else if (error.message.includes('ECONNREFUSED')) {
+      console.error('   ⚠️ Connection refused - check if your cluster is running');
+    }
     console.log('⚠️ Running without MongoDB - using in-memory storage for coupons and logs');
     isMongoConnected = false;
     return false;
   }
 }
 
-// Connect immediately (don't block server startup)
+async function initializeDatabase() {
+  if (!isMongoConnected || !InitialBalance) {
+    console.warn('⚠️ MongoDB not connected, skipping database initialization');
+    return;
+  }
+
+  try {
+    console.log('🔄 Initializing database collections...');
+    
+    const defaultBalances = [
+      { provider: 'replicate', balance: parseFloat(process.env.REPLICATE_BALANCE) || 10.00 },
+      { provider: 'byteplus', balance: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40 }
+    ];
+
+    for (const balance of defaultBalances) {
+      await InitialBalance.findOneAndUpdate(
+        { provider: balance.provider },
+        { balance: balance.balance },
+        { upsert: true, new: true }
+      );
+    }
+    
+    try {
+      const collections = await mongoose.connection.db.listCollections().toArray();
+      console.log(`   📁 Collections: ${collections.map(c => c.name).join(', ') || 'none'}`);
+    } catch (err) {
+      console.log('   📁 Collections: unable to list');
+    }
+    
+    try {
+      if (Revenue) {
+        const revenueCount = await Revenue.countDocuments();
+        console.log(`   💰 Revenue records: ${revenueCount}`);
+      }
+      if (VideoUsage) {
+        const usageCount = await VideoUsage.countDocuments();
+        console.log(`   🎬 Video usages: ${usageCount}`);
+      }
+      if (UserPayment) {
+        const paymentCount = await UserPayment.countDocuments();
+        console.log(`   💳 User payments: ${paymentCount}`);
+      }
+    } catch (err) {
+      // Ignore counting errors
+    }
+    
+    console.log('✅ Database initialized successfully');
+  } catch (error) {
+    console.error('❌ Error initializing database:', error.message);
+  }
+}
+
+// Connect to MongoDB (don't block server startup)
 connectToMongo();
 
-const db = mongoose.connection;
+// ============================================
+// MONGODB EVENT LISTENERS
+// ============================================
 
-db.on('error', (error) => {
-  console.error('❌ MongoDB connection error:', error);
+mongoose.connection.on('connected', () => {
+  console.log('✅ MongoDB connected via event listener');
+  isMongoConnected = true;
+});
+
+mongoose.connection.on('error', (err) => {
+  console.error('❌ MongoDB connection error:', err.message);
   isMongoConnected = false;
 });
 
-db.on('disconnected', () => {
-  console.warn('⚠️ MongoDB disconnected. Running in fallback mode.');
+mongoose.connection.on('disconnected', () => {
+  console.warn('⚠️ MongoDB disconnected');
   isMongoConnected = false;
 });
 
-db.on('reconnected', () => {
+mongoose.connection.on('reconnected', () => {
   console.log('✅ MongoDB reconnected!');
   isMongoConnected = true;
 });
@@ -117,12 +193,11 @@ memoryStore.coupons[TEST_COUPON] = {
   serviceType: 'photo-to-video',
   used: false,
   usedAt: null,
-  expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(), // 30 days
+  expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString(),
   createdAt: new Date().toISOString()
 };
 console.log(`✅ Test coupon created: ${TEST_COUPON} for katungu1@gmail.com`);
 
-// Also create a generic test coupon
 const GENERIC_COUPON = 'REDO-TEST-001';
 memoryStore.coupons[GENERIC_COUPON] = {
   code: GENERIC_COUPON,
@@ -244,35 +319,6 @@ try {
 // ============================================
 // DATA ACCESS FUNCTIONS - WITH FALLBACK
 // ============================================
-
-async function initializeBalances() {
-  if (!isMongoConnected || !InitialBalance) {
-    console.warn('⚠️ MongoDB not connected, skipping balance initialization');
-    return;
-  }
-
-  try {
-    const defaultBalances = [
-      { provider: 'replicate', balance: parseFloat(process.env.REPLICATE_BALANCE) || 10.00 },
-      { provider: 'byteplus', balance: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40 }
-    ];
-
-    for (const balance of defaultBalances) {
-      await InitialBalance.findOneAndUpdate(
-        { provider: balance.provider },
-        { balance: balance.balance },
-        { upsert: true, new: true }
-      );
-    }
-    console.log('✅ Initial balances initialized');
-  } catch (error) {
-    console.error('❌ Error initializing balances:', error.message);
-  }
-}
-
-db.once('open', () => {
-  setTimeout(initializeBalances, 1000);
-});
 
 async function addApiTransaction(provider, amount, type, description) {
   if (!isMongoConnected || !ApiLedger) {
@@ -676,7 +722,7 @@ async function saveTranslation(translationData) {
 
 async function generateCoupon(paymentReference, email, serviceType) {
   const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
+  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   memoryStore.coupons[couponCode] = {
     code: couponCode,
@@ -815,7 +861,7 @@ cloudinary.config({
 });
 
 if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
-  console.error('❌ Cloudinary env vars not fully set (CLOUDINARY_CLOUD_NAME / CLOUDINARY_API_KEY / CLOUDINARY_API_SECRET)');
+  console.error('❌ Cloudinary env vars not fully set');
 } else {
   console.log('☁️ Cloudinary configured successfully!');
 }
@@ -864,7 +910,7 @@ async function translateText(text, targetLanguage) {
 }
 
 // ============================================
-// TEXT-TO-SPEECH (UPDATED WITH VOICE GENDER)
+// TEXT-TO-SPEECH
 // ============================================
 async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGender = 'MALE') {
   try {
@@ -889,13 +935,12 @@ async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGende
       input: { text: text },
       voice: {
         languageCode: languageCode,
-        ssmlGender: voiceGender.toUpperCase() // 'MALE', 'FEMALE', or 'NEUTRAL'
+        ssmlGender: voiceGender.toUpperCase()
       },
       audioConfig: { audioEncoding: 'MP3', speakingRate: clampedRate }
     };
 
     console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode}), Gender: ${voiceGender}, rate: ${clampedRate}`);
-    console.log(`📝 Text length: ${text.length} characters`);
 
     const response = await axios.post(url, requestBody, {
       headers: { 'Content-Type': 'application/json' },
@@ -909,10 +954,6 @@ async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGende
     throw new Error('No audio content returned');
   } catch (error) {
     console.error('❌ TTS error:', error.response?.data?.error?.message || error.message);
-    if (error.response) {
-      console.error('Status:', error.response.status);
-      console.error('Data:', JSON.stringify(error.response.data, null, 2));
-    }
     throw new Error(`TTS failed: ${error.response?.data?.error?.message || error.message}`);
   }
 }
@@ -1021,16 +1062,8 @@ async function validateReplicateTokenAtStartup() {
   const token = rawToken.trim();
 
   if (!token) {
-    console.warn('⚠️ REPLICATE_API_TOKEN not set — text-to-video and the photo-to-video final fallback will be unavailable.');
+    console.warn('⚠️ REPLICATE_API_TOKEN not set');
     return;
-  }
-
-  if (rawToken !== token) {
-    console.warn('⚠️ REPLICATE_API_TOKEN has leading/trailing whitespace — trimmed automatically, but clean up the env var value.');
-  }
-
-  if (!token.startsWith('r8_')) {
-    console.warn(`⚠️ REPLICATE_API_TOKEN does not start with the expected "r8_" prefix (starts with "${token.substring(0, 3)}..."). Double-check you copied the correct token.`);
   }
 
   try {
@@ -1039,20 +1072,19 @@ async function validateReplicateTokenAtStartup() {
     });
 
     if (res.status === 401) {
-      console.error('❌ REPLICATE_API_TOKEN is INVALID or EXPIRED (401 from /v1/account).');
-      console.error('   → Regenerate at https://replicate.com/account/api-tokens and update it in Render → Environment, then redeploy.');
+      console.error('❌ REPLICATE_API_TOKEN is INVALID or EXPIRED');
       return;
     }
 
     if (!res.ok) {
-      console.warn(`⚠️ Replicate token check returned unexpected status ${res.status} — continuing, but this may indicate an account issue.`);
+      console.warn(`⚠️ Replicate token check returned unexpected status ${res.status}`);
       return;
     }
 
     const account = await res.json();
     console.log(`✅ Replicate token verified at startup (account: ${account.username || account.name || 'unknown'})`);
   } catch (error) {
-    console.warn('⚠️ Could not verify Replicate token at startup (network error):', error.message);
+    console.warn('⚠️ Could not verify Replicate token at startup:', error.message);
   }
 }
 
@@ -1121,7 +1153,6 @@ app.use(async (req, res, next) => {
 
 process.on('uncaughtException', (error) => {
   console.error('❌ Uncaught Exception:', error);
-  console.error('Stack trace:', error.stack);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
@@ -1194,7 +1225,7 @@ async function sendEmail(to, subject, html, text) {
   console.log(`📧 Sending email to ${to} via ${emailProvider.toUpperCase()}`);
 
   if (emailProvider === 'none') {
-    const msg = 'No email provider configured on the server (missing MAILGUN_API_KEY or EMAIL_USER/EMAIL_PASSWORD env vars)';
+    const msg = 'No email provider configured on the server';
     console.error(`❌ ${msg}`);
     return { success: false, provider: 'none', error: msg };
   }
@@ -1219,11 +1250,9 @@ async function sendEmail(to, subject, html, text) {
       });
 
       console.log(`✅ Email sent via Mailgun to ${to}`);
-      console.log(`   Message ID: ${result.id}`);
       return { success: true, provider: 'mailgun', id: result.id };
     } catch (error) {
       console.error('❌ Mailgun error:', error.message);
-      if (error.statusCode) console.error('   Mailgun status code:', error.statusCode);
       lastError = `Mailgun error: ${error.message}`;
     }
   }
@@ -1240,7 +1269,6 @@ async function sendEmail(to, subject, html, text) {
 
       const info = await transporter.sendMail(mailOptions);
       console.log(`✅ Email sent via Gmail to ${to}`);
-      console.log(`   Message ID: ${info.messageId}`);
       return { success: true, provider: 'gmail', id: info.messageId };
     } catch (error) {
       console.error('❌ Gmail error:', error.message);
@@ -1528,8 +1556,6 @@ if (!fs.existsSync(uploadsDir)) {
 
 app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
-  console.log('📤 Content-Type:', req.headers['content-type']);
-  console.log('📤 Content-Length:', req.headers['content-length']);
 
   req.setTimeout(300000);
   res.setTimeout(300000);
@@ -1570,9 +1596,7 @@ app.post('/api/upload-video', (req, res) => {
         uploadStream.end(req.file.buffer);
       });
 
-      console.log('✅ Video uploaded to Cloudinary successfully:');
-      console.log(`   URL: ${result.secure_url}`);
-
+      console.log('✅ Video uploaded to Cloudinary successfully');
       return res.status(200).json({
         success: true,
         videoUrl: result.secure_url,
@@ -1673,9 +1697,6 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
   const tempAudioPath = path.join(tempDir, `${crypto.randomUUID()}.mp3`);
   fs.writeFileSync(tempAudioPath, audioBuffer);
 
-  const stats = fs.statSync(tempAudioPath);
-  console.log(`📁 Audio file size: ${stats.size} bytes`);
-
   const videoDuration = await getDuration(videoPath);
   const audioDuration = await getDuration(tempAudioPath);
   console.log(`📏 Video: ${videoDuration.toFixed(2)}s | New audio: ${audioDuration.toFixed(2)}s`);
@@ -1683,7 +1704,7 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
   let tempoRatio = audioDuration / videoDuration;
   tempoRatio = Math.min(Math.max(tempoRatio, 0.7), 1.4);
   const atempoFilter = buildAtempoFilter(tempoRatio);
-  console.log(`🎚️ Applying tempo adjustment: ${tempoRatio.toFixed(3)}x (${atempoFilter})`);
+  console.log(`🎚️ Applying tempo adjustment: ${tempoRatio.toFixed(3)}x`);
 
   return new Promise((resolve, reject) => {
     ffmpeg(videoPath)
@@ -1712,7 +1733,6 @@ async function combineAudioWithVideo(videoPath, audioBuffer, outputPath) {
 
 async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duration) {
   console.log(`🎬 Starting translation pipeline for ${targetLanguage}`);
-  console.log(`📹 Original video: ${originalVideoUrl.substring(0, 100)}...`);
 
   const videoId = crypto.randomUUID();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
@@ -1780,6 +1800,111 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
 }
 
 // ============================================
+// TRANSLATION LANGUAGES
+// ============================================
+
+const FREE_TRANSLATION_LANGUAGES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia'
+};
+
+// ============================================
+// PAYMENT VERIFICATION
+// ============================================
+
+async function verifyPayment(reference) {
+  try {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
+      console.log('⚠️ No secret key, accepting test payment');
+      return true;
+    }
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.status && data.data?.status === 'success';
+  } catch (error) {
+    console.error('❌ Payment verification error:', error.message);
+    return false;
+  }
+}
+
+// ============================================
+// HEALTH CHECK ENDPOINT
+// ============================================
+
+app.get('/api/health', async (req, res) => {
+  const dbStatus = {
+    connected: mongoose.connection.readyState === 1,
+    readyState: mongoose.connection.readyState,
+    readyStateText: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
+    host: mongoose.connection.host || 'not connected',
+    database: mongoose.connection.name || 'not connected'
+  };
+  
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    mongodb: dbStatus,
+    environment: isProduction ? 'production' : 'development'
+  });
+});
+
+// ============================================
+// DB STATUS ENDPOINT
+// ============================================
+
+app.get('/api/db-status', async (req, res) => {
+  try {
+    const status = {
+      isConnected: mongoose.connection.readyState === 1,
+      readyState: mongoose.connection.readyState,
+      readyStateText: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
+      host: mongoose.connection.host || 'not connected',
+      database: mongoose.connection.name || 'not connected',
+      models: Object.keys(mongoose.models || {}),
+      collections: []
+    };
+    
+    if (status.isConnected) {
+      try {
+        const collections = await mongoose.connection.db.listCollections().toArray();
+        status.collections = collections.map(c => c.name);
+      } catch (err) {
+        status.collectionsError = err.message;
+      }
+    }
+    
+    res.json({ success: true, ...status });
+  } catch (error) {
+    res.json({ success: false, error: error.message });
+  }
+});
+
+// ============================================
+// TEST ENDPOINT
+// ============================================
+
+app.get('/api/test', (req, res) => {
+  res.json({ status: 'Server is running!', environment: isProduction ? 'production' : 'development' });
+});
+
+app.get('/', (req, res) => {
+  res.json({ name: 'Video Creator API', version: '2.0.5', status: 'running' });
+});
+
+// ============================================
 // TRANSLATION ENDPOINTS
 // ============================================
 
@@ -1791,17 +1916,12 @@ app.post('/api/translate-video', async (req, res) => {
       sourceLanguage,
       paymentReference,
       email,
-      text,
       duration
     } = req.body;
 
     const TRANSLATION_PRICE = 300;
 
-    console.log('🌐 Translation request received:');
-    console.log(`   Video URL: ${videoUrl ? videoUrl.substring(0, 50) + '...' : 'Not provided'}`);
-    console.log(`   Target Language: ${targetLanguage}`);
-    console.log(`   User Email: ${email}`);
-    console.log(`   Payment Reference: ${paymentReference}`);
+    console.log('🌐 Translation request received');
 
     if (!paymentReference) {
       return res.status(402).json({
@@ -1851,22 +1971,6 @@ app.post('/api/translate-video', async (req, res) => {
     await addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
     await addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
 
-    let emailResult = { success: false };
-    try {
-      const translationEmail = generateTranslationEmail(
-        email,
-        translatedVideoUrl,
-        `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`,
-        FREE_TRANSLATION_LANGUAGES[targetLanguage],
-        translationCost
-      );
-      emailResult = await sendEmail(email, translationEmail.subject, translationEmail.html);
-      console.log(`📧 Translation video sent to ${email}: ${emailResult.success}`);
-    } catch (emailErr) {
-      console.warn('⚠️ Could not send translation email:', emailErr.message);
-      emailResult = { success: false, error: emailErr.message };
-    }
-
     res.json({
       success: true,
       videoUrl: translatedVideoUrl,
@@ -1875,9 +1979,7 @@ app.post('/api/translate-video', async (req, res) => {
       duration: duration || 5,
       paymentReference,
       translationId,
-      price: TRANSLATION_PRICE,
-      emailSent: emailResult.success,
-      emailError: emailResult.error || null
+      price: TRANSLATION_PRICE
     });
 
   } catch (error) {
@@ -1894,8 +1996,6 @@ app.post('/api/translate-video-free', async (req, res) => {
     const { videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration } = req.body;
 
     console.log('🔄 Free retry translation for:', email);
-    console.log('📝 Payment Reference:', paymentReference);
-    console.log('🎯 Target Language:', targetLanguage);
 
     const payment = await findPaymentByReference(paymentReference);
 
@@ -1965,7 +2065,6 @@ app.post('/api/test-tts', async (req, res) => {
     }
 
     console.log(`🔊 Testing TTS with text: "${text.substring(0, 50)}..."`);
-    console.log(`📝 Target language: ${targetLanguage || 'en'}, Gender: ${voiceGender || 'MALE'}`);
 
     const audioBuffer = await textToSpeech(text, targetLanguage || 'en', 1.0, voiceGender || 'MALE');
 
@@ -2002,8 +2101,6 @@ app.post('/api/test-audio-mux', async (req, res) => {
     }
 
     console.log('🧪 Testing audio mux pipeline...');
-    console.log('📹 Input Video:', videoUrl);
-    console.log('🎙️ Script:', script);
 
     const narratedUrl = await addAudioToSceneVideo(videoUrl, script, voiceGender || 'MALE');
 
@@ -2027,34 +2124,12 @@ app.post('/api/test-audio-mux', async (req, res) => {
 // PAYMENT ENDPOINTS
 // ============================================
 
-async function verifyPayment(reference) {
-  try {
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      console.log('⚠️ No secret key, accepting test payment');
-      return true;
-    }
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
-    });
-    if (!response.ok) return false;
-    const data = await response.json();
-    return data.status && data.data?.status === 'success';
-  } catch (error) {
-    console.error('❌ Payment verification error:', error.message);
-    return false;
-  }
-}
-
 app.post('/api/initialize-payment', async (req, res) => {
   try {
     const { email, amount, serviceType, metadata } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
     console.log('💰 Initializing payment...');
-    console.log('📧 Email:', email);
-    console.log('💰 Amount:', amount);
 
     if (!email) {
       return res.status(400).json({
@@ -2114,8 +2189,6 @@ app.post('/api/initialize-payment', async (req, res) => {
 
     if (data.status) {
       console.log('✅ Payment initialized successfully!');
-      console.log('📝 Reference:', data.data.reference);
-
       return res.status(200).json({
         success: true,
         reference: data.data.reference,
@@ -2143,7 +2216,7 @@ app.post('/api/verify-payment', async (req, res) => {
     const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
-    console.log(`🔍 Verifying payment: ${reference}`, { email, amount, serviceType, paymentMethod, duration });
+    console.log(`🔍 Verifying payment: ${reference}`);
 
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
@@ -2154,13 +2227,6 @@ app.post('/api/verify-payment', async (req, res) => {
       await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
       await addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
       await addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
-
-      try {
-        const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
-        await sendEmail(email, receiptEmail.subject, receiptEmail.html);
-      } catch (emailErr) {
-        console.warn('⚠️ Could not send receipt email:', emailErr.message);
-      }
 
       return res.json({
         success: true,
@@ -2176,7 +2242,6 @@ app.post('/api/verify-payment', async (req, res) => {
     });
 
     const data = await response.json();
-    console.log('📦 Paystack verification response:', data);
 
     if (data.status && data.data.status === 'success') {
       const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions' };
@@ -2186,14 +2251,6 @@ app.post('/api/verify-payment', async (req, res) => {
       await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
       await addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
       await addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
-
-      try {
-        const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceKey, duration || 5);
-        await sendEmail(email, receiptEmail.subject, receiptEmail.html);
-        console.log(`📧 Receipt email sent to ${email}`);
-      } catch (emailErr) {
-        console.warn('⚠️ Could not send receipt email:', emailErr.message);
-      }
 
       res.json({
         success: true,
@@ -2609,21 +2666,8 @@ app.get('/api/coupon-status/:paymentReference', async (req, res) => {
 });
 
 // ============================================
-// TRANSLATION LANGUAGES
+// TRANSLATION LANGUAGE ENDPOINTS
 // ============================================
-
-const FREE_TRANSLATION_LANGUAGES = {
-  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
-  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
-  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
-  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
-  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
-  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
-  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
-  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
-  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
-  'mr': 'Marathi', 'or': 'Odia'
-};
 
 app.get('/api/free-languages', (req, res) => {
   console.log('🌐 GET /api/free-languages - Returning languages');
@@ -2689,7 +2733,6 @@ app.post('/api/send-video-email', async (req, res) => {
     }
 
     console.log(`📧 Sending video to ${email}`);
-    console.log(`📹 Video URL: ${videoUrl}`);
 
     const videoEmail = generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration || 5);
 
@@ -3583,10 +3626,83 @@ app.post('/api/generate-photo-video', async (req, res) => {
 });
 
 // ============================================
+// MUSIC & CAPTIONS PAYMENT INITIALIZATION
+// ============================================
+
+app.post('/api/initialize-music-captions-payment', async (req, res) => {
+  try {
+    const { email } = req.body;
+    const amount = 200;
+
+    console.log('💰 Initializing Music & Captions payment...');
+    console.log('📧 Email:', email);
+
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
+      const reference = 'MUSIC-TEST-' + Date.now();
+      console.log('⚠️ Using test mode, reference:', reference);
+      return res.json({
+        success: true,
+        reference: reference,
+        authorization_url: 'https://www.katareel.com/music-captions?payment=success&reference=' + reference,
+        amount: amount,
+        currency: 'KES',
+        testMode: true
+      });
+    }
+
+    const response = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email: email,
+        amount: amount * 100,
+        metadata: {
+          serviceType: 'music-captions',
+          amount: amount,
+          custom_fields: [
+            { display_name: "Service", variable_name: "service", value: "Music & Captions" },
+            { display_name: "Amount", variable_name: "amount", value: `${amount} KES` }
+          ]
+        },
+        callback_url: process.env.FRONTEND_URL + '/music-captions?payment=success'
+      })
+    });
+
+    const data = await response.json();
+    
+    if (data.status) {
+      console.log('✅ Payment initialized successfully!');
+      res.json({
+        success: true,
+        reference: data.data.reference,
+        authorization_url: data.data.authorization_url,
+        amount: amount,
+        currency: 'KES'
+      });
+    } else {
+      console.error('❌ Paystack error:', data.message);
+      res.status(400).json({
+        success: false,
+        error: data.message || 'Payment initialization failed'
+      });
+    }
+  } catch (error) {
+    console.error('❌ Payment init error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ============================================
 // ADD MUSIC & CAPTIONS TO VIDEO
 // ============================================
 
-// Helper: Format timestamp for SRT
 function formatTimestamp(seconds) {
   const hours = Math.floor(seconds / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
@@ -3610,12 +3726,10 @@ app.post('/api/add-music-captions', async (req, res) => {
     } = req.body;
 
     console.log('🎬 Adding music and captions to video...');
-    console.log(`📹 Video URL: ${videoUrl?.substring(0, 50)}...`);
     console.log(`📝 Captions: ${captions?.length || 0}`);
     console.log(`🎵 Music: ${musicUrl ? 'Yes' : 'No'}`);
     console.log(`💳 Payment Reference: ${paymentReference}`);
 
-    // Validate payment
     if (!paymentReference) {
       return res.status(402).json({
         success: false,
@@ -3649,17 +3763,14 @@ app.post('/api/add-music-captions', async (req, res) => {
     const subtitlePath = path.join(tempDir, `${videoId}.srt`);
 
     try {
-      // 1. Download input video
       console.log('📥 Downloading video...');
       const response = await fetch(videoUrl);
       if (!response.ok) throw new Error(`Failed to download video: ${response.status}`);
       const videoBuffer = await response.arrayBuffer();
       fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
 
-      // Build FFmpeg command - start with video
       let ffmpegCommand = ffmpeg(videoPath);
 
-      // 2. Add music if provided
       if (musicUrl) {
         console.log('🎵 Adding background music...');
         const musicResponse = await fetch(musicUrl);
@@ -3677,11 +3788,9 @@ app.post('/api/add-music-captions', async (req, res) => {
         }
       }
 
-      // 3. Add captions/subtitles
       if (captions && captions.length > 0) {
         console.log('📝 Adding captions...');
         
-        // Generate SRT from captions
         let srtContent = '';
         captions.forEach((caption, index) => {
           const startTime = index * 1.5;
@@ -3693,7 +3802,6 @@ app.post('/api/add-music-captions', async (req, res) => {
 
         fs.writeFileSync(subtitlePath, srtContent);
 
-        // Style configuration for subtitles
         let styleOptions = [
           'force_style=FontName=Arial',
           `FontSize=${captionFontSize || 24}`,
@@ -3703,18 +3811,16 @@ app.post('/api/add-music-captions', async (req, res) => {
           'Shadow=1'
         ];
 
-        // Position
         if (captionPosition === 'top') {
           styleOptions.push('MarginV=20');
           styleOptions.push('Alignment=6');
         } else if (captionPosition === 'center') {
           styleOptions.push('Alignment=5');
-        } else { // bottom
+        } else {
           styleOptions.push('MarginV=50');
           styleOptions.push('Alignment=2');
         }
 
-        // Style specific settings
         if (captionStyle === 'bold') {
           styleOptions.push('Bold=1');
         }
@@ -3750,7 +3856,6 @@ app.post('/api/add-music-captions', async (req, res) => {
           ]);
       }
 
-      // 4. Execute FFmpeg
       console.log('🎬 Processing video with music and captions...');
       await new Promise((resolve, reject) => {
         ffmpegCommand
@@ -3762,7 +3867,6 @@ app.post('/api/add-music-captions', async (req, res) => {
 
       console.log('✅ Video processing complete');
 
-      // 5. Upload to Cloudinary
       console.log('☁️ Uploading to Cloudinary...');
       const uploadResult = await cloudinary.uploader.upload(outputPath, {
         resource_type: 'video',
@@ -3770,12 +3874,10 @@ app.post('/api/add-music-captions', async (req, res) => {
         public_id: `${videoId}_with_music_captions`
       });
 
-      // 6. Cleanup temp files
       [videoPath, outputPath, tempAudioPath, subtitlePath].forEach(f => {
         if (fs.existsSync(f)) fs.unlinkSync(f);
       });
 
-      // 7. Log activity
       await addActivityLog(
         email || 'anonymous',
         '🎵 Added Music & Captions',
@@ -3786,7 +3888,6 @@ app.post('/api/add-music-captions', async (req, res) => {
       await addUserPayment(email || 'anonymous', 200, 'card', 'music-captions', paymentReference);
       await addVideoUsage(paymentReference, email || 'anonymous', 'music-captions', captions?.map(c => c.text).join(' ') || 'Music & Captions', 200, 'FFmpeg', 'custom', 5);
 
-      // 8. Send email if provided
       if (email) {
         try {
           const downloadUrl = uploadResult.secure_url.includes('/upload/')
@@ -3864,7 +3965,6 @@ app.post('/api/add-music-captions', async (req, res) => {
 
     } catch (error) {
       console.error('❌ Processing error:', error.message);
-      // Cleanup on error
       [videoPath, outputPath, tempAudioPath, subtitlePath].forEach(f => {
         if (fs.existsSync(f)) fs.unlinkSync(f);
       });
@@ -3881,84 +3981,7 @@ app.post('/api/add-music-captions', async (req, res) => {
 });
 
 // ============================================
-// INITIALIZE MUSIC & CAPTIONS PAYMENT
-// ============================================
-
-app.post('/api/initialize-music-captions-payment', async (req, res) => {
-  try {
-    const { email } = req.body;
-    const amount = 200; // KES 200 for music & captions
-
-    console.log('💰 Initializing Music & Captions payment...');
-    console.log('📧 Email:', email);
-    console.log('💰 Amount:', amount);
-
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      // Test mode
-      const reference = 'MUSIC-TEST-' + Date.now();
-      console.log('⚠️ Using test mode, reference:', reference);
-      return res.json({
-        success: true,
-        reference: reference,
-        authorization_url: 'https://www.katareel.com/music-captions?payment=success',
-        amount: amount,
-        currency: 'KES',
-        testMode: true
-      });
-    }
-
-    const response = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: email,
-        amount: amount * 100,
-        metadata: {
-          serviceType: 'music-captions',
-          amount: amount,
-          custom_fields: [
-            { display_name: "Service", variable_name: "service", value: "Music & Captions" },
-            { display_name: "Amount", variable_name: "amount", value: `${amount} KES` }
-          ]
-        },
-        callback_url: process.env.FRONTEND_URL + '/music-captions?payment=success'
-      })
-    });
-
-    const data = await response.json();
-    
-    if (data.status) {
-      console.log('✅ Payment initialized successfully!');
-      console.log('📝 Reference:', data.data.reference);
-      res.json({
-        success: true,
-        reference: data.data.reference,
-        authorization_url: data.data.authorization_url,
-        amount: amount,
-        currency: 'KES'
-      });
-    } else {
-      console.error('❌ Paystack error:', data.message);
-      res.status(400).json({
-        success: false,
-        error: data.message || 'Payment initialization failed'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Payment init error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// ============================================
-// AUXILIARY ENDPOINTS
+// CALCULATE PRICE ENDPOINT
 // ============================================
 
 app.post('/api/calculate-price', (req, res) => {
@@ -3987,18 +4010,6 @@ app.post('/api/calculate-price', (req, res) => {
   });
 });
 
-app.get('/api/test', (req, res) => {
-  res.json({ status: 'Server is running!', environment: isProduction ? 'production' : 'development' });
-});
-
-app.get('/api/health', async (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
-});
-
-app.get('/', (req, res) => {
-  res.json({ name: 'Video Creator API', version: '2.0.4', status: 'running' });
-});
-
 // ============================================
 // SERVE FRONTEND IN PRODUCTION
 // ============================================
@@ -4016,6 +4027,7 @@ app.use((req, res) => {
 });
 
 app.use((err, req, res, next) => {
+  console.error('❌ Server error:', err);
   res.status(500).json({ success: false, error: err.message || 'Internal server error' });
 });
 
