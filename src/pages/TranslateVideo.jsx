@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './TranslateVideo.css';
@@ -65,26 +66,52 @@ function TranslateVideo() {
     }
   }, []);
 
-  // Load Paystack script on component mount
+  // Check for pending payment on load (return from Startbutton redirect)
   useEffect(() => {
-    const loadPaystack = () => {
-      if (typeof window.PaystackPop === 'undefined') {
-        console.log('⏳ Loading Paystack script...');
-        const script = document.createElement('script');
-        script.src = 'https://js.paystack.co/v1/inline.js';
-        script.async = true;
-        script.onload = () => {
-          console.log('✅ Paystack script loaded successfully');
-        };
-        script.onerror = () => {
-          console.error('❌ Failed to load Paystack script');
-        };
-        document.head.appendChild(script);
-      } else {
-        console.log('✅ Paystack already loaded');
-      }
-    };
-    loadPaystack();
+    const urlParams = new URLSearchParams(window.location.search);
+    const reference = urlParams.get('reference') || urlParams.get('payment_reference');
+    
+    if (reference) {
+      console.log('🔍 Found payment reference in URL:', reference);
+      const savedEmail = localStorage.getItem('pending_payment_email') || email;
+      const savedService = localStorage.getItem('pending_payment_service') || 'translation';
+      const savedAmount = localStorage.getItem('pending_payment_amount') || TRANSLATION_PRICE;
+      
+      // Verify the payment
+      const verifyPayment = async () => {
+        setLoading(true);
+        try {
+          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-startbutton-payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              reference: reference,
+              email: savedEmail,
+              amount: parseFloat(savedAmount),
+              serviceType: savedService,
+              duration: 5
+            })
+          });
+          
+          const verifyData = await verifyResponse.json();
+          if (verifyData.success) {
+            // Payment verified, process translation
+            await processTranslation(reference);
+          } else {
+            setError('Payment verification failed. Please try again.');
+            setLoading(false);
+          }
+        } catch (error) {
+          console.error('❌ Verification error:', error);
+          setError('Payment verification failed: ' + error.message);
+          setLoading(false);
+        }
+      };
+      
+      verifyPayment();
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }, []);
 
   // Handle file upload
@@ -242,6 +269,10 @@ function TranslateVideo() {
         setLoading(false);
         // Clear payment reference after successful translation
         localStorage.removeItem('paymentReference');
+        localStorage.removeItem('pending_payment_reference');
+        localStorage.removeItem('pending_payment_email');
+        localStorage.removeItem('pending_payment_service');
+        localStorage.removeItem('pending_payment_amount');
         setShowRetry(false);
         
         if (videoRef.current) {
@@ -363,30 +394,16 @@ function TranslateVideo() {
     setSuccess('');
 
     try {
-      console.log('💰 Starting payment process...');
+      console.log('💰 Starting payment process with Startbutton...');
       console.log('📧 Email:', email);
       console.log('💰 Amount:', TRANSLATION_PRICE);
-      
-      // Check if Paystack is loaded
-      if (typeof window.PaystackPop === 'undefined') {
-        console.log('⏳ Paystack not loaded, attempting to load...');
-        await new Promise((resolve, reject) => {
-          const script = document.createElement('script');
-          script.src = 'https://js.paystack.co/v1/inline.js';
-          script.async = true;
-          script.onload = resolve;
-          script.onerror = reject;
-          document.head.appendChild(script);
-        });
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        console.log('✅ Paystack script loaded');
-      }
       
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000);
 
       try {
-        const paymentResponse = await fetch('/api/initialize-payment', {
+        // Use Startbutton instead of Paystack
+        const paymentResponse = await fetch('/api/initialize-startbutton-payment', {
           method: 'POST',
           headers: { 
             'Content-Type': 'application/json',
@@ -462,7 +479,7 @@ function TranslateVideo() {
           throw new Error('Invalid response from payment server. Please try again.');
         }
 
-        console.log('📦 Payment response:', paymentData);
+        console.log('📦 Startbutton payment response:', paymentData);
 
         if (!paymentData.success) {
           throw new Error(paymentData.error || 'Payment initialization failed');
@@ -478,43 +495,20 @@ function TranslateVideo() {
         localStorage.setItem('paymentReference', paymentData.reference);
         setPaymentReference(paymentData.reference);
 
-        // Check again if Paystack is available
-        if (typeof window.PaystackPop === 'undefined') {
-          console.error('❌ Paystack still not available after loading');
-          throw new Error('Payment system not available. Please refresh and try again.');
+        // Redirect to Startbutton payment page
+        if (paymentData.authorization_url) {
+          // Store data for after redirect
+          localStorage.setItem('pending_payment_reference', paymentData.reference);
+          localStorage.setItem('pending_payment_email', email);
+          localStorage.setItem('pending_payment_service', 'translation');
+          localStorage.setItem('pending_payment_amount', TRANSLATION_PRICE);
+          
+          // Redirect to Startbutton
+          window.location.href = paymentData.authorization_url;
+        } else {
+          // If no redirect URL, try to process directly (test mode)
+          await processTranslation(paymentData.reference);
         }
-
-        const publicKey = process.env.REACT_APP_PAYSTACK_PUBLIC_KEY;
-        
-        if (!publicKey || publicKey === 'pk_test_xxx' || publicKey === 'pk_live_xxx') {
-          console.error('❌ Invalid Paystack public key:', publicKey);
-          throw new Error('Payment configuration error. Please contact support.');
-        }
-
-        console.log('🔑 Using Paystack public key:', publicKey.substring(0, 10) + '...');
-        
-        // Use PaystackPop with proper initialization
-        const PaystackPop = window.PaystackPop;
-        const popup = new PaystackPop();
-        
-        popup.open({
-          key: publicKey,
-          email: email,
-          amount: TRANSLATION_PRICE * 100,
-          ref: paymentData.reference,
-          metadata: paymentData.metadata,
-          currency: 'KES',
-          callback: async (response) => {
-            console.log('✅ Payment successful:', response);
-            setSuccess('✅ Payment successful! Processing translation...');
-            await processTranslation(response.reference);
-          },
-          onClose: () => {
-            console.log('❌ Payment popup closed');
-            setLoading(false);
-            setError('Payment was cancelled. Please try again.');
-          }
-        });
       } catch (fetchError) {
         clearTimeout(timeoutId);
         if (fetchError.name === 'AbortError') {
@@ -641,7 +635,7 @@ function TranslateVideo() {
             </div>
           </div>
 
-          {/* Payment Button */}
+          {/* Payment Button - Now uses Startbutton */}
           <button 
             className="translate-btn"
             onClick={handlePayment}
@@ -722,7 +716,7 @@ function TranslateVideo() {
             <ul>
               <li>📤 Upload a video with spoken audio</li>
               <li>🌍 Choose source and target languages</li>
-              <li>💰 Complete payment (KES {TRANSLATION_PRICE})</li>
+              <li>💰 Complete payment via Startbutton (Cards, M-PESA, Bank Transfer)</li>
               <li>🤖 AI will translate the audio</li>
               <li>📥 Download the translated video</li>
               <li>📧 Video link sent to your email</li>

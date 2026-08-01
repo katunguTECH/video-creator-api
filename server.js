@@ -1817,7 +1817,7 @@ const FREE_TRANSLATION_LANGUAGES = {
 };
 
 // ============================================
-// PAYMENT VERIFICATION
+// PAYMENT VERIFICATION (ORIGINAL PAYSTACK)
 // ============================================
 
 async function verifyPayment(reference) {
@@ -1838,6 +1838,132 @@ async function verifyPayment(reference) {
     console.error('❌ Payment verification error:', error.message);
     return false;
   }
+}
+
+// ============================================
+// ===== STARTBUTTON PAYMENT INTEGRATION (ADDED) =====
+// ============================================
+
+const STARTBUTTON_SECRET_KEY = process.env.STARTBUTTON_SECRET_KEY;
+const STARTBUTTON_PUBLIC_KEY = process.env.STARTBUTTON_PUBLIC_KEY;
+const STARTBUTTON_BASE_URL = process.env.STARTBUTTON_BASE_URL || 'https://api.startbutton.tech/v1';
+
+console.log('🔑 Startbutton configured:', STARTBUTTON_SECRET_KEY ? '✅' : '❌');
+
+// Initialize Startbutton payment
+async function initializeStartbuttonPayment(email, amount, serviceType, metadata = {}) {
+    try {
+        console.log('💰 Initializing Startbutton payment...');
+        console.log(`📧 Email: ${email}`);
+        console.log(`💵 Amount: KES ${amount}`);
+
+        if (!STARTBUTTON_SECRET_KEY || STARTBUTTON_SECRET_KEY === 'your_startbutton_secret_key') {
+            console.warn('⚠️ STARTBUTTON_SECRET_KEY not set. Using test mode.');
+            const reference = 'SB-TEST-' + Date.now();
+            return {
+                success: true,
+                reference: reference,
+                authorization_url: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success?reference=${reference}`,
+                testMode: true
+            };
+        }
+
+        // Startbutton expects amount in the currency's base unit (e.g., 100 for KES 100)
+        const amountInBaseUnit = Math.round(amount);
+
+        const requestBody = {
+            amount: amountInBaseUnit,
+            currency: 'KES',
+            email: email,
+            callback_url: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success`,
+            metadata: {
+                service_type: serviceType || 'translation',
+                ...metadata,
+                custom_fields: [
+                    {
+                        display_name: "Service Type",
+                        variable_name: "service_type",
+                        value: serviceType || 'translation'
+                    },
+                    {
+                        display_name: "Amount",
+                        variable_name: "amount",
+                        value: `${amount} KES`
+                    }
+                ]
+            }
+        };
+
+        console.log('📤 Sending to Startbutton:', JSON.stringify(requestBody, null, 2));
+
+        const response = await fetch(`${STARTBUTTON_BASE_URL}/payments`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${STARTBUTTON_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            console.error('❌ Startbutton API error:', response.status, errorText);
+            throw new Error(`Startbutton API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log('✅ Startbutton payment initialized:', data);
+
+        return {
+            success: true,
+            reference: data.data?.reference || data.reference,
+            authorization_url: data.data?.authorization_url || data.authorization_url,
+            testMode: false
+        };
+
+    } catch (error) {
+        console.error('❌ Startbutton payment initialization error:', error.message);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// Verify Startbutton payment
+async function verifyStartbuttonPayment(reference) {
+    try {
+        console.log(`🔍 Verifying Startbutton payment: ${reference}`);
+
+        if (!STARTBUTTON_SECRET_KEY || STARTBUTTON_SECRET_KEY === 'your_startbutton_secret_key') {
+            console.warn('⚠️ STARTBUTTON_SECRET_KEY not set. Using test mode.');
+            return true;
+        }
+
+        const response = await fetch(`${STARTBUTTON_BASE_URL}/payments/${reference}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${STARTBUTTON_SECRET_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            console.error('❌ Startbutton verification error:', response.status);
+            return false;
+        }
+
+        const data = await response.json();
+        console.log('✅ Startbutton verification response:', data);
+
+        // Check if payment was successful
+        const status = data.data?.status || data.status;
+        return status === 'success' || status === 'completed' || status === 'paid';
+
+    } catch (error) {
+        console.error('❌ Startbutton verification error:', error.message);
+        return false;
+    }
 }
 
 // ============================================
@@ -2121,7 +2247,7 @@ app.post('/api/test-audio-mux', async (req, res) => {
 });
 
 // ============================================
-// PAYMENT ENDPOINTS
+// PAYMENT ENDPOINTS (ORIGINAL PAYSTACK)
 // ============================================
 
 app.post('/api/initialize-payment', async (req, res) => {
@@ -2301,6 +2427,160 @@ app.post('/api/webhook/paystack', (req, res) => {
     res.status(500).send('Webhook processing failed');
   }
 });
+
+// ============================================
+// ===== STARTBUTTON PAYMENT ENDPOINTS (ADDED) =====
+// ============================================
+
+app.post('/api/initialize-startbutton-payment', async (req, res) => {
+    try {
+        const { email, amount, serviceType, metadata } = req.body;
+
+        console.log('💰 Initializing Startbutton payment...');
+
+        if (!email) {
+            return res.status(400).json({
+                success: false,
+                error: 'Email is required'
+            });
+        }
+
+        if (!amount || amount <= 0) {
+            return res.status(400).json({
+                success: false,
+                error: 'Valid amount is required'
+            });
+        }
+
+        const result = await initializeStartbuttonPayment(email, amount, serviceType, metadata);
+
+        if (result.success) {
+            return res.status(200).json({
+                success: true,
+                reference: result.reference,
+                authorization_url: result.authorization_url,
+                testMode: result.testMode || false
+            });
+        } else {
+            return res.status(400).json({
+                success: false,
+                error: result.error || 'Payment initialization failed'
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ Startbutton payment initialization error:', error);
+        return res.status(500).json({
+            success: false,
+            error: 'Payment initialization failed. Please try again.'
+        });
+    }
+});
+
+// ============================================
+// VERIFY STARTBUTTON PAYMENT ENDPOINT
+// ============================================
+
+app.post('/api/verify-startbutton-payment', async (req, res) => {
+    try {
+        const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
+
+        console.log(`🔍 Verifying Startbutton payment: ${reference}`);
+
+        const isValid = await verifyStartbuttonPayment(reference);
+
+        if (isValid) {
+            const serviceMap = { 
+                'text-to-video': 'textToVideo', 
+                'photo-to-video': 'photoToVideo', 
+                'translation': 'translation', 
+                'music-captions': 'music-captions' 
+            };
+            const serviceKey = serviceMap[serviceType] || 'textToVideo';
+            const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+            const videoDuration = duration || 5;
+
+            await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'startbutton');
+            await addUserPayment(email, amount, paymentMethod || 'startbutton', serviceType, reference);
+            await addActivityLog(email, `💰 Paid for ${serviceType} via Startbutton`, `Amount: KES ${amount}, Duration: ${videoDuration}s`, amount);
+
+            res.json({
+                success: true,
+                message: 'Payment verified successfully',
+                transactionId,
+                reference
+            });
+        } else {
+            res.json({
+                success: false,
+                error: 'Payment verification failed or payment not completed'
+            });
+        }
+
+    } catch (error) {
+        console.error('❌ Startbutton verification error:', error.message);
+        res.status(500).json({ success: false, error: error.message });
+    }
+});
+
+// ============================================
+// STARTBUTTON WEBHOOK HANDLER
+// ============================================
+
+app.post('/api/webhook/startbutton', async (req, res) => {
+    try {
+        const payload = req.body;
+        console.log('📨 Startbutton webhook received:', payload);
+
+        const event = payload.event || payload.type;
+        const data = payload.data || payload;
+
+        if (event === 'payment.success' || event === 'charge.success' || data.status === 'success' || data.status === 'completed') {
+            const reference = data.reference || data.id;
+            const email = data.customer?.email || data.email;
+            const amount = data.amount || data.amount_paid || 0;
+
+            console.log(`✅ Startbutton payment successful!`);
+            console.log(`   Reference: ${reference}`);
+            console.log(`   Amount: ${amount} KES`);
+            console.log(`   Customer: ${email}`);
+
+            // Extract metadata
+            let serviceType = 'text-to-video';
+            let duration = 5;
+            
+            if (data.metadata) {
+                const meta = data.metadata;
+                if (meta.custom_fields) {
+                    const serviceField = meta.custom_fields.find(f => f.display_name === 'Service Type' || f.variable_name === 'service_type');
+                    if (serviceField) serviceType = serviceField.value;
+                    
+                    const durationField = meta.custom_fields.find(f => f.display_name === 'Duration' || f.variable_name === 'duration');
+                    if (durationField) duration = parseInt(durationField.value) || 5;
+                }
+                if (meta.service_type) serviceType = meta.service_type;
+                if (meta.duration) duration = parseInt(meta.duration) || 5;
+            }
+
+            // Record the payment
+            await addUserPayment(email, amount, 'startbutton', serviceType, reference);
+            await addActivityLog(email, `💰 Payment received via Startbutton webhook`, `Amount: KES ${amount}, Ref: ${reference}, Duration: ${duration}s`, amount);
+
+            res.sendStatus(200);
+        } else {
+            console.warn('⚠️ Unhandled Startbutton webhook event:', event);
+            res.sendStatus(200);
+        }
+
+    } catch (error) {
+        console.error('❌ Startbutton webhook error:', error.message);
+        res.status(500).send('Webhook processing failed');
+    }
+});
+
+// ============================================
+// ADMIN ENDPOINTS
+// ============================================
 
 app.post('/api/admin/add-missing-payment', async (req, res) => {
   try {

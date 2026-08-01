@@ -2,38 +2,20 @@
   "name": "video-creator-app",
   "version": "1.0.0",
   "private": true,
-  "engines": {
-    "node": ">=20.0.0 <22.0.0"
-  },
   "dependencies": {
-    "@ffmpeg-installer/ffmpeg": "^1.1.0",
     "@testing-library/jest-dom": "^5.17.0",
     "@testing-library/react": "^13.4.0",
     "@testing-library/user-event": "^13.5.0",
-    "axios": "^1.6.2",
-    "cloudinary": "^1.41.0",
-    "cors": "^2.8.5",
-    "dotenv": "^16.3.1",
-    "express": "^4.18.2",
-    "fluent-ffmpeg": "^2.1.2",
-    "groq-sdk": "^0.3.0",
-    "jsonwebtoken": "^9.0.3",
-    "mailgun-js": "^0.22.0",
-    "mongoose": "^7.6.3",
-    "multer": "^1.4.4",
-    "multer-storage-cloudinary": "^4.0.0",
-    "nodemailer": "^6.9.7",
-    "react": "^18.2.0",
-    "react-dom": "^18.2.0",
-    "react-dropzone": "^14.2.3",
-    "react-router-dom": "^6.20.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
     "react-scripts": "5.0.1",
-    "recharts": "^2.8.0",
+    "recharts": "^3.10.1",
     "web-vitals": "^2.1.4"
   },
   "scripts": {
     "start": "react-scripts start",
-    "build": "REACT_APP_API_URL=https://video-creator-api-kjzy.onrender.com REACT_APP_PAYSTACK_PUBLIC_KEY=pk_live_b4e989714e327518caddc237577c32c3b2f9fc8b react-scripts build",
+    "build": "cross-env REACT_APP_API_URL=https://video-creator-api-kjzy.onrender.com react-scripts build",
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
@@ -55,5 +37,7 @@
       "last 1 safari version"
     ]
   },
-  "proxy": "https://video-creator-api-kjzy.onrender.com"
+  "devDependencies": {
+    "cross-env": "^7.0.3"
+  }
 }

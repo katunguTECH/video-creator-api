@@ -1,0 +1,13 @@
+sb_test_c28a63467d9cc7a854904f16ab52fb9858894118d699419be18c66877c6dbea8
+
+sv_test_bc1db8cb617c2dadd89302e35f862e8bbc63aadc6bae1effba2814d64e8a6962
+
+Field	Value to Enter
+Redirect Link	https://katareel.com/checkout/order-received/
+Webhook URL	https://katareel.com/?wc-api=wc_startbutton_gateway
+
+
+STARTBUTTON_SECRET_KEY=sv_test_bc1db8cb617c2dadd89302e35f862e8bbc63aadc6bae1effba2814d64e8a6962
+STARTBUTTON_PUBLIC_KEY=sb_test_c28a63467d9cc7a854904f16ab52fb9858894118d699419be18c66877c6dbea8
+STARTBUTTON_BASE_URL=https://api.startbutton.tech/v1
+FRONTEND_URL=https://www.katareel.com

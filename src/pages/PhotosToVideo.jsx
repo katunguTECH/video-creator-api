@@ -62,7 +62,6 @@ function PhotosToVideo() {
   const [success, setSuccess] = useState('');
   const [videoUrl, setVideoUrl] = useState(null);
   const [paymentReference, setPaymentReference] = useState('');
-  const [paystackReady, setPaystackReady] = useState(false);
   const fileInputRef = useRef(null);
 
   // Redo / Coupon states
@@ -73,47 +72,64 @@ function PhotosToVideo() {
   const [redoLoading, setRedoLoading] = useState(false);
   const [savedCoupon, setSavedCoupon] = useState('');
 
-  // Load Paystack script on component mount
+  // Calculate price whenever photos or duration changes
   useEffect(() => {
-    const loadPaystack = () => {
-      if (typeof window.PaystackPop !== 'undefined') {
-        console.log('✅ Paystack already loaded');
-        setPaystackReady(true);
-        return;
-      }
+    calculatePrice();
+  }, [photos.length, duration]);
 
-      const existingScript = document.querySelector('script[src*="paystack"]');
-      if (existingScript) {
-        console.log('📦 Paystack script already in DOM');
-        setTimeout(() => {
-          if (typeof window.PaystackPop !== 'undefined') {
-            console.log('✅ Paystack loaded from existing script!');
-            setPaystackReady(true);
+  // Check for pending payment on load (return from Startbutton redirect)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const reference = urlParams.get('reference') || urlParams.get('payment_reference');
+    
+    if (reference) {
+      console.log('🔍 Found payment reference in URL:', reference);
+      const savedEmail = localStorage.getItem('pending_payment_email') || email;
+      const savedService = localStorage.getItem('pending_payment_service') || 'photo-to-video';
+      const savedAmount = localStorage.getItem('pending_payment_amount') || '300';
+      const savedDuration = localStorage.getItem('pending_payment_duration') || '5';
+      const savedPhotos = localStorage.getItem('pending_payment_photos') || '[]';
+      
+      // Verify the payment
+      const verifyPayment = async () => {
+        setLoading(true);
+        try {
+          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-startbutton-payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              reference: reference,
+              email: savedEmail,
+              amount: parseFloat(savedAmount),
+              serviceType: savedService,
+              duration: parseInt(savedDuration)
+            })
+          });
+          
+          const verifyData = await verifyResponse.json();
+          if (verifyData.success) {
+            // Payment verified, generate video
+            // Restore photos if needed
+            try {
+              const photoData = JSON.parse(savedPhotos);
+              // Process with photos
+            } catch (e) {}
+            await processPhotoVideo(reference);
+          } else {
+            setError('Payment verification failed. Please try again.');
+            setLoading(false);
           }
-        }, 2000);
-        return;
-      }
-
-      console.log('📦 Loading Paystack script...');
-      const script = document.createElement('script');
-      script.src = 'https://js.paystack.co/v1/inline.js';
-      script.async = true;
-      script.onload = () => {
-        console.log('✅ Paystack script loaded successfully!');
-        setTimeout(() => {
-          if (typeof window.PaystackPop !== 'undefined') {
-            setPaystackReady(true);
-          }
-        }, 1000);
+        } catch (error) {
+          console.error('❌ Verification error:', error);
+          setError('Payment verification failed: ' + error.message);
+          setLoading(false);
+        }
       };
-      script.onerror = () => {
-        console.error('❌ Failed to load Paystack script');
-        setTimeout(loadPaystack, 3000);
-      };
-      document.head.appendChild(script);
-    };
-
-    loadPaystack();
+      
+      verifyPayment();
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
 
     const savedCouponCode = localStorage.getItem('video_redo_coupon');
     if (savedCouponCode) {
@@ -121,14 +137,7 @@ function PhotosToVideo() {
       setCouponCode(savedCouponCode);
       setShowRedoSection(true);
     }
-
-    return () => {};
   }, []);
-
-  // Calculate price whenever photos or duration changes
-  useEffect(() => {
-    calculatePrice();
-  }, [photos.length, duration]);
 
   const calculatePrice = async () => {
     if (photos.length === 0) {
@@ -192,54 +201,6 @@ function PhotosToVideo() {
 
   const removePhoto = (id) => {
     setPhotos(photos.filter(p => p.id !== id));
-  };
-
-  const openPaystackPopup = (paymentData) => {
-    if (typeof window.PaystackPop === 'undefined') {
-      console.error('❌ Paystack not ready, waiting...');
-      setError('Payment system is loading. Please wait a moment...');
-      setLoading(false);
-
-      const script = document.createElement('script');
-      script.src = 'https://js.paystack.co/v1/inline.js';
-      script.async = true;
-      script.onload = () => {
-        console.log('✅ Paystack reloaded');
-        setPaystackReady(true);
-        setTimeout(() => {
-          setError('');
-          setLoading(false);
-          setSuccess('✅ Paystack loaded. Please click "Generate AI Video" again.');
-        }, 1000);
-      };
-      document.head.appendChild(script);
-      return;
-    }
-
-    try {
-      console.log('💰 Opening Paystack popup with:', paymentData);
-      const handler = window.PaystackPop.setup({
-        key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
-        email: email,
-        amount: paymentData.amount * 100,
-        ref: paymentData.reference,
-        metadata: paymentData.metadata,
-        currency: 'KES',
-        callback: (response) => {
-          console.log('✅ Payment successful:', response);
-          processPhotoVideo(response.reference);
-        },
-        onClose: () => {
-          setLoading(false);
-          setError('Payment was cancelled');
-        }
-      });
-      handler.openIframe();
-    } catch (error) {
-      console.error('❌ Paystack error:', error);
-      setError('Payment system error. Please try again.');
-      setLoading(false);
-    }
   };
 
   const displayVideo = (url) => {
@@ -311,9 +272,10 @@ function PhotosToVideo() {
 
     try {
       const priceAmount = price?.finalPrice || 300;
-      console.log('💰 Processing payment for:', priceAmount);
+      console.log('💰 Processing payment with Startbutton for:', priceAmount);
 
-      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-payment`, {
+      // Use Startbutton instead of Paystack
+      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-startbutton-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -356,7 +318,7 @@ function PhotosToVideo() {
       }
 
       const paymentData = await paymentResponse.json();
-      console.log('📦 Payment response:', paymentData);
+      console.log('📦 Startbutton payment response:', paymentData);
 
       if (!paymentData.success) {
         throw new Error(paymentData.error || 'Payment initialization failed');
@@ -364,16 +326,22 @@ function PhotosToVideo() {
 
       setPaymentReference(paymentData.reference);
 
-      if (paymentData.testMode) {
+      // Redirect to Startbutton payment page
+      if (paymentData.authorization_url) {
+        // Store data for after redirect
+        localStorage.setItem('pending_payment_reference', paymentData.reference);
+        localStorage.setItem('pending_payment_email', email);
+        localStorage.setItem('pending_payment_service', 'photo-to-video');
+        localStorage.setItem('pending_payment_amount', priceAmount);
+        localStorage.setItem('pending_payment_duration', duration);
+        localStorage.setItem('pending_payment_photos', JSON.stringify(photos.map(p => p.preview)));
+        
+        // Redirect to Startbutton
+        window.location.href = paymentData.authorization_url;
+      } else {
+        // If no redirect URL, try to process directly (test mode)
         await processPhotoVideo(paymentData.reference);
-        return;
       }
-
-      openPaystackPopup({
-        amount: priceAmount,
-        reference: paymentData.reference,
-        metadata: paymentData.metadata
-      });
 
     } catch (error) {
       console.error('❌ Payment error:', error);
@@ -478,6 +446,13 @@ function PhotosToVideo() {
           setLoading(false);
           setRedoLoading(false);
           setIsRedoMode(false);
+          // Clear pending data
+          localStorage.removeItem('pending_payment_reference');
+          localStorage.removeItem('pending_payment_email');
+          localStorage.removeItem('pending_payment_service');
+          localStorage.removeItem('pending_payment_amount');
+          localStorage.removeItem('pending_payment_duration');
+          localStorage.removeItem('pending_payment_photos');
           return;
         }
 
@@ -547,6 +522,13 @@ function PhotosToVideo() {
         setLoading(false);
         setRedoLoading(false);
         setIsRedoMode(false);
+        // Clear pending data
+        localStorage.removeItem('pending_payment_reference');
+        localStorage.removeItem('pending_payment_email');
+        localStorage.removeItem('pending_payment_service');
+        localStorage.removeItem('pending_payment_amount');
+        localStorage.removeItem('pending_payment_duration');
+        localStorage.removeItem('pending_payment_photos');
 
       } else {
         throw new Error(data.error || 'Video generation failed - no video URL returned');
@@ -750,7 +732,7 @@ function PhotosToVideo() {
                 </div>
               </div>
               <div className="price-note">
-                <small>Complete your payment below</small>
+                <small>Complete your payment below via Startbutton (Cards, M-PESA, Bank Transfer)</small>
               </div>
             </div>
           )}
@@ -824,7 +806,7 @@ function PhotosToVideo() {
             </div>
           )}
 
-          {/* Payment Button */}
+          {/* Payment Button - Now uses Startbutton */}
           {!isRedoMode && (
             <button
               className="generate-btn"
@@ -897,7 +879,7 @@ function PhotosToVideo() {
               <li>📤 Upload a photo (JPG, PNG, WEBP)</li>
               <li>📝 Describe what you want the AI to generate</li>
               <li>🎙️ Select voice character (Male, Female, Neutral)</li>
-              <li>💰 Complete payment via Paystack</li>
+              <li>💰 Complete payment via Startbutton (Cards, M-PESA, Bank Transfer)</li>
               <li>📥 Download your AI-generated video with speech</li>
               <li>🔄 Use your redo coupon for free regeneration</li>
               <li>🔒 All AI generations are secure and private</li>

@@ -112,9 +112,10 @@ function CreateVideo() {
 
     try {
       const priceAmount = price?.finalPrice || 200;
-      console.log('💰 Processing payment for:', priceAmount);
+      console.log('💰 Processing payment with Startbutton for:', priceAmount);
 
-      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-payment`, {
+      // Use Startbutton instead of Paystack
+      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-startbutton-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -151,7 +152,7 @@ function CreateVideo() {
       }
 
       const paymentData = await paymentResponse.json();
-      console.log('📦 Payment response:', paymentData);
+      console.log('📦 Startbutton payment response:', paymentData);
 
       if (!paymentData.success) {
         throw new Error(paymentData.error || 'Payment initialization failed');
@@ -159,30 +160,19 @@ function CreateVideo() {
 
       setPaymentReference(paymentData.reference);
 
-      if (paymentData.testMode) {
-        await processVideoGeneration(paymentData.reference);
-        return;
-      }
-
-      if (window.PaystackPop) {
-        const popup = new window.PaystackPop();
-        popup.open({
-          key: process.env.REACT_APP_PAYSTACK_PUBLIC_KEY,
-          email: email,
-          amount: priceAmount * 100,
-          ref: paymentData.reference,
-          metadata: paymentData.metadata,
-          currency: 'KES',
-          callback: async (response) => {
-            console.log('✅ Payment successful:', response);
-            await processVideoGeneration(response.reference);
-          },
-          onClose: () => {
-            setLoading(false);
-            setError('Payment was cancelled');
-          }
-        });
+      // Redirect to Startbutton payment page
+      if (paymentData.authorization_url) {
+        // Store reference for after redirect
+        localStorage.setItem('pending_payment_reference', paymentData.reference);
+        localStorage.setItem('pending_payment_email', email);
+        localStorage.setItem('pending_payment_service', 'text-to-video');
+        localStorage.setItem('pending_payment_amount', priceAmount);
+        localStorage.setItem('pending_payment_duration', duration);
+        
+        // Redirect to Startbutton
+        window.location.href = paymentData.authorization_url;
       } else {
+        // If no redirect URL, try to process directly (test mode)
         await processVideoGeneration(paymentData.reference);
       }
     } catch (error) {
@@ -217,6 +207,12 @@ function CreateVideo() {
         setVideoUrl(data.videoUrl);
         setSuccess('✅ Video generated successfully! Check your email for the download link.');
         setLoading(false);
+        // Clear pending data
+        localStorage.removeItem('pending_payment_reference');
+        localStorage.removeItem('pending_payment_email');
+        localStorage.removeItem('pending_payment_service');
+        localStorage.removeItem('pending_payment_amount');
+        localStorage.removeItem('pending_payment_duration');
       } else {
         throw new Error(data.error || 'Video generation failed');
       }
@@ -226,6 +222,55 @@ function CreateVideo() {
       setLoading(false);
     }
   };
+
+  // Check for pending payment on load (return from Startbutton redirect)
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    const reference = urlParams.get('reference') || urlParams.get('payment_reference');
+    
+    if (reference) {
+      console.log('🔍 Found payment reference in URL:', reference);
+      const savedEmail = localStorage.getItem('pending_payment_email') || email;
+      const savedService = localStorage.getItem('pending_payment_service') || 'text-to-video';
+      const savedAmount = localStorage.getItem('pending_payment_amount') || '200';
+      const savedDuration = localStorage.getItem('pending_payment_duration') || '5';
+      
+      // Verify the payment
+      const verifyPayment = async () => {
+        setLoading(true);
+        try {
+          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-startbutton-payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              reference: reference,
+              email: savedEmail,
+              amount: parseFloat(savedAmount),
+              serviceType: savedService,
+              duration: parseInt(savedDuration)
+            })
+          });
+          
+          const verifyData = await verifyResponse.json();
+          if (verifyData.success) {
+            // Payment verified, generate video
+            await processVideoGeneration(reference);
+          } else {
+            setError('Payment verification failed. Please try again.');
+            setLoading(false);
+          }
+        } catch (error) {
+          console.error('❌ Verification error:', error);
+          setError('Payment verification failed: ' + error.message);
+          setLoading(false);
+        }
+      };
+      
+      verifyPayment();
+      // Clean URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+  }, []);
 
   const getPriceDisplay = () => {
     if (!price) return 'Calculating price...';
@@ -310,7 +355,7 @@ function CreateVideo() {
             </div>
           </div>
 
-          {/* Payment Button - REPLACED PaystackButton */}
+          {/* Payment Button - Now uses Startbutton */}
           <button 
             onClick={handlePayment}
             className="generate-btn"
@@ -345,7 +390,7 @@ function CreateVideo() {
             <h4>ℹ️ How It Works</h4>
             <ul>
               <li>📝 Describe what you want the AI to generate</li>
-              <li>💰 Complete payment via Paystack</li>
+              <li>💰 Complete payment via Startbutton (Cards, M-PESA, Bank Transfer)</li>
               <li>📥 Download your AI-generated video</li>
               <li>🔒 All AI generations are secure and private</li>
             </ul>
