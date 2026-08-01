@@ -46,8 +46,7 @@ if (!MONGODB_URI) {
 let isMongoConnected = false;
 
 const mongooseOptions = {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
+const mongooseOptions = {
   serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
   family: 4,
