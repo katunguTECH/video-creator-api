@@ -699,7 +699,44 @@ app.use((req, res, next) => {
   }
   next();
 });
-
+// ============================================
+// RECORD SITE VISIT FUNCTION
+// ============================================
+async function recordSiteVisit(page, ip, userAgent) {
+    try {
+        // If Supabase is available, log the visit there
+        if (supabase) {
+            const { data, error } = await supabase
+                .from('site_visits')
+                .insert({
+                    page: page || '/',
+                    ip: ip || 'unknown',
+                    user_agent: userAgent || 'unknown'
+                })
+                .select()
+                .single();
+            
+            if (error) throw error;
+            console.log('✅ Site visit recorded:', page);
+            return data;
+        }
+        
+        // Fallback: Store in memory
+        if (!memoryStore.siteVisits) {
+            memoryStore.siteVisits = [];
+        }
+        memoryStore.siteVisits.push({
+            page: page || '/',
+            ip: ip || 'unknown',
+            userAgent: userAgent || 'unknown',
+            createdAt: new Date().toISOString()
+        });
+        return 'memory-' + Date.now();
+    } catch (error) {
+        console.error('❌ Error recording site visit:', error.message);
+        return null;
+    }
+}
 // ============================================
 // MIDDLEWARE
 // ============================================
