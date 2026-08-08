@@ -9,7 +9,7 @@
   },
   "dependencies": {
     "@ffmpeg-installer/ffmpeg": "^1.1.0",
-    "@supabase/supabase-js": "^2.39.0",
+    "@supabase/supabase-js": "^2.112.2",
     "axios": "^1.6.2",
     "cloudinary": "^1.41.0",
     "cors": "^2.8.5",
