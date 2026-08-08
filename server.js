@@ -19,6 +19,7 @@ const ffmpeg = require('fluent-ffmpeg');
 const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
+const { createClient } = require('@supabase/supabase-js');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -28,149 +29,19 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// MONGODB ATLAS CONNECTION
+// SUPABASE CONFIGURATION
 // ============================================
+const supabaseUrl = process.env.SUPABASE_URL || 'https://ocllfaqgqbpqiszkghcj.supabase.co';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jbGxmYXFncWJwcWlzemtnaGNqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjE0NjI5OSwiZXhwIjoyMTAxNzIyMjk5fQ.uBMUxzomxE18alp1zyqd8filjet1oth_bzwZrELXq8o';
 
-const MONGODB_URI = process.env.MONGODB_URI;
-const DATABASE_NAME = process.env.DATABASE_NAME || 'video-creator';
+console.log('🔗 Supabase URL:', supabaseUrl);
+console.log('🔑 Supabase Service Key:', supabaseServiceKey ? '✅ Configured' : '❌ Missing');
 
-if (!MONGODB_URI) {
-  console.error('❌ MONGODB_URI not set in environment. Set it in Render → Environment.');
-} else {
-  const maskedUri = MONGODB_URI.replace(/\/\/[^:]+:[^@]+@/, '//****:****@');
-  console.log('🔑 MongoDB Atlas configured');
-  console.log(`📡 Connection string: ${maskedUri}`);
-  console.log(`📊 Database: ${DATABASE_NAME}`);
-}
-
-let isMongoConnected = false;
-
-const mongooseOptions = {
-  serverSelectionTimeoutMS: 30000,
-  socketTimeoutMS: 45000,
-  family: 4,
-  dbName: DATABASE_NAME
-};
-
-async function connectToMongo() {
-  if (!MONGODB_URI) {
-    console.warn('⚠️ Skipping MongoDB connection: MONGODB_URI not set');
-    return false;
-  }
-  try {
-    console.log('🔄 Connecting to MongoDB Atlas...');
-    
-    await mongoose.connect(MONGODB_URI, mongooseOptions);
-    
-    const dbName = mongoose.connection.db?.databaseName || DATABASE_NAME;
-    console.log('✅ MongoDB Atlas connected successfully!');
-    console.log(`   Database: ${dbName}`);
-    console.log(`   Host: ${mongoose.connection.host}`);
-    console.log(`   Connection State: ${mongoose.connection.readyState}`);
-    isMongoConnected = true;
-    
-    setTimeout(initializeDatabase, 1000);
-    return true;
-  } catch (error) {
-    console.error('❌ MongoDB connection error:', error.message);
-    if (error.code === 'ENOTFOUND') {
-      console.error('   ⚠️ DNS resolution failed - check your connection string hostname');
-    } else if (error.message.includes('bad auth')) {
-      console.error('   ⚠️ Authentication failed - check your username and password');
-    } else if (error.message.includes('not whitelisted')) {
-      console.error('   ⚠️ IP not whitelisted - add 0.0.0.0/0 to MongoDB Atlas IP Access List');
-    } else if (error.message.includes('ECONNREFUSED')) {
-      console.error('   ⚠️ Connection refused - check if your cluster is running');
-    }
-    console.log('⚠️ Running without MongoDB - using in-memory storage for coupons and logs');
-    isMongoConnected = false;
-    return false;
-  }
-}
-
-async function initializeDatabase() {
-  if (!isMongoConnected || !InitialBalance) {
-    console.warn('⚠️ MongoDB not connected, skipping database initialization');
-    return;
-  }
-
-  try {
-    console.log('🔄 Initializing database collections...');
-    
-    const defaultBalances = [
-      { provider: 'replicate', balance: parseFloat(process.env.REPLICATE_BALANCE) || 10.00 },
-      { provider: 'byteplus', balance: parseFloat(process.env.BYTEPLUS_BALANCE) || 29.40 }
-    ];
-
-    for (const balance of defaultBalances) {
-      await InitialBalance.findOneAndUpdate(
-        { provider: balance.provider },
-        { balance: balance.balance },
-        { upsert: true, new: true }
-      );
-    }
-    
-    try {
-      const collections = await mongoose.connection.db.listCollections().toArray();
-      console.log(`   📁 Collections: ${collections.map(c => c.name).join(', ') || 'none'}`);
-    } catch (err) {
-      console.log('   📁 Collections: unable to list');
-    }
-    
-    try {
-      if (Revenue) {
-        const revenueCount = await Revenue.countDocuments();
-        console.log(`   💰 Revenue records: ${revenueCount}`);
-      }
-      if (VideoUsage) {
-        const usageCount = await VideoUsage.countDocuments();
-        console.log(`   🎬 Video usages: ${usageCount}`);
-      }
-      if (UserPayment) {
-        const paymentCount = await UserPayment.countDocuments();
-        console.log(`   💳 User payments: ${paymentCount}`);
-      }
-    } catch (err) {
-      // Ignore counting errors
-    }
-    
-    console.log('✅ Database initialized successfully');
-  } catch (error) {
-    console.error('❌ Error initializing database:', error.message);
-  }
-}
-
-// Connect to MongoDB (don't block server startup)
-connectToMongo();
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 // ============================================
-// MONGODB EVENT LISTENERS
+// IN-MEMORY FALLBACK STORAGE
 // ============================================
-
-mongoose.connection.on('connected', () => {
-  console.log('✅ MongoDB connected via event listener');
-  isMongoConnected = true;
-});
-
-mongoose.connection.on('error', (err) => {
-  console.error('❌ MongoDB connection error:', err.message);
-  isMongoConnected = false;
-});
-
-mongoose.connection.on('disconnected', () => {
-  console.warn('⚠️ MongoDB disconnected');
-  isMongoConnected = false;
-});
-
-mongoose.connection.on('reconnected', () => {
-  console.log('✅ MongoDB reconnected!');
-  isMongoConnected = true;
-});
-
-// ============================================
-// IN-MEMORY FALLBACK STORAGE (When MongoDB is down)
-// ============================================
-
 const memoryStore = {
   coupons: {},
   payments: [],
@@ -181,7 +52,340 @@ const memoryStore = {
 };
 
 // ============================================
-// ✅ PRE-CREATE TEST COUPON FOR katungu1@gmail.com
+// SUPABASE HELPER FUNCTIONS
+// ============================================
+
+async function supabaseAddPayment(email, amount, paymentMethod, serviceType, reference) {
+    try {
+        const { data, error } = await supabase
+            .from('payments')
+            .insert({
+                email,
+                amount,
+                payment_method: paymentMethod,
+                service_type: serviceType,
+                reference,
+                status: 'completed'
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Payment saved to Supabase:', data.id);
+        return data;
+    } catch (error) {
+        console.error('❌ Error adding payment to Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseAddRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
+    try {
+        const { data, error } = await supabase
+            .from('revenues')
+            .insert({
+                transaction_id: transactionId,
+                email,
+                amount,
+                service_type: serviceType,
+                payment_reference: paymentReference,
+                payment_method: paymentMethod || 'card'
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Revenue saved to Supabase:', data.id);
+        return data;
+    } catch (error) {
+        console.error('❌ Error adding revenue to Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseAddVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
+    try {
+        const { data, error } = await supabase
+            .from('video_usage')
+            .insert({
+                transaction_id: transactionId,
+                user_email: userEmail || 'anonymous',
+                video_type: videoType,
+                prompt: prompt ? prompt.substring(0, 200) : '',
+                cost: cost || 0,
+                model_used: modelUsed || 'unknown',
+                provider: provider || 'unknown',
+                duration: duration || 5
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Video usage saved to Supabase:', data.id);
+        return data;
+    } catch (error) {
+        console.error('❌ Error adding video usage to Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseAddActivityLog(userEmail, action, details, amount) {
+    try {
+        const { data, error } = await supabase
+            .from('activity_logs')
+            .insert({
+                user_email: userEmail || 'anonymous',
+                action,
+                details: details || '',
+                amount: amount || 0
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Activity log saved to Supabase:', data.id);
+        return data;
+    } catch (error) {
+        console.error('❌ Error adding activity log to Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseFindPaymentByReference(reference) {
+    try {
+        const { data, error } = await supabase
+            .from('payments')
+            .select('*')
+            .eq('reference', reference)
+            .single();
+        if (error) {
+            if (error.code === 'PGRST116') return null;
+            throw error;
+        }
+        return data;
+    } catch (error) {
+        console.error('❌ Error finding payment in Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseGenerateCoupon(paymentReference, email, serviceType) {
+    const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    try {
+        const { data: existing } = await supabase
+            .from('coupons')
+            .select('code')
+            .eq('payment_reference', paymentReference)
+            .single();
+        if (existing) return existing.code;
+        const { data, error } = await supabase
+            .from('coupons')
+            .insert({
+                code: couponCode,
+                payment_reference: paymentReference,
+                email,
+                service_type: serviceType || 'photo-to-video',
+                expires_at: expiresAt.toISOString()
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Coupon saved to Supabase:', data.code);
+        return data.code;
+    } catch (error) {
+        console.error('❌ Error generating coupon in Supabase:', error.message);
+        return couponCode;
+    }
+}
+
+async function supabaseValidateCoupon(couponCode, email) {
+    try {
+        const { data, error } = await supabase
+            .from('coupons')
+            .select('*')
+            .eq('code', couponCode)
+            .single();
+        if (error) {
+            if (error.code === 'PGRST116') return { valid: false, error: 'Coupon not found' };
+            throw error;
+        }
+        if (data.used) {
+            return { valid: false, error: 'This coupon has already been used' };
+        }
+        if (new Date(data.expires_at) < new Date()) {
+            return { valid: false, error: 'Coupon has expired' };
+        }
+        if (email && data.email !== email) {
+            return { valid: false, error: 'Coupon not valid for this email' };
+        }
+        return { valid: true, coupon: data };
+    } catch (error) {
+        console.error('❌ Error validating coupon in Supabase:', error.message);
+        return { valid: false, error: 'Error validating coupon' };
+    }
+}
+
+async function supabaseRedeemCoupon(couponCode, email) {
+    try {
+        const validation = await supabaseValidateCoupon(couponCode, email);
+        if (!validation || !validation.valid) {
+            return validation || { success: false, error: 'Invalid coupon' };
+        }
+        const { data, error } = await supabase
+            .from('coupons')
+            .update({ used: true, used_at: new Date().toISOString() })
+            .eq('code', couponCode)
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Coupon redeemed in Supabase:', data.code);
+        return { success: true, coupon: data };
+    } catch (error) {
+        console.error('❌ Error redeeming coupon in Supabase:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
+// ============================================
+// DATA ACCESS FUNCTIONS (Supabase first, fallback to memory)
+// ============================================
+
+async function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
+    const result = await supabaseAddPayment(email, amount, paymentMethod, serviceType, reference);
+    if (result) return result.id;
+    memoryStore.payments.push({
+        email,
+        amount: parseFloat(amount),
+        paymentMethod,
+        serviceType,
+        reference,
+        status: 'completed',
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
+
+async function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
+    const result = await supabaseAddRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod);
+    if (result) return result.id;
+    memoryStore.revenues.push({
+        transactionId,
+        email,
+        amount: parseFloat(amount),
+        serviceType,
+        paymentReference,
+        paymentMethod: paymentMethod || 'card',
+        duration: 5,
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
+
+async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
+    const result = await supabaseAddVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration);
+    if (result) return result.id;
+    memoryStore.videoUsages.push({
+        transactionId,
+        userEmail: userEmail || 'anonymous',
+        videoType,
+        prompt: prompt ? prompt.substring(0, 200) : '',
+        cost: cost || 0,
+        modelUsed: modelUsed || 'unknown',
+        provider: provider || 'unknown',
+        duration: duration || 5,
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
+
+async function addActivityLog(userEmail, action, details, amount) {
+    const result = await supabaseAddActivityLog(userEmail, action, details, amount);
+    if (result) return result.id;
+    memoryStore.activityLogs.push({
+        userEmail: userEmail || 'anonymous',
+        action,
+        details: details || '',
+        amount: amount || 0,
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
+
+async function findPaymentByReference(reference) {
+    const result = await supabaseFindPaymentByReference(reference);
+    if (result) return result;
+    return memoryStore.payments.find(p => p.reference === reference) || null;
+}
+
+async function generateCoupon(paymentReference, email, serviceType) {
+    const result = await supabaseGenerateCoupon(paymentReference, email, serviceType);
+    if (result) return result;
+    const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    memoryStore.coupons[couponCode] = {
+        code: couponCode,
+        paymentReference,
+        email,
+        serviceType: serviceType || 'photo-to-video',
+        used: false,
+        usedAt: null,
+        expiresAt: expiresAt.toISOString(),
+        createdAt: new Date().toISOString()
+    };
+    return couponCode;
+}
+
+async function validateCoupon(couponCode, email) {
+    const result = await supabaseValidateCoupon(couponCode, email);
+    if (result) return result;
+    if (memoryStore.coupons[couponCode]) {
+        const coupon = memoryStore.coupons[couponCode];
+        if (coupon.used) return { valid: false, error: 'This coupon has already been used' };
+        if (new Date(coupon.expiresAt) < new Date()) return { valid: false, error: 'Coupon has expired' };
+        if (email && coupon.email !== email) return { valid: false, error: 'Coupon not valid for this email' };
+        return { valid: true, coupon };
+    }
+    return { valid: false, error: 'Coupon not found' };
+}
+
+async function redeemCoupon(couponCode, email) {
+    const result = await supabaseRedeemCoupon(couponCode, email);
+    if (result) return result;
+    if (memoryStore.coupons[couponCode]) {
+        const coupon = memoryStore.coupons[couponCode];
+        if (coupon.used) return { success: false, error: 'This coupon has already been used' };
+        if (new Date(coupon.expiresAt) < new Date()) return { success: false, error: 'Coupon has expired' };
+        coupon.used = true;
+        coupon.usedAt = new Date().toISOString();
+        return { success: true, coupon };
+    }
+    return { success: false, error: 'Coupon not found' };
+}
+
+// ============================================
+// TEST SUPABASE CONNECTION ENDPOINT
+// ============================================
+app.get('/api/test-supabase', async (req, res) => {
+    try {
+        const { data, error, count } = await supabase
+            .from('payments')
+            .select('*', { count: 'exact', head: true });
+        
+        if (error) throw error;
+        
+        res.json({
+            success: true,
+            message: '✅ Supabase connected successfully!',
+            paymentCount: count || 0
+        });
+    } catch (error) {
+        console.error('❌ Supabase test error:', error.message);
+        res.json({
+            success: false,
+            error: error.message
+        });
+    }
+});
+
+// ============================================
+// ✅ PRE-CREATE TEST COUPONS
 // ============================================
 const TEST_COUPON = 'REDO-KATUNGU-001';
 memoryStore.coupons[TEST_COUPON] = {
@@ -208,645 +412,6 @@ memoryStore.coupons[GENERIC_COUPON] = {
   createdAt: new Date().toISOString()
 };
 console.log(`✅ Generic test coupon created: ${GENERIC_COUPON}`);
-
-// ============================================
-// MONGODB SCHEMAS AND MODELS
-// ============================================
-
-let InitialBalance, ApiLedger, Revenue, VideoUsage, UserPayment, Translation, ActivityLog, SiteVisit, Coupon;
-
-try {
-  const initialBalanceSchema = new mongoose.Schema({
-    provider: { type: String, required: true, unique: true },
-    balance: { type: Number, required: true, default: 0 }
-  });
-
-  const apiLedgerSchema = new mongoose.Schema({
-    provider: { type: String, required: true },
-    amount: { type: Number, required: true },
-    type: { type: String, enum: ['purchase', 'usage'], required: true },
-    description: { type: String, default: '' },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  const revenueSchema = new mongoose.Schema({
-    transactionId: { type: String, required: true },
-    email: { type: String, required: true },
-    amount: { type: Number, required: true },
-    serviceType: { type: String, required: true },
-    paymentReference: { type: String },
-    paymentMethod: { type: String, default: 'card' },
-    duration: { type: Number, default: 5 },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  const videoUsageSchema = new mongoose.Schema({
-    transactionId: { type: String, required: true },
-    userEmail: { type: String, default: 'anonymous' },
-    videoType: { type: String, required: true },
-    prompt: { type: String, default: '' },
-    cost: { type: Number, default: 0 },
-    modelUsed: { type: String, default: 'unknown' },
-    provider: { type: String, default: 'unknown' },
-    duration: { type: Number, default: 5 },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  const userPaymentSchema = new mongoose.Schema({
-    email: { type: String, required: true },
-    amount: { type: Number, required: true },
-    paymentMethod: { type: String, required: true },
-    serviceType: { type: String, required: true },
-    reference: { type: String, required: true, unique: true },
-    status: { type: String, default: 'completed' },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  const translationSchema = new mongoose.Schema({
-    paymentReference: { type: String, required: true },
-    email: { type: String, required: true },
-    videoUrl: { type: String, required: true },
-    targetLanguage: { type: String, required: true },
-    sourceLanguage: { type: String, default: 'en' },
-    translatedText: { type: String },
-    translatedVideoUrl: { type: String },
-    duration: { type: Number, default: 5 },
-    price: { type: Number, default: 300 },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  const activityLogSchema = new mongoose.Schema({
-    userEmail: { type: String, default: 'anonymous' },
-    action: { type: String, required: true },
-    details: { type: String, default: '' },
-    amount: { type: Number, default: 0 },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  const siteVisitSchema = new mongoose.Schema({
-    page: { type: String, required: true },
-    ip: { type: String, default: 'unknown' },
-    userAgent: { type: String, default: 'unknown' },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  const couponSchema = new mongoose.Schema({
-    code: { type: String, required: true, unique: true },
-    paymentReference: { type: String, required: true },
-    email: { type: String, required: true },
-    serviceType: { type: String, default: 'photo-to-video' },
-    used: { type: Boolean, default: false },
-    usedAt: { type: Date },
-    expiresAt: { type: Date, required: true },
-    createdAt: { type: Date, default: Date.now }
-  });
-
-  InitialBalance = mongoose.model('InitialBalance', initialBalanceSchema);
-  ApiLedger = mongoose.model('ApiLedger', apiLedgerSchema);
-  Revenue = mongoose.model('Revenue', revenueSchema);
-  VideoUsage = mongoose.model('VideoUsage', videoUsageSchema);
-  UserPayment = mongoose.model('UserPayment', userPaymentSchema);
-  Translation = mongoose.model('Translation', translationSchema);
-  ActivityLog = mongoose.model('ActivityLog', activityLogSchema);
-  SiteVisit = mongoose.model('SiteVisit', siteVisitSchema);
-  Coupon = mongoose.model('Coupon', couponSchema);
-} catch (error) {
-  console.warn('⚠️ Could not initialize MongoDB models:', error.message);
-}
-
-// ============================================
-// DATA ACCESS FUNCTIONS - WITH FALLBACK
-// ============================================
-
-async function addApiTransaction(provider, amount, type, description) {
-  if (!isMongoConnected || !ApiLedger) {
-    console.warn('⚠️ MongoDB not connected, skipping API transaction');
-    return null;
-  }
-
-  try {
-    const entry = new ApiLedger({
-      provider,
-      amount: parseFloat(amount),
-      type,
-      description: description || ''
-    });
-    await entry.save();
-    return entry.id;
-  } catch (error) {
-    console.error('❌ Error adding API transaction:', error.message);
-    return null;
-  }
-}
-
-async function getApiBalance(provider) {
-  if (!isMongoConnected || !InitialBalance) {
-    console.warn('⚠️ MongoDB not connected, returning default balance');
-    return 0;
-  }
-
-  try {
-    const initialBalance = await InitialBalance.findOne({ provider });
-    const initial = initialBalance ? initialBalance.balance : 0;
-
-    const transactions = await ApiLedger.find({ provider });
-    const totalPurchases = transactions.filter(t => t.type === 'purchase').reduce((sum, t) => sum + t.amount, 0);
-    const totalUsage = transactions.filter(t => t.type === 'usage').reduce((sum, t) => sum + t.amount, 0);
-
-    return Math.round((initial + totalPurchases - totalUsage) * 100) / 100;
-  } catch (error) {
-    console.error('❌ Error getting API balance:', error.message);
-    return 0;
-  }
-}
-
-async function getApiBalances() {
-  const replicate = await getApiBalance('replicate');
-  const byteplus = await getApiBalance('byteplus');
-  return {
-    replicate: replicate,
-    byteplus: byteplus,
-    total: Math.round((replicate + byteplus) * 100) / 100
-  };
-}
-
-async function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
-  memoryStore.payments.push({
-    email,
-    amount: parseFloat(amount),
-    paymentMethod,
-    serviceType,
-    reference,
-    status: 'completed',
-    createdAt: new Date().toISOString()
-  });
-
-  if (!isMongoConnected || !UserPayment) {
-    console.warn('⚠️ MongoDB not connected, payment stored in memory only');
-    return 'memory-' + Date.now();
-  }
-
-  try {
-    const entry = new UserPayment({
-      email,
-      amount: parseFloat(amount),
-      paymentMethod,
-      serviceType,
-      reference
-    });
-    await entry.save();
-    return entry.id;
-  } catch (error) {
-    console.error('❌ Error adding user payment:', error.message);
-    return 'memory-' + Date.now();
-  }
-}
-
-async function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
-  memoryStore.revenues.push({
-    transactionId,
-    email,
-    amount: parseFloat(amount),
-    serviceType,
-    paymentReference,
-    paymentMethod: paymentMethod || 'card',
-    duration: 5,
-    createdAt: new Date().toISOString()
-  });
-
-  if (!isMongoConnected || !Revenue) {
-    console.warn('⚠️ MongoDB not connected, revenue stored in memory only');
-    return 'memory-' + Date.now();
-  }
-
-  try {
-    const entry = new Revenue({
-      transactionId,
-      email,
-      amount: parseFloat(amount),
-      serviceType,
-      paymentReference,
-      paymentMethod: paymentMethod || 'card'
-    });
-    await entry.save();
-    return entry.id;
-  } catch (error) {
-    console.error('❌ Error adding revenue:', error.message);
-    return 'memory-' + Date.now();
-  }
-}
-
-async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
-  memoryStore.videoUsages.push({
-    transactionId,
-    userEmail: userEmail || 'anonymous',
-    videoType,
-    prompt: prompt ? prompt.substring(0, 200) : '',
-    cost: cost || 0,
-    modelUsed: modelUsed || 'unknown',
-    provider: provider || 'unknown',
-    duration: duration || 5,
-    createdAt: new Date().toISOString()
-  });
-
-  if (!isMongoConnected || !VideoUsage) {
-    console.warn('⚠️ MongoDB not connected, video usage stored in memory only');
-    return 'memory-' + Date.now();
-  }
-
-  try {
-    const entry = new VideoUsage({
-      transactionId,
-      userEmail: userEmail || 'anonymous',
-      videoType,
-      prompt: prompt ? prompt.substring(0, 200) : '',
-      cost: cost || 0,
-      modelUsed: modelUsed || 'unknown',
-      provider: provider || 'unknown',
-      duration: duration || 5
-    });
-    await entry.save();
-    return entry.id;
-  } catch (error) {
-    console.error('❌ Error adding video usage:', error.message);
-    return 'memory-' + Date.now();
-  }
-}
-
-async function addActivityLog(userEmail, action, details, amount) {
-  memoryStore.activityLogs.push({
-    userEmail: userEmail || 'anonymous',
-    action,
-    details: details || '',
-    amount: amount || 0,
-    createdAt: new Date().toISOString()
-  });
-
-  if (!isMongoConnected || !ActivityLog) {
-    console.warn('⚠️ MongoDB not connected, activity log stored in memory only');
-    return 'memory-' + Date.now();
-  }
-
-  try {
-    const entry = new ActivityLog({
-      userEmail: userEmail || 'anonymous',
-      action,
-      details: details || '',
-      amount: amount || 0
-    });
-    await entry.save();
-
-    const count = await ActivityLog.countDocuments();
-    if (count > 1000) {
-      const oldest = await ActivityLog.findOne().sort({ createdAt: 1 });
-      if (oldest) await ActivityLog.deleteOne({ _id: oldest._id });
-    }
-
-    return entry.id;
-  } catch (error) {
-    console.error('❌ Error adding activity log:', error.message);
-    return 'memory-' + Date.now();
-  }
-}
-
-async function recordSiteVisit(page, ip, userAgent) {
-  if (!isMongoConnected || !SiteVisit) {
-    return null;
-  }
-
-  try {
-    const entry = new SiteVisit({
-      page,
-      ip: ip || 'unknown',
-      userAgent: userAgent || 'unknown'
-    });
-    await entry.save();
-
-    const count = await SiteVisit.countDocuments();
-    if (count > 5000) {
-      const oldest = await SiteVisit.findOne().sort({ createdAt: 1 });
-      if (oldest) await SiteVisit.deleteOne({ _id: oldest._id });
-    }
-
-    return entry.id;
-  } catch (error) {
-    return null;
-  }
-}
-
-async function getRevenueByService() {
-  if (!isMongoConnected || !Revenue) {
-    const total = memoryStore.revenues.reduce((sum, r) => sum + r.amount, 0);
-    return { total, textToVideo: 0, photoToVideo: 0, translation: 0 };
-  }
-
-  try {
-    const textToVideo = await Revenue.aggregate([
-      { $match: { serviceType: 'textToVideo' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const photoToVideo = await Revenue.aggregate([
-      { $match: { serviceType: 'photoToVideo' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-    const translation = await Revenue.aggregate([
-      { $match: { serviceType: 'translation' } },
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-
-    const textTotal = textToVideo[0]?.total || 0;
-    const photoTotal = photoToVideo[0]?.total || 0;
-    const translationTotal = translation[0]?.total || 0;
-
-    return {
-      total: textTotal + photoTotal + translationTotal,
-      textToVideo: textTotal,
-      photoToVideo: photoTotal,
-      translation: translationTotal
-    };
-  } catch (error) {
-    console.error('❌ Error getting revenue by service:', error.message);
-    return { total: 0, textToVideo: 0, photoToVideo: 0, translation: 0 };
-  }
-}
-
-async function getVideoUsage() {
-  if (!isMongoConnected || !VideoUsage) {
-    return { totalVideos: memoryStore.videoUsages.length, textToVideo: 0, photoToVideo: 0, translation: 0 };
-  }
-
-  try {
-    const textToVideo = await VideoUsage.countDocuments({ videoType: 'text-to-video' });
-    const photoToVideo = await VideoUsage.countDocuments({ videoType: 'photo-to-video' });
-    const translation = await VideoUsage.countDocuments({ videoType: 'translation' });
-
-    return {
-      totalVideos: textToVideo + photoToVideo + translation,
-      textToVideo,
-      photoToVideo,
-      translation
-    };
-  } catch (error) {
-    console.error('❌ Error getting video usage:', error.message);
-    return { totalVideos: 0, textToVideo: 0, photoToVideo: 0, translation: 0 };
-  }
-}
-
-async function getSiteVisits() {
-  if (!isMongoConnected || !SiteVisit) return 0;
-  try {
-    return await SiteVisit.countDocuments();
-  } catch (error) {
-    return 0;
-  }
-}
-
-async function getRecentActivity(limit = 10) {
-  if (!isMongoConnected || !ActivityLog) {
-    return memoryStore.activityLogs.slice(-limit).map(log => ({
-      id: 'memory-' + Date.now(),
-      user: log.userEmail || 'Anonymous',
-      action: log.action,
-      details: log.details || '',
-      amount: log.amount || 0,
-      time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
-    }));
-  }
-
-  try {
-    const logs = await ActivityLog.find()
-      .sort({ createdAt: -1 })
-      .limit(limit);
-
-    return logs.map(log => ({
-      id: log._id,
-      user: log.userEmail || 'Anonymous',
-      action: log.action,
-      details: log.details || '',
-      amount: log.amount || 0,
-      time: log.createdAt ? new Date(log.createdAt).toLocaleString() : 'Just now'
-    }));
-  } catch (error) {
-    console.error('❌ Error getting recent activity:', error.message);
-    return [];
-  }
-}
-
-async function getUserPayments(limit = 20) {
-  if (!isMongoConnected || !UserPayment) {
-    return memoryStore.payments.slice(-limit).map(p => ({
-      id: 'memory-' + Date.now(),
-      email: p.email,
-      amount: p.amount,
-      paymentMethod: p.paymentMethod,
-      serviceType: p.serviceType,
-      reference: p.reference,
-      status: p.status,
-      createdAt: p.createdAt ? new Date(p.createdAt).toLocaleString() : 'Just now'
-    }));
-  }
-
-  try {
-    const payments = await UserPayment.find()
-      .sort({ createdAt: -1 })
-      .limit(limit);
-
-    return payments.map(payment => ({
-      id: payment._id,
-      email: payment.email,
-      amount: payment.amount,
-      paymentMethod: payment.paymentMethod,
-      serviceType: payment.serviceType,
-      reference: payment.reference,
-      status: payment.status,
-      createdAt: payment.createdAt ? new Date(payment.createdAt).toLocaleString() : 'Just now'
-    }));
-  } catch (error) {
-    console.error('❌ Error getting user payments:', error.message);
-    return [];
-  }
-}
-
-async function findPaymentByReference(reference) {
-  if (!isMongoConnected || !UserPayment) {
-    return memoryStore.payments.find(p => p.reference === reference) || null;
-  }
-
-  try {
-    return await UserPayment.findOne({ reference });
-  } catch (error) {
-    console.error('❌ Error finding payment by reference:', error.message);
-    return null;
-  }
-}
-
-async function getTranslations(email) {
-  if (!isMongoConnected || !Translation) {
-    return memoryStore.translations.filter(t => !email || t.email === email).slice(-20);
-  }
-
-  try {
-    const query = email ? { email } : {};
-    return await Translation.find(query)
-      .sort({ createdAt: -1 })
-      .limit(20);
-  } catch (error) {
-    console.error('❌ Error getting translations:', error.message);
-    return [];
-  }
-}
-
-async function saveTranslation(translationData) {
-  memoryStore.translations.push(translationData);
-
-  if (!isMongoConnected || !Translation) {
-    console.warn('⚠️ MongoDB not connected, translation stored in memory only');
-    return translationData;
-  }
-
-  try {
-    const entry = new Translation(translationData);
-    await entry.save();
-    return entry;
-  } catch (error) {
-    console.error('❌ Error saving translation:', error.message);
-    return translationData;
-  }
-}
-
-// ============================================
-// COUPON FUNCTIONS - WITH FALLBACK
-// ============================================
-
-async function generateCoupon(paymentReference, email, serviceType) {
-  const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-  const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-
-  memoryStore.coupons[couponCode] = {
-    code: couponCode,
-    paymentReference,
-    email,
-    serviceType: serviceType || 'photo-to-video',
-    used: false,
-    usedAt: null,
-    expiresAt: expiresAt.toISOString(),
-    createdAt: new Date().toISOString()
-  };
-
-  if (!isMongoConnected || !Coupon) {
-    console.log(`✅ Coupon generated (memory): ${couponCode} for ${email}`);
-    return couponCode;
-  }
-
-  try {
-    const existingCoupon = await Coupon.findOne({ paymentReference });
-    if (existingCoupon) {
-      return existingCoupon.code;
-    }
-
-    const coupon = new Coupon({
-      code: couponCode,
-      paymentReference,
-      email,
-      serviceType: serviceType || 'photo-to-video',
-      expiresAt
-    });
-
-    await coupon.save();
-    console.log(`✅ Coupon generated (MongoDB): ${couponCode} for ${email}`);
-    return couponCode;
-  } catch (error) {
-    console.error('❌ Error generating coupon in MongoDB:', error.message);
-    return couponCode;
-  }
-}
-
-async function validateCoupon(couponCode, email) {
-  if (memoryStore.coupons[couponCode]) {
-    const coupon = memoryStore.coupons[couponCode];
-    if (coupon.used) {
-      return { valid: false, error: 'This coupon has already been used' };
-    }
-    if (new Date(coupon.expiresAt) < new Date()) {
-      return { valid: false, error: 'Coupon has expired' };
-    }
-    if (email && coupon.email !== email) {
-      return { valid: false, error: 'Coupon not valid for this email' };
-    }
-    return { valid: true, coupon, source: 'memory' };
-  }
-
-  if (!isMongoConnected || !Coupon) {
-    return { valid: false, error: 'Coupon not found' };
-  }
-
-  try {
-    const coupon = await Coupon.findOne({ code: couponCode });
-    if (!coupon) {
-      return { valid: false, error: 'Invalid coupon code' };
-    }
-
-    if (coupon.used) {
-      return { valid: false, error: 'This coupon has already been used' };
-    }
-
-    if (new Date(coupon.expiresAt) < new Date()) {
-      return { valid: false, error: 'Coupon has expired' };
-    }
-
-    if (email && coupon.email !== email) {
-      return { valid: false, error: 'Coupon not valid for this email' };
-    }
-
-    return { valid: true, coupon, source: 'mongodb' };
-  } catch (error) {
-    console.error('❌ Error validating coupon:', error.message);
-    return { valid: false, error: 'Error validating coupon' };
-  }
-}
-
-async function redeemCoupon(couponCode, email) {
-  if (memoryStore.coupons[couponCode]) {
-    const coupon = memoryStore.coupons[couponCode];
-    if (coupon.used) {
-      return { success: false, error: 'This coupon has already been used' };
-    }
-    if (new Date(coupon.expiresAt) < new Date()) {
-      return { success: false, error: 'Coupon has expired' };
-    }
-    coupon.used = true;
-    coupon.usedAt = new Date().toISOString();
-    return { success: true, coupon, source: 'memory' };
-  }
-
-  if (!isMongoConnected || !Coupon) {
-    return { success: false, error: 'Coupon not found' };
-  }
-
-  try {
-    const coupon = await Coupon.findOne({ code: couponCode });
-    if (!coupon) {
-      return { success: false, error: 'Invalid coupon code' };
-    }
-
-    if (coupon.used) {
-      return { success: false, error: 'This coupon has already been used' };
-    }
-
-    if (new Date(coupon.expiresAt) < new Date()) {
-      return { success: false, error: 'Coupon has expired' };
-    }
-
-    coupon.used = true;
-    coupon.usedAt = new Date();
-    await coupon.save();
-
-    return { success: true, coupon, source: 'mongodb' };
-  } catch (error) {
-    console.error('❌ Error redeeming coupon:', error.message);
-    return { success: false, error: 'Error redeeming coupon' };
-  }
-}
 
 // ============================================
 // CLOUDINARY CONFIGURATION
@@ -1815,7 +1380,7 @@ const FREE_TRANSLATION_LANGUAGES = {
 };
 
 // ============================================
-// PAYMENT VERIFICATION (ORIGINAL PAYSTACK - KEPT FOR COMPATIBILITY)
+// PAYMENT VERIFICATION (PAYSTACK - KEPT FOR COMPATIBILITY)
 // ============================================
 
 async function verifyPayment(reference) {
@@ -1839,7 +1404,7 @@ async function verifyPayment(reference) {
 }
 
 // ============================================
-// ===== STARTBUTTON PAYMENT INTEGRATION (FIXED) =====
+// ===== STARTBUTTON PAYMENT INTEGRATION =====
 // ============================================
 
 const STARTBUTTON_SECRET_KEY = process.env.STARTBUTTON_SECRET_KEY;
@@ -1868,10 +1433,7 @@ async function initializeStartbuttonPayment(email, amount, serviceType, metadata
             };
         }
 
-        // Generate a unique reference for each transaction
         const uniqueReference = `SB-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-        
-        // Amount should be in fractional units (300 KES = 30000)
         const amountInFractionalUnits = Math.round(amount * 100);
 
         const requestBody = {
@@ -1900,7 +1462,6 @@ async function initializeStartbuttonPayment(email, amount, serviceType, metadata
 
         console.log('📤 Sending to Startbutton:', JSON.stringify(requestBody, null, 2));
 
-        // Correct endpoint: /transaction/initialize
         const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/initialize`, {
             method: 'POST',
             headers: {
@@ -1956,7 +1517,6 @@ async function verifyStartbuttonPayment(reference) {
             return true;
         }
 
-        // Check transaction status
         const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/verify/${reference}`, {
             method: 'GET',
             headers: {
@@ -1973,7 +1533,6 @@ async function verifyStartbuttonPayment(reference) {
         const data = await response.json();
         console.log('✅ Startbutton verification response:', data);
 
-        // Check if payment was successful
         const status = data.status || data.data?.status;
         return status === 'successful' || status === 'success' || status === 'completed';
 
@@ -1988,51 +1547,11 @@ async function verifyStartbuttonPayment(reference) {
 // ============================================
 
 app.get('/api/health', async (req, res) => {
-  const dbStatus = {
-    connected: mongoose.connection.readyState === 1,
-    readyState: mongoose.connection.readyState,
-    readyStateText: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
-    host: mongoose.connection.host || 'not connected',
-    database: mongoose.connection.name || 'not connected'
-  };
-  
   res.json({
     status: 'healthy',
     timestamp: new Date().toISOString(),
-    mongodb: dbStatus,
     environment: isProduction ? 'production' : 'development'
   });
-});
-
-// ============================================
-// DB STATUS ENDPOINT
-// ============================================
-
-app.get('/api/db-status', async (req, res) => {
-  try {
-    const status = {
-      isConnected: mongoose.connection.readyState === 1,
-      readyState: mongoose.connection.readyState,
-      readyStateText: ['disconnected', 'connected', 'connecting', 'disconnecting'][mongoose.connection.readyState] || 'unknown',
-      host: mongoose.connection.host || 'not connected',
-      database: mongoose.connection.name || 'not connected',
-      models: Object.keys(mongoose.models || {}),
-      collections: []
-    };
-    
-    if (status.isConnected) {
-      try {
-        const collections = await mongoose.connection.db.listCollections().toArray();
-        status.collections = collections.map(c => c.name);
-      } catch (err) {
-        status.collectionsError = err.message;
-      }
-    }
-    
-    res.json({ success: true, ...status });
-  } catch (error) {
-    res.json({ success: false, error: error.message });
-  }
 });
 
 // ============================================
@@ -2264,7 +1783,7 @@ app.post('/api/test-audio-mux', async (req, res) => {
 });
 
 // ============================================
-// PAYMENT ENDPOINTS (ORIGINAL PAYSTACK - KEPT FOR COMPATIBILITY)
+// PAYMENT ENDPOINTS (PAYSTACK - KEPT FOR COMPATIBILITY)
 // ============================================
 
 app.post('/api/initialize-payment', async (req, res) => {
@@ -2494,10 +2013,6 @@ app.post('/api/initialize-startbutton-payment', async (req, res) => {
     }
 });
 
-// ============================================
-// VERIFY STARTBUTTON PAYMENT ENDPOINT
-// ============================================
-
 app.post('/api/verify-startbutton-payment', async (req, res) => {
     try {
         const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
@@ -2540,10 +2055,6 @@ app.post('/api/verify-startbutton-payment', async (req, res) => {
     }
 });
 
-// ============================================
-// STARTBUTTON WEBHOOK HANDLER
-// ============================================
-
 app.post('/api/webhook/startbutton', async (req, res) => {
     try {
         const payload = req.body;
@@ -2562,7 +2073,6 @@ app.post('/api/webhook/startbutton', async (req, res) => {
             console.log(`   Amount: ${amount} KES`);
             console.log(`   Customer: ${email}`);
 
-            // Extract metadata
             let serviceType = 'text-to-video';
             let duration = 5;
             
@@ -2579,7 +2089,6 @@ app.post('/api/webhook/startbutton', async (req, res) => {
                 if (meta.duration) duration = parseInt(meta.duration) || 5;
             }
 
-            // Record the payment
             await addUserPayment(email, amount, 'startbutton', serviceType, reference);
             await addActivityLog(email, `💰 Payment received via Startbutton webhook`, `Amount: KES ${amount}, Ref: ${reference}, Duration: ${duration}s`, amount);
 
@@ -2593,353 +2102,6 @@ app.post('/api/webhook/startbutton', async (req, res) => {
         console.error('❌ Startbutton webhook error:', error.message);
         res.status(500).send('Webhook processing failed');
     }
-});
-
-// ============================================
-// ADMIN ENDPOINTS
-// ============================================
-
-app.post('/api/admin/add-missing-payment', async (req, res) => {
-  try {
-    const { email, amount, serviceType, paymentMethod, reference, duration } = req.body;
-
-    console.log('📝 Adding missing payment:', { email, amount, serviceType, paymentMethod, duration });
-
-    if (!email || !amount) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email and amount are required'
-      });
-    }
-
-    const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-    const serviceKey = serviceType || 'textToVideo';
-    const method = paymentMethod || 'mpesa';
-    const videoDuration = duration || 5;
-
-    await addRevenue(transactionId, email, amount, serviceKey, reference || 'manual_' + Date.now(), method);
-    await addUserPayment(email, amount, method, serviceKey, reference || 'manual_' + Date.now());
-    await addActivityLog(email, `💰 Manual payment added`, `Amount: KES ${amount} via ${method}, Duration: ${videoDuration}s`, amount);
-
-    const totalRevenueResult = await Revenue.aggregate([
-      { $group: { _id: null, total: { $sum: '$amount' } } }
-    ]);
-
-    res.json({
-      success: true,
-      message: `Payment of KES ${amount} added for ${email}`,
-      transactionId,
-      totalRevenue: totalRevenueResult[0]?.total || 0
-    });
-  } catch (error) {
-    console.error('❌ Error adding missing payment:', error);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/admin/payments', async (req, res) => {
-  try {
-    const limit = parseInt(req.query.limit) || 50;
-    const payments = await getUserPayments(limit);
-    const total = isMongoConnected && UserPayment ? await UserPayment.countDocuments() : payments.length;
-    const totalAmountResult = isMongoConnected && UserPayment
-      ? await UserPayment.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }])
-      : [];
-
-    res.json({
-      success: true,
-      payments: payments,
-      total: total,
-      totalAmount: totalAmountResult[0]?.total || 0
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-// ============================================
-// ENHANCED ADMIN DASHBOARD ENDPOINT
-// ============================================
-
-app.get('/api/admin/dashboard', async (req, res) => {
-  try {
-    const balances = await getApiBalances();
-    const revenue = await getRevenueByService();
-    const usage = await getVideoUsage();
-    const visits = await getSiteVisits();
-    const activity = await getRecentActivity(20);
-    const payments = await getUserPayments(20);
-    const translations = isMongoConnected && Translation ? await Translation.countDocuments() : memoryStore.translations.length;
-
-    let totalDuration = 0;
-    let totalVideos = 0;
-    if (isMongoConnected && VideoUsage) {
-      const totalDurationResult = await VideoUsage.aggregate([
-        { $group: { _id: null, totalDuration: { $sum: '$duration' } } }
-      ]);
-      totalDuration = totalDurationResult[0]?.totalDuration || 0;
-      totalVideos = await VideoUsage.countDocuments();
-    } else {
-      totalVideos = memoryStore.videoUsages.length;
-      totalDuration = memoryStore.videoUsages.reduce((sum, v) => sum + (v.duration || 0), 0);
-    }
-    const avgDuration = totalVideos > 0 ? Math.round(totalDuration / totalVideos) : 0;
-
-    // Get service-specific stats
-    let serviceStats = {
-      textToVideo: { count: 0, revenue: 0 },
-      photoToVideo: { count: 0, revenue: 0 },
-      translation: { count: 0, revenue: 0 },
-      musicCaptions: { count: 0, revenue: 0 }
-    };
-
-    if (isMongoConnected && Revenue && VideoUsage) {
-      // Revenue by service
-      const revenueByService = await Revenue.aggregate([
-        { $group: { _id: '$serviceType', total: { $sum: '$amount' }, count: { $sum: 1 } } }
-      ]);
-      
-      revenueByService.forEach(item => {
-        const key = item._id;
-        if (serviceStats[key]) {
-          serviceStats[key].revenue = item.total || 0;
-          serviceStats[key].count = item.count || 0;
-        }
-      });
-
-      // Video counts by service
-      const videoCounts = await VideoUsage.aggregate([
-        { $group: { _id: '$videoType', count: { $sum: 1 } } }
-      ]);
-      
-      videoCounts.forEach(item => {
-        const typeMap = {
-          'text-to-video': 'textToVideo',
-          'photo-to-video': 'photoToVideo',
-          'translation': 'translation',
-          'music-captions': 'musicCaptions'
-        };
-        const key = typeMap[item._id];
-        if (key && serviceStats[key]) {
-          serviceStats[key].count = item.count || 0;
-        }
-      });
-    }
-
-    // Get unique users
-    let users = [];
-    if (isMongoConnected && UserPayment) {
-      users = await UserPayment.aggregate([
-        { $group: { 
-          _id: '$email', 
-          totalSpent: { $sum: '$amount' },
-          lastPayment: { $max: '$createdAt' },
-          paymentCount: { $sum: 1 }
-        }},
-        { $sort: { totalSpent: -1 } },
-        { $limit: 50 }
-      ]);
-      
-      users = users.map(u => ({
-        email: u._id,
-        totalSpent: u.totalSpent || 0,
-        videoCount: 0,
-        joined: u.lastPayment ? new Date(u.lastPayment).toLocaleDateString() : 'N/A',
-        lastActivity: u.lastPayment ? new Date(u.lastPayment).toLocaleDateString() : 'N/A'
-      }));
-
-      const userVideos = await VideoUsage.aggregate([
-        { $group: { _id: '$userEmail', count: { $sum: 1 } } }
-      ]);
-      
-      const videoMap = {};
-      userVideos.forEach(v => {
-        videoMap[v._id] = v.count;
-      });
-      
-      users = users.map(u => ({
-        ...u,
-        videoCount: videoMap[u.email] || 0
-      }));
-    }
-
-    // Get visit statistics
-    let visitStats = {
-      total: visits || 0,
-      today: 0,
-      week: 0,
-      month: 0,
-      daily: [],
-      weekly: [],
-      monthly: []
-    };
-
-    if (isMongoConnected && SiteVisit) {
-      const now = new Date();
-      const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-      const weekAgo = new Date(today);
-      weekAgo.setDate(weekAgo.getDate() - 7);
-      const monthAgo = new Date(today);
-      monthAgo.setDate(monthAgo.getDate() - 30);
-
-      visitStats.today = await SiteVisit.countDocuments({ createdAt: { $gte: today } });
-      visitStats.week = await SiteVisit.countDocuments({ createdAt: { $gte: weekAgo } });
-      visitStats.month = await SiteVisit.countDocuments({ createdAt: { $gte: monthAgo } });
-
-      // Daily visits (last 7 days)
-      const dailyVisits = [];
-      for (let i = 6; i >= 0; i--) {
-        const day = new Date(today);
-        day.setDate(day.getDate() - i);
-        const nextDay = new Date(day);
-        nextDay.setDate(nextDay.getDate() + 1);
-        const count = await SiteVisit.countDocuments({
-          createdAt: { $gte: day, $lt: nextDay }
-        });
-        dailyVisits.push({
-          date: day.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }),
-          visits: count
-        });
-      }
-      visitStats.daily = dailyVisits;
-
-      // Weekly visits (last 4 weeks)
-      const weeklyVisits = [];
-      for (let i = 3; i >= 0; i--) {
-        const weekStart = new Date(today);
-        weekStart.setDate(weekStart.getDate() - (i * 7 + 7));
-        const weekEnd = new Date(weekStart);
-        weekEnd.setDate(weekEnd.getDate() + 7);
-        const count = await SiteVisit.countDocuments({
-          createdAt: { $gte: weekStart, $lt: weekEnd }
-        });
-        weeklyVisits.push({
-          week: `Week ${4 - i}`,
-          visits: count
-        });
-      }
-      visitStats.weekly = weeklyVisits;
-
-      // Monthly visits (last 6 months)
-      const monthlyVisits = [];
-      for (let i = 5; i >= 0; i--) {
-        const monthStart = new Date(today.getFullYear(), today.getMonth() - i, 1);
-        const monthEnd = new Date(today.getFullYear(), today.getMonth() - i + 1, 1);
-        const count = await SiteVisit.countDocuments({
-          createdAt: { $gte: monthStart, $lt: monthEnd }
-        });
-        monthlyVisits.push({
-          month: monthStart.toLocaleDateString('en-US', { month: 'short', year: 'numeric' }),
-          visits: count
-        });
-      }
-      visitStats.monthly = monthlyVisits;
-    }
-
-    // Get Music & Captions stats
-    let musicCaptionsRevenue = 0;
-    let musicCaptionsCount = 0;
-    if (isMongoConnected && Revenue) {
-      const musicStats = await Revenue.aggregate([
-        { $match: { serviceType: 'music-captions' } },
-        { $group: { _id: null, total: { $sum: '$amount' }, count: { $sum: 1 } } }
-      ]);
-      if (musicStats.length > 0) {
-        musicCaptionsRevenue = musicStats[0].total || 0;
-        musicCaptionsCount = musicStats[0].count || 0;
-      }
-    }
-
-    res.json({
-      credits: balances,
-      revenue: {
-        total: Math.round(revenue.total) || 0,
-        textToVideo: Math.round(revenue.textToVideo) || 0,
-        photoToVideo: Math.round(revenue.photoToVideo) || 0,
-        translation: Math.round(revenue.translation) || 0,
-        musicCaptions: Math.round(musicCaptionsRevenue) || 0
-      },
-      usage: {
-        totalVideos: usage.totalVideos || 0,
-        textToVideo: usage.textToVideo || 0,
-        photoToVideo: usage.photoToVideo || 0,
-        translation: usage.translation || 0,
-        musicCaptions: musicCaptionsCount || 0,
-        avgDuration: avgDuration
-      },
-      visits: visitStats,
-      recentActivity: activity.map(a => ({
-        ...a,
-        service: a.details ? 
-          (a.details.includes('Text') ? 'text-to-video' :
-           a.details.includes('Photo') ? 'photo-to-video' :
-           a.details.includes('Translation') ? 'translation' :
-           a.details.includes('Music') ? 'music-captions' : 'general') : 'general'
-      })),
-      recentPayments: payments,
-      translations: translations || 0,
-      users: users || [],
-      serviceStats: serviceStats,
-      mongodb: {
-        connected: isMongoConnected,
-        database: DATABASE_NAME
-      },
-      emailProvider: emailProvider
-    });
-  } catch (error) {
-    console.error('Error fetching dashboard data:', error);
-    res.status(500).json({ error: 'Failed to fetch dashboard data' });
-  }
-});
-
-app.post('/api/admin/add-credits', async (req, res) => {
-  try {
-    const { provider, amount, description } = req.body;
-    if (!provider || !amount) {
-      return res.status(400).json({
-        success: false,
-        error: 'Provider and amount are required. Valid providers: replicate, byteplus'
-      });
-    }
-
-    if (!['replicate', 'byteplus'].includes(provider)) {
-      return res.status(400).json({
-        success: false,
-        error: 'Invalid provider. Must be "replicate" or "byteplus"'
-      });
-    }
-
-    await addApiTransaction(provider, parseFloat(amount), 'purchase', description || 'Manual credit addition');
-
-    const newBalance = await getApiBalances();
-    res.json({
-      success: true,
-      message: `Added ${amount} ${provider} credits`,
-      newBalance: newBalance
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/admin/balances', async (req, res) => {
-  try {
-    const balances = await getApiBalances();
-    const initialBalances = isMongoConnected && InitialBalance ? await InitialBalance.find() : [];
-    const transactionCount = isMongoConnected && ApiLedger ? await ApiLedger.countDocuments() : 0;
-
-    res.json({
-      success: true,
-      credits: balances,
-      initialBalances: initialBalances.reduce((acc, b) => {
-        acc[b.provider] = b.balance;
-        return acc;
-      }, {}),
-      transactionCount: transactionCount
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
 });
 
 // ============================================
@@ -2986,11 +2148,6 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
     let expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
     if (memoryStore.coupons[couponCode]) {
       expiresAt = new Date(memoryStore.coupons[couponCode].expiresAt);
-    } else if (isMongoConnected && Coupon) {
-      const coupon = await Coupon.findOne({ code: couponCode });
-      if (coupon) {
-        expiresAt = coupon.expiresAt;
-      }
     }
 
     res.json({
@@ -3101,10 +2258,6 @@ app.get('/api/coupon-status/:paymentReference', async (req, res) => {
       }
     }
 
-    if (!coupon && isMongoConnected && Coupon) {
-      coupon = await Coupon.findOne({ paymentReference });
-    }
-
     if (coupon) {
       res.json({
         success: true,
@@ -3173,8 +2326,7 @@ app.get('/api/translation-price', (req, res) => {
 app.get('/api/translations', async (req, res) => {
   try {
     const { email } = req.query;
-    const translations = await getTranslations(email);
-
+    const translations = memoryStore.translations.filter(t => !email || t.email === email).slice(-20);
     res.json({
       success: true,
       translations: translations,
@@ -3184,6 +2336,11 @@ app.get('/api/translations', async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 });
+
+async function saveTranslation(translationData) {
+  memoryStore.translations.push(translationData);
+  return translationData;
+}
 
 // ============================================
 // SEND VIDEO EMAIL ENDPOINT
@@ -3317,6 +2474,10 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
   await sendEmail(email, receiptEmail.subject, receiptEmail.html);
   console.log(`📧 Receipt sent to ${email}`);
 }
+
+// ============================================
+// VIDEO GENERATION ENDPOINTS (KEPT AS IS)
+// ============================================
 
 // ============================================
 // VIDEO GENERATION WITH DURATION SUPPORT
