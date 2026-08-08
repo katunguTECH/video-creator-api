@@ -20,6 +20,7 @@ const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
+const WebSocket = require('ws'); // ADDED: WebSocket support for Supabase
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -29,7 +30,7 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// SUPABASE CONFIGURATION
+// SUPABASE CONFIGURATION (UPDATED WITH WEBSOCKET)
 // ============================================
 const supabaseUrl = process.env.SUPABASE_URL || 'https://ocllfaqgqbpqiszkghcj.supabase.co';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jbGxmYXFncWJwcWlzemtnaGNqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjE0NjI5OSwiZXhwIjoyMTAxNzIyMjk5fQ.uBMUxzomxE18alp1zyqd8filjet1oth_bzwZrELXq8o';
@@ -37,20 +38,24 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1
 console.log('🔗 Supabase URL:', supabaseUrl);
 console.log('🔑 Supabase Service Key:', supabaseServiceKey ? '✅ Configured' : '❌ Missing');
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey);
+// Create Supabase client with WebSocket transport for Node.js 22+
+const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+    realtime: {
+        transport: WebSocket
+    }
+});
 
 // ============================================
 // IN-MEMORY FALLBACK STORAGE
 // ============================================
 const memoryStore = {
-  coupons: {},
-  payments: [],
-  revenues: [],
-  videoUsages: [],
-  activityLogs: [],
-  translations: []
+    coupons: {},
+    payments: [],
+    revenues: [],
+    videoUsages: [],
+    activityLogs: [],
+    translations: []
 };
-
 // ============================================
 // SUPABASE HELPER FUNCTIONS
 // ============================================
@@ -242,7 +247,6 @@ async function supabaseRedeemCoupon(couponCode, email) {
         return { success: false, error: error.message };
     }
 }
-
 // ============================================
 // DATA ACCESS FUNCTIONS (Supabase first, fallback to memory)
 // ============================================
@@ -385,7 +389,7 @@ app.get('/api/test-supabase', async (req, res) => {
 });
 
 // ============================================
-// ✅ PRE-CREATE TEST COUPONS
+// ✅ PRE-CREATE TEST COUPON FOR katungu1@gmail.com
 // ============================================
 const TEST_COUPON = 'REDO-KATUNGU-001';
 memoryStore.coupons[TEST_COUPON] = {
@@ -471,7 +475,6 @@ async function translateText(text, targetLanguage) {
     return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
   }
 }
-
 // ============================================
 // TEXT-TO-SPEECH
 // ============================================
@@ -842,7 +845,6 @@ async function sendEmail(to, subject, html, text) {
   console.error(`❌ Failed to send email to ${to}: ${lastError || 'unknown error'}`);
   return { success: false, provider: emailProvider, error: lastError || 'No email provider available' };
 }
-
 // ============================================
 // EMAIL TEMPLATES
 // ============================================
@@ -1178,7 +1180,6 @@ app.post('/api/upload-video', (req, res) => {
     }
   });
 });
-
 // ============================================
 // VIDEO TRANSLATION PIPELINE FUNCTIONS
 // ============================================
@@ -1541,7 +1542,6 @@ async function verifyStartbuttonPayment(reference) {
         return false;
     }
 }
-
 // ============================================
 // HEALTH CHECK ENDPOINT
 // ============================================
@@ -2341,7 +2341,6 @@ async function saveTranslation(translationData) {
   memoryStore.translations.push(translationData);
   return translationData;
 }
-
 // ============================================
 // SEND VIDEO EMAIL ENDPOINT
 // ============================================
@@ -2474,10 +2473,6 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
   await sendEmail(email, receiptEmail.subject, receiptEmail.html);
   console.log(`📧 Receipt sent to ${email}`);
 }
-
-// ============================================
-// VIDEO GENERATION ENDPOINTS (KEPT AS IS)
-// ============================================
 
 // ============================================
 // VIDEO GENERATION WITH DURATION SUPPORT
