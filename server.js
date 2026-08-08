@@ -46,8 +46,6 @@ if (!MONGODB_URI) {
 let isMongoConnected = false;
 
 const mongooseOptions = {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
   serverSelectionTimeoutMS: 30000,
   socketTimeoutMS: 45000,
   family: 4,
@@ -1870,6 +1868,9 @@ async function initializeStartbuttonPayment(email, amount, serviceType, metadata
             };
         }
 
+        // Generate a unique reference for each transaction
+        const uniqueReference = `SB-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+        
         // Amount should be in fractional units (300 KES = 30000)
         const amountInFractionalUnits = Math.round(amount * 100);
 
@@ -1877,6 +1878,7 @@ async function initializeStartbuttonPayment(email, amount, serviceType, metadata
             amount: amountInFractionalUnits,
             currency: 'KES',
             email: email,
+            reference: uniqueReference,
             redirectUrl: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success`,
             metadata: {
                 service_type: serviceType || 'text-to-video',
@@ -1902,7 +1904,7 @@ async function initializeStartbuttonPayment(email, amount, serviceType, metadata
         const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/initialize`, {
             method: 'POST',
             headers: {
-                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`, // Use PUBLIC KEY, not SECRET KEY
+                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(requestBody)
@@ -1926,12 +1928,11 @@ async function initializeStartbuttonPayment(email, amount, serviceType, metadata
         const data = JSON.parse(responseText);
         console.log('✅ Startbutton payment initialized:', data);
 
-        // The response format from Startbutton: { success: true, message: "Encrypted", data: "pay.startbuton.tech/#/{paymentCode}" }
         const authorizationUrl = data.data || data.authorization_url;
         
         return {
             success: true,
-            reference: data.reference || data.data?.reference || 'SB-REF-' + Date.now(),
+            reference: uniqueReference,
             authorization_url: authorizationUrl.startsWith('http') ? authorizationUrl : `https://${authorizationUrl}`,
             testMode: false
         };
