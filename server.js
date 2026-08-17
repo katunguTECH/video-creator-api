@@ -20,7 +20,7 @@ const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const WebSocket = require('ws'); // ADDED: WebSocket support for Supabase
+const WebSocket = require('ws'); // ADDED: WebSocket support for Supabaseapp.use(async (req, res, next) => {
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -747,10 +747,31 @@ app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(async (req, res, next) => {
   console.log(`${req.method} ${req.url}`);
-  if (!req.path.startsWith('/api')) {
-    const ip = req.headers['x-forwarded-for'] || req.ip || req.connection.remoteAddress;
-    await recordSiteVisit(req.path, ip, req.headers['user-agent']);
+
+  // Only track real page visits, not assets/API requests
+  const isPageRequest =
+    req.method === 'GET' &&
+    !req.path.startsWith('/api') &&
+    !req.path.startsWith('/static') &&
+    !req.path.startsWith('/uploads') &&
+    !req.path.includes('.') &&
+    req.path !== '/manifest.json';
+
+  if (isPageRequest) {
+    const ip =
+      req.headers['x-forwarded-for'] ||
+      req.ip ||
+      req.connection.remoteAddress;
+
+    recordSiteVisit(
+      req.path,
+      ip,
+      req.headers['user-agent']
+    ).catch(error => {
+      console.error('❌ Analytics error:', error.message);
+    });
   }
+
   next();
 });
 
