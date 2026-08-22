@@ -8,10 +8,9 @@ import './TranslateVideo.css';
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
 
 // ============================================
-// Helper function with retry logic for cold starts
+// SIMPLIFIED helper function with retry logic
 // ============================================
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
-  let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       console.log(`🔄 Fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
@@ -21,17 +20,21 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
         return response;
       }
       if (attempt < maxRetries) {
-        const delay = (attempt + 1) * 1000;
-        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        const waitTime = (attempt + 1) * 1000;
+        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
       }
     } catch (error) {
-      lastError = error;
-      console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
-      await new Promise(resolve => setTimeout(resolve, delay));
+      console.error(`❌ Attempt ${attempt + 1} failed:`, error);
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      const waitTime = (attempt + 1) * 1000;
+      console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${waitTime}ms...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
     }
   }
-  throw lastError || new Error('Max retries exceeded');
+  throw new Error('Max retries exceeded');
 };
 
 // Hardcoded languages as fallback
@@ -99,8 +102,7 @@ function TranslateVideo() {
       const savedEmail = localStorage.getItem('pending_payment_email') || email;
       const savedService = localStorage.getItem('pending_payment_service') || 'translation';
       const savedAmount = localStorage.getItem('pending_payment_amount') || TRANSLATION_PRICE;
-      
-      // Verify the payment
+
       const verifyPayment = async () => {
         setLoading(true);
         try {
@@ -115,10 +117,9 @@ function TranslateVideo() {
               duration: 5
             })
           });
-          
+
           const verifyData = await verifyResponse.json();
           if (verifyData.success) {
-            // Payment verified, process translation
             await processTranslation(reference);
           } else {
             setError('Payment verification failed. Please try again.');
@@ -130,7 +131,7 @@ function TranslateVideo() {
           setLoading(false);
         }
       };
-      
+
       verifyPayment();
     }
   }, []);
@@ -139,13 +140,11 @@ function TranslateVideo() {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validate file size (50MB max)
     if (file.size > 50 * 1024 * 1024) {
       setError('File size exceeds 50MB limit');
       return;
     }
 
-    // Validate file type
     const validTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/webm', 'video/mov'];
     if (!validTypes.includes(file.type)) {
       setError('Invalid file format. Please upload MP4, AVI, MOV, or WEBM');
@@ -156,21 +155,19 @@ function TranslateVideo() {
     setVideoUrl(URL.createObjectURL(file));
     setError('');
     setSuccess('');
-    
-    // Upload the file
     await uploadVideo(file);
   };
 
   const uploadVideo = async (file) => {
     setUploading(true);
     setError('');
-    
+
     try {
       const formData = new FormData();
       formData.append('video', file);
-      
+
       console.log('📤 Uploading video to:', `${API_BASE_URL}/api/upload-video`);
-      
+
       const response = await fetch(`${API_BASE_URL}/api/upload-video`, {
         method: 'POST',
         body: formData,
@@ -184,7 +181,7 @@ function TranslateVideo() {
 
       const data = await response.json();
       console.log('✅ Upload successful:', data);
-      
+
       if (data.success && data.url) {
         setVideoUrl(data.url);
         setSuccess('Video uploaded successfully!');
@@ -214,7 +211,7 @@ function TranslateVideo() {
       setError('Please select a video first');
       return;
     }
-    
+
     if (!targetLanguage) {
       setError('Please select a target language');
       return;
@@ -230,7 +227,6 @@ function TranslateVideo() {
     setSuccess('');
 
     try {
-      // Initialize payment with Startbutton
       const response = await fetch(`${API_BASE_URL}/api/initialize-translation-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -244,15 +240,12 @@ function TranslateVideo() {
       });
 
       const data = await response.json();
-      
+
       if (data.success && data.paymentUrl) {
-        // Store payment info for verification
         localStorage.setItem('pending_payment_email', email);
         localStorage.setItem('pending_payment_service', 'translation');
         localStorage.setItem('pending_payment_amount', TRANSLATION_PRICE);
         localStorage.setItem('pending_payment_reference', data.reference);
-        
-        // Redirect to payment page
         window.location.href = data.paymentUrl;
       } else {
         setError(data.message || 'Failed to initialize payment');
@@ -268,7 +261,7 @@ function TranslateVideo() {
   const processTranslation = async (reference) => {
     try {
       console.log('🔄 Processing translation with reference:', reference);
-      
+
       const response = await fetch(`${API_BASE_URL}/api/process-translation`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -282,18 +275,17 @@ function TranslateVideo() {
       });
 
       const data = await response.json();
-      
+
       if (data.success) {
         setSuccess('Translation completed successfully! Check your email.');
         setTranslatedVideo(data.translatedVideoUrl);
         setTranslatedText(data.translatedText);
-        
-        // Clear pending payment info
+
         localStorage.removeItem('pending_payment_email');
         localStorage.removeItem('pending_payment_service');
         localStorage.removeItem('pending_payment_amount');
         localStorage.removeItem('pending_payment_reference');
-        
+
         setLoading(false);
       } else {
         setError(data.message || 'Translation failed');
@@ -311,7 +303,7 @@ function TranslateVideo() {
       setError('No payment reference found');
       return;
     }
-    
+
     setIsRetryLoading(true);
     await processTranslation(paymentReference);
     setIsRetryLoading(false);
@@ -326,7 +318,6 @@ function TranslateVideo() {
 
       <div className="main-content">
         <div className="left-panel">
-          {/* Email Input */}
           <div className="email-section">
             <label>📧 Your Email</label>
             <input
@@ -339,7 +330,6 @@ function TranslateVideo() {
             <small>Your translated video will be sent to this email</small>
           </div>
 
-          {/* File Upload */}
           <div className="upload-section">
             <div className="upload-area" onClick={() => fileInputRef.current?.click()}>
               {!selectedFile ? (
@@ -352,7 +342,7 @@ function TranslateVideo() {
                 <div className="file-info">
                   <span>📹 {selectedFile.name}</span>
                   <span className="file-size">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
-                  <button 
+                  <button
                     className="remove-file"
                     onClick={(e) => {
                       e.stopPropagation();
@@ -375,12 +365,11 @@ function TranslateVideo() {
             {uploading && <div className="spinner">Uploading...</div>}
           </div>
 
-          {/* Language Selection */}
           <div className="language-section">
             <div className="language-group">
               <label>🔍 Source Language</label>
-              <select 
-                value={sourceLanguage} 
+              <select
+                value={sourceLanguage}
                 onChange={(e) => setSourceLanguage(e.target.value)}
                 disabled={loading}
               >
@@ -393,8 +382,8 @@ function TranslateVideo() {
 
             <div className="language-group">
               <label>🎯 Target Language</label>
-              <select 
-                value={targetLanguage} 
+              <select
+                value={targetLanguage}
                 onChange={(e) => setTargetLanguage(e.target.value)}
                 disabled={loading}
               >
@@ -409,7 +398,6 @@ function TranslateVideo() {
             </div>
           </div>
 
-          {/* Price Display */}
           <div className="price-section">
             <h3>💰 Total Cost</h3>
             <div className="price-card">
@@ -426,8 +414,7 @@ function TranslateVideo() {
             </div>
           </div>
 
-          {/* Payment Button - Now uses Startbutton */}
-          <button 
+          <button
             className="translate-btn"
             onClick={handlePayment}
             disabled={loading || !selectedFile || !targetLanguage}
@@ -435,7 +422,6 @@ function TranslateVideo() {
             {loading ? '⏳ Processing...' : `💰 Pay KES ${TRANSLATION_PRICE} & Translate 🚀`}
           </button>
 
-          {/* RETRY BUTTON - Shows if user has a saved payment reference */}
           {showRetry && paymentReference && (
             <div className="retry-section">
               <div className="retry-info">
@@ -444,7 +430,7 @@ function TranslateVideo() {
                   Click below to retry translation for free
                 </p>
               </div>
-              <button 
+              <button
                 className="retry-btn"
                 onClick={handleFreeRetry}
                 disabled={isRetryLoading || !videoUrl || !targetLanguage}
@@ -454,7 +440,6 @@ function TranslateVideo() {
             </div>
           )}
 
-          {/* Messages */}
           {error && <div className="error-message">❌ {error}</div>}
           {success && <div className="success-message">✅ {success}</div>}
         </div>
