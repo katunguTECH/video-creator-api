@@ -125,7 +125,33 @@ if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !pr
   console.error('❌ Cloudinary env vars not fully set');
 } else {
   console.log('☁️ Cloudinary configured successfully!');
+  console.log(`   Cloud Name: ${process.env.CLOUDINARY_CLOUD_NAME}`);
+  console.log(`   API Key: ${process.env.CLOUDINARY_API_KEY ? '✅ Set' : '❌ Missing'}`);
+  console.log(`   API Secret: ${process.env.CLOUDINARY_API_SECRET ? '✅ Set' : '❌ Missing'}`);
 }
+
+// ============================================
+// TEST CLOUDINARY ENDPOINT
+// ============================================
+app.get('/api/test-cloudinary', async (req, res) => {
+  try {
+    const result = await cloudinary.api.resources({
+      resource_type: 'video',
+      max_results: 1
+    });
+    res.json({
+      success: true,
+      message: 'Cloudinary is working',
+      resources: result.resources?.length || 0
+    });
+  } catch (error) {
+    console.error('❌ Cloudinary test failed:', error.message);
+    res.json({
+      success: false,
+      error: error.message
+    });
+  }
+});
 
 // ============================================
 // GOOGLE CLOUD CONFIGURATION
@@ -836,27 +862,32 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // ============================================
-// UPLOAD VIDEO ENDPOINT - COMPLETE
+// UPLOAD VIDEO ENDPOINT - WITH DEBUG LOGGING
 // ============================================
 app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
   console.log('📤 Content-Type:', req.headers['content-type']);
   console.log('📤 Content-Length:', req.headers['content-length']);
+  console.log('📤 Host:', req.headers['host']);
 
+  // Set timeouts
   req.setTimeout(300000);
   res.setTimeout(300000);
 
   upload.single('video')(req, res, async function(err) {
     res.setTimeout(0);
 
+    // Log any multer errors
     if (err) {
       console.error('❌ Multer error:', err.message);
+      console.error('❌ Multer error stack:', err.stack);
       return res.status(400).json({
         success: false,
         error: err.message || 'File upload failed'
       });
     }
 
+    // Check if file was received
     if (!req.file) {
       console.error('❌ No file in request');
       return res.status(400).json({
@@ -865,9 +896,12 @@ app.post('/api/upload-video', (req, res) => {
       });
     }
 
+    console.log(`✅ File received: ${req.file.originalname}, Size: ${req.file.size} bytes`);
+    console.log(`✅ File mimetype: ${req.file.mimetype}`);
+
     try {
       const fileSizeMB = (req.file.size / 1024 / 1024).toFixed(2);
-      console.log('✅ Video received, uploading to Cloudinary...');
+      console.log(`☁️ Uploading to Cloudinary... (${fileSizeMB} MB)`);
 
       const result = await new Promise((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream({
@@ -879,6 +913,7 @@ app.post('/api/upload-video', (req, res) => {
             console.error('❌ Cloudinary upload error:', error.message);
             reject(error);
           } else {
+            console.log('✅ Cloudinary upload successful');
             resolve(result);
           }
         });
@@ -886,9 +921,11 @@ app.post('/api/upload-video', (req, res) => {
         uploadStream.end(req.file.buffer);
       });
 
-      console.log('✅ Video uploaded to Cloudinary successfully');
+      console.log(`✅ Video uploaded to Cloudinary successfully`);
       console.log(`   URL: ${result.secure_url}`);
+      console.log(`   Public ID: ${result.public_id}`);
 
+      // Send response
       return res.status(200).json({
         success: true,
         videoUrl: result.secure_url,
@@ -898,9 +935,12 @@ app.post('/api/upload-video', (req, res) => {
         sizeMB: parseFloat(fileSizeMB),
         mimetype: req.file.mimetype
       });
-      
+
     } catch (error) {
       console.error('❌ Upload processing error:', error.message);
+      console.error('❌ Error stack:', error.stack);
+      
+      // Always send a JSON response
       return res.status(500).json({
         success: false,
         error: 'Server error processing upload: ' + error.message
