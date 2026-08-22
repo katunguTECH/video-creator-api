@@ -3,6 +3,13 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 
+// ============================================
+// FIX: point every API call at the real backend origin,
+// not a relative path (which resolves to the frontend's
+// own domain and silently fails / returns an empty 200).
+// ============================================
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
+
 function MusicCaptions() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -41,7 +48,7 @@ function MusicCaptions() {
     const params = new URLSearchParams(location.search);
     const paymentSuccess = params.get('payment');
     const ref = params.get('reference');
-    
+
     if (paymentSuccess === 'success' && ref) {
       setPaymentReference(ref);
       setPaymentStatus('success');
@@ -51,7 +58,8 @@ function MusicCaptions() {
   }, [location, navigate]);
 
   // ============================================
-  // FIXED: handleVideoUpload with proper response handling
+  // FIXED: handleVideoUpload now hits the real backend
+  // and handles empty/non-JSON bodies safely.
   // ============================================
   const handleVideoUpload = async (event) => {
     const file = event.target.files[0];
@@ -70,23 +78,33 @@ function MusicCaptions() {
 
     try {
       console.log('📤 Uploading file:', file.name, file.size, 'bytes');
-      
-      const response = await fetch('/api/upload-video', {
+
+      const response = await fetch(`${API_BASE_URL}/api/upload-video`, {
         method: 'POST',
         body: formData,
       });
 
       console.log('📥 Response status:', response.status);
 
-      // Check if response is OK
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('Server error response:', text);
-        throw new Error(`Server error: ${response.status}`);
+      // Read the body as text first so we never crash on an
+      // empty or non-JSON response - then try to parse it.
+      const rawText = await response.text();
+      let data;
+      try {
+        data = rawText ? JSON.parse(rawText) : null;
+      } catch (parseErr) {
+        console.error('Non-JSON response body:', rawText);
+        throw new Error(`Server returned an unexpected response (status ${response.status})`);
       }
 
-      // Parse the response as JSON directly - ONLY ONCE
-      const data = await response.json();
+      if (!response.ok) {
+        throw new Error((data && data.error) || `Server error: ${response.status}`);
+      }
+
+      if (!data) {
+        throw new Error('Empty response from server');
+      }
+
       console.log('📥 Parsed JSON response:', data);
 
       if (data.success) {
@@ -116,7 +134,7 @@ function MusicCaptions() {
 
   const handleAddCaption = () => {
     if (!captionText.trim()) return;
-    
+
     const newCaption = {
       id: Date.now(),
       text: captionText.trim(),
@@ -125,7 +143,7 @@ function MusicCaptions() {
       position: captionPosition,
       fontSize: captionFontSize
     };
-    
+
     setCaptions([...captions, newCaption]);
     setCaptionText('');
   };
@@ -154,7 +172,7 @@ function MusicCaptions() {
     setError('');
 
     try {
-      const response = await fetch('/api/initialize-music-captions-payment', {
+      const response = await fetch(`${API_BASE_URL}/api/initialize-music-captions-payment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -170,7 +188,7 @@ function MusicCaptions() {
       if (data.success) {
         setPaymentReference(data.reference);
         setPaymentStatus('pending');
-        
+
         if (data.authorization_url) {
           window.location.href = data.authorization_url;
         } else {
@@ -194,7 +212,7 @@ function MusicCaptions() {
 
     try {
       // Verify payment first
-      const verifyResponse = await fetch('/api/verify-payment', {
+      const verifyResponse = await fetch(`${API_BASE_URL}/api/verify-payment`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -210,7 +228,7 @@ function MusicCaptions() {
       });
 
       const verifyData = await verifyResponse.json();
-      
+
       if (!verifyData.success) {
         setError('Payment verification failed. Please try again.');
         setIsProcessing(false);
@@ -241,7 +259,7 @@ function MusicCaptions() {
         hasMusic: !!musicUrlToSend
       });
 
-      const processResponse = await fetch('/api/add-music-captions', {
+      const processResponse = await fetch(`${API_BASE_URL}/api/add-music-captions`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -257,7 +275,7 @@ function MusicCaptions() {
       }
 
       const processData = await processResponse.json();
-      
+
       if (processData.success) {
         setResultVideoUrl(processData.resultVideoUrl);
         setIsProcessingComplete(true);
@@ -324,7 +342,7 @@ function MusicCaptions() {
             {/* Video Input */}
             <div className="bg-white/10 rounded-xl p-6">
               <h2 className="text-lg font-semibold mb-4">📹 Your Video</h2>
-              
+
               <div className="border-2 border-dashed border-white/20 rounded-lg p-6 text-center hover:border-white/40 transition-all">
                 <input
                   type="file"
@@ -388,7 +406,7 @@ function MusicCaptions() {
                     className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-pink-500"
                   />
                 </div>
-                
+
                 {/* Payment Button */}
                 <button
                   onClick={handleInitializePayment}
@@ -443,7 +461,7 @@ function MusicCaptions() {
             {/* Music Upload */}
             <div className="bg-white/10 rounded-xl p-6">
               <h2 className="text-lg font-semibold mb-4">🎵 Background Music</h2>
-              
+
               <div className="border-2 border-dashed border-white/20 rounded-lg p-6 text-center hover:border-white/40 transition-all">
                 <input
                   type="file"
@@ -470,7 +488,7 @@ function MusicCaptions() {
                   <audio controls className="w-full">
                     <source src={musicUrl} type={musicFile.type} />
                   </audio>
-                  
+
                   <div className="mt-2">
                     <label className="text-sm text-gray-400">Music Volume: {musicVolume}%</label>
                     <input
@@ -491,7 +509,7 @@ function MusicCaptions() {
           <div className="space-y-6">
             <div className="bg-white/10 rounded-xl p-6">
               <h2 className="text-lg font-semibold mb-4">📝 Captions</h2>
-              
+
               <div className="flex gap-2 mb-4">
                 <input
                   type="text"
