@@ -5,7 +5,7 @@ import './TranslateVideo.css';
 // ============================================
 // API Base URL from environment
 // ============================================
-const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
 
 // ============================================
 // Helper function with retry logic for cold starts
@@ -27,12 +27,8 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
       }
     } catch (error) {
       lastError = error;
-      console.log(`❌ Attempt ${attempt + 1} failed:`, error.message);
-      if (attempt < maxRetries) {
-        const delay = (attempt + 1) * 1000;
-        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
-      }
+      console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
     }
   }
   throw lastError || new Error('Max retries exceeded');
@@ -78,36 +74,28 @@ function TranslateVideo() {
   useEffect(() => {
     const fetchLanguages = async () => {
       try {
-        console.log('🌐 Fetching languages...');
-        const response = await fetchWithRetry(`${API_BASE_URL}/api/free-languages`);
+        console.log('🌍 Fetching languages...');
+        const response = await fetch(`${API_BASE_URL}/api/languages`);
         if (response.ok) {
           const data = await response.json();
-          if (data.success && data.languages) {
+          if (data.languages) {
             setLanguages(data.languages);
-            console.log('✅ Languages loaded:', Object.keys(data.languages).length);
           }
         }
       } catch (error) {
-        console.error('❌ Error loading languages:', error);
+        console.error('Error fetching languages:', error);
+        // Keep using fallback languages
       }
     };
     fetchLanguages();
-
-    // Check if user has a pending payment for retry
-    const savedPaymentRef = localStorage.getItem('paymentReference');
-    if (savedPaymentRef) {
-      setPaymentReference(savedPaymentRef);
-      setShowRetry(true);
-    }
   }, []);
 
-  // Check for pending payment on load (return from Startbutton redirect)
+  // Check for payment reference in URL
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const reference = urlParams.get('reference') || urlParams.get('payment_reference');
-    
+    const params = new URLSearchParams(window.location.search);
+    const reference = params.get('reference');
     if (reference) {
-      console.log('🔍 Found payment reference in URL:', reference);
+      console.log('🌐 Found payment reference in URL:', reference);
       const savedEmail = localStorage.getItem('pending_payment_email') || email;
       const savedService = localStorage.getItem('pending_payment_service') || 'translation';
       const savedAmount = localStorage.getItem('pending_payment_amount') || TRANSLATION_PRICE;
@@ -137,126 +125,75 @@ function TranslateVideo() {
             setLoading(false);
           }
         } catch (error) {
-          console.error('❌ Verification error:', error);
-          setError('Payment verification failed: ' + error.message);
+          console.error('❌ Payment verification error:', error);
+          setError('Error verifying payment. Please try again.');
           setLoading(false);
         }
       };
       
       verifyPayment();
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
 
-  // Handle file upload
   const handleFileUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
 
-    // Validate file size (max 50MB for better performance)
+    // Validate file size (50MB max)
     if (file.size > 50 * 1024 * 1024) {
-      setError('File size exceeds 50MB limit. Please compress your video or use a smaller file.');
+      setError('File size exceeds 50MB limit');
       return;
     }
 
-    const validTypes = ['video/mp4', 'video/avi', 'video/mov', 'video/webm', 'video/quicktime'];
-    const fileType = file.type;
-    const fileExtension = file.name.split('.').pop().toLowerCase();
-    
-    if (!validTypes.includes(fileType) && !['mp4', 'avi', 'mov', 'webm'].includes(fileExtension)) {
-      setError('Please upload a valid video file (MP4, AVI, MOV, WEBM)');
+    // Validate file type
+    const validTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/webm', 'video/mov'];
+    if (!validTypes.includes(file.type)) {
+      setError('Invalid file format. Please upload MP4, AVI, MOV, or WEBM');
       return;
     }
 
     setSelectedFile(file);
+    setVideoUrl(URL.createObjectURL(file));
     setError('');
-    setUploading(true);
     setSuccess('');
+    
+    // Upload the file
+    await uploadVideo(file);
+  };
 
+  const uploadVideo = async (file) => {
+    setUploading(true);
+    setError('');
+    
     try {
       const formData = new FormData();
       formData.append('video', file);
+      
+      console.log('📤 Uploading video to:', `${API_BASE_URL}/api/upload-video`);
+      
+      const response = await fetch(`${API_BASE_URL}/api/upload-video`, {
+        method: 'POST',
+        body: formData,
+      });
 
-      console.log('📤 Uploading video:', file.name, `(${(file.size / 1024 / 1024).toFixed(2)} MB)`);
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Upload failed:', errorText);
+        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      }
 
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 minutes
-
-      try {
-        const response = await fetch('/api/upload-video', {
-          method: 'POST',
-          body: formData,
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        if (!response.ok) {
-          let errorMessage = `Upload failed (${response.status})`;
-          try {
-            const errorText = await response.text();
-            if (errorText) {
-              try {
-                const errorJson = JSON.parse(errorText);
-                if (errorJson.error) {
-                  errorMessage = errorJson.error;
-                }
-              } catch (e) {
-                errorMessage = errorText;
-              }
-            }
-          } catch (e) {
-            // Ignore
-          }
-          throw new Error(errorMessage);
-        }
-
-        const responseText = await response.text();
-        if (!responseText || responseText.trim() === '') {
-          throw new Error('Empty response from server. Please try again.');
-        }
-
-        let data;
-        try {
-          data = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error('❌ Failed to parse upload response:', parseError);
-          throw new Error('Invalid response from server. Please try again.');
-        }
-
-        if (data.success) {
-          setVideoUrl(data.videoUrl);
-          if (videoRef.current) {
-            videoRef.current.src = data.videoUrl;
-            videoRef.current.load();
-          }
-          setSuccess(`✅ Video uploaded successfully! (${(file.size / 1024 / 1024).toFixed(2)} MB)`);
-          console.log('✅ Video uploaded:', data.videoUrl);
-          
-          // Check if we have a saved payment reference for retry
-          const savedRef = localStorage.getItem('paymentReference');
-          if (savedRef) {
-            setPaymentReference(savedRef);
-            setShowRetry(true);
-          }
-        } else {
-          throw new Error(data.error || 'Upload failed');
-        }
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          throw new Error('Upload timed out. Please try again with a smaller file (under 50MB).');
-        }
-        throw fetchError;
+      const data = await response.json();
+      console.log('✅ Upload successful:', data);
+      
+      if (data.success && data.url) {
+        setVideoUrl(data.url);
+        setSuccess('Video uploaded successfully!');
+      } else {
+        throw new Error(data.message || 'Upload failed');
       }
     } catch (error) {
-      console.error('❌ Upload error:', error.message);
-      setError('Upload failed: ' + error.message);
-      setSelectedFile(null);
-      if (fileInputRef.current) {
-        fileInputRef.current.value = '';
-      }
+      console.error('❌ Upload error:', error);
+      setError(`Upload failed: ${error.message}`);
     } finally {
       setUploading(false);
     }
@@ -265,162 +202,26 @@ function TranslateVideo() {
   const handleRemoveFile = () => {
     setSelectedFile(null);
     setVideoUrl(null);
-    setTranslatedVideo(null);
-    setTranslatedText('');
-    setSuccess('');
     setError('');
+    setSuccess('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
-    }
-    if (videoRef.current) {
-      videoRef.current.src = '';
-      videoRef.current.load();
-    }
-  };
-
-  const processTranslation = async (reference) => {
-    try {
-      setSuccess('🔄 Processing translation... This may take a few moments.');
-
-      const response = await fetchWithRetry(`${API_BASE_URL}/api/translate-video`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoUrl: videoUrl,
-          targetLanguage: targetLanguage,
-          sourceLanguage: sourceLanguage === 'auto' ? 'en' : sourceLanguage,
-          paymentReference: reference,
-          email: email,
-          duration: 5,
-          text: 'Sample video content for translation'
-        })
-      });
-
-      const data = await response.json();
-      if (data.success) {
-        setTranslatedVideo(data.videoUrl);
-        setTranslatedText(data.translatedText);
-        setSuccess(`✅ Translation complete! Video sent to ${email}`);
-        setLoading(false);
-        // Clear payment reference after successful translation
-        localStorage.removeItem('paymentReference');
-        localStorage.removeItem('pending_payment_reference');
-        localStorage.removeItem('pending_payment_email');
-        localStorage.removeItem('pending_payment_service');
-        localStorage.removeItem('pending_payment_amount');
-        setShowRetry(false);
-        
-        if (videoRef.current) {
-          videoRef.current.src = data.videoUrl;
-          videoRef.current.load();
-        }
-      } else {
-        throw new Error(data.error || 'Translation failed');
-      }
-    } catch (error) {
-      console.error('❌ Translation error:', error);
-      setError('Translation failed: ' + error.message);
-      setLoading(false);
-    }
-  };
-
-  // Handle free retry for paid users
-  const handleFreeRetry = async () => {
-    if (!videoUrl) {
-      setError('Please upload a video first');
-      return;
-    }
-
-    if (!email) {
-      setError('Please enter your email address');
-      return;
-    }
-
-    if (!targetLanguage) {
-      setError('Please select a target language');
-      return;
-    }
-
-    if (!paymentReference) {
-      setError('No payment reference found. Please make a payment first.');
-      return;
-    }
-
-    setIsRetryLoading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      console.log('🔄 Starting free retry...');
-      console.log('📧 Email:', email);
-      console.log('📝 Payment Reference:', paymentReference);
-
-      const response = await fetchWithRetry(`${API_BASE_URL}/api/translate-video-free`, {
-        method: 'POST',
-        headers: { 
-          'Content-Type': 'application/json',
-          'Accept': 'application/json'
-        },
-        body: JSON.stringify({
-          videoUrl: videoUrl,
-          targetLanguage: targetLanguage,
-          sourceLanguage: sourceLanguage === 'auto' ? 'en' : sourceLanguage,
-          paymentReference: paymentReference,
-          email: email,
-          duration: 5
-        })
-      });
-
-      if (!response.ok) {
-        let errorMessage = `Server error: ${response.status}`;
-        try {
-          const errorData = await response.json();
-          if (errorData.error) {
-            errorMessage = errorData.error;
-          }
-        } catch (e) {
-          // Ignore
-        }
-        throw new Error(errorMessage);
-      }
-
-      const data = await response.json();
-      if (data.success) {
-        setTranslatedVideo(data.videoUrl);
-        setTranslatedText(data.translatedText);
-        setSuccess('✅ Translation complete! Check your email for the download link and receipt.');
-        setIsRetryLoading(false);
-        // Clear payment reference after successful retry
-        localStorage.removeItem('paymentReference');
-        setShowRetry(false);
-        
-        if (videoRef.current) {
-          videoRef.current.src = data.videoUrl;
-          videoRef.current.load();
-        }
-      } else {
-        throw new Error(data.error || 'Retry failed');
-      }
-    } catch (error) {
-      console.error('❌ Retry error:', error);
-      setError('Retry failed: ' + error.message);
-      setIsRetryLoading(false);
     }
   };
 
   const handlePayment = async () => {
     if (!selectedFile) {
-      setError('Please upload a video first');
+      setError('Please select a video first');
+      return;
+    }
+    
+    if (!targetLanguage) {
+      setError('Please select a target language');
       return;
     }
 
     if (!email) {
-      setError('Please enter your email address');
-      return;
-    }
-
-    if (!targetLanguage) {
-      setError('Please select a target language');
+      setError('Please enter your email');
       return;
     }
 
@@ -429,142 +230,97 @@ function TranslateVideo() {
     setSuccess('');
 
     try {
-      console.log('💰 Starting payment process with Startbutton...');
-      console.log('📧 Email:', email);
-      console.log('💰 Amount:', TRANSLATION_PRICE);
+      // Initialize payment with Startbutton
+      const response = await fetch(`${API_BASE_URL}/api/initialize-translation-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email,
+          amount: TRANSLATION_PRICE,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage,
+          videoUrl: videoUrl
+        })
+      });
+
+      const data = await response.json();
       
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
-
-      try {
-        // Use Startbutton instead of Paystack
-        const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-startbutton-payment`, {
-          method: 'POST',
-          headers: { 
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
-          },
-          body: JSON.stringify({
-            email: email,
-            amount: TRANSLATION_PRICE,
-            serviceType: 'translation',
-            metadata: {
-              videoUrl: videoUrl,
-              targetLanguage: targetLanguage,
-              sourceLanguage: sourceLanguage,
-              duration: 5,
-              custom_fields: [
-                {
-                  display_name: "Video Type",
-                  variable_name: "video_type",
-                  value: "translation"
-                },
-                {
-                  display_name: "Target Language",
-                  variable_name: "target_language",
-                  value: languages[targetLanguage] || targetLanguage
-                },
-                {
-                  display_name: "Amount",
-                  variable_name: "amount",
-                  value: `${TRANSLATION_PRICE} KES`
-                }
-              ]
-            }
-          }),
-          signal: controller.signal
-        });
-
-        clearTimeout(timeoutId);
-
-        console.log('📦 Response status:', paymentResponse.status);
-
-        if (!paymentResponse.ok) {
-          let errorMessage = `Server error: ${paymentResponse.status}`;
-          try {
-            const errorText = await paymentResponse.text();
-            if (errorText) {
-              try {
-                const errorJson = JSON.parse(errorText);
-                if (errorJson.error) {
-                  errorMessage = errorJson.error;
-                }
-              } catch (e) {
-                errorMessage = errorText;
-              }
-            }
-          } catch (e) {
-            // Ignore
-          }
-          throw new Error(errorMessage);
-        }
-
-        const responseText = await paymentResponse.text();
-        console.log('📦 Raw response length:', responseText.length);
-
-        if (!responseText || responseText.trim() === '') {
-          throw new Error('Empty response from server. Please try again.');
-        }
-
-        let paymentData;
-        try {
-          paymentData = JSON.parse(responseText);
-        } catch (parseError) {
-          console.error('❌ Failed to parse payment response:', parseError);
-          throw new Error('Invalid response from payment server. Please try again.');
-        }
-
-        console.log('📦 Startbutton payment response:', paymentData);
-
-        if (!paymentData.success) {
-          throw new Error(paymentData.error || 'Payment initialization failed');
-        }
-
-        if (!paymentData.reference) {
-          throw new Error('Payment reference missing. Please try again.');
-        }
-
-        console.log('✅ Payment initialized with reference:', paymentData.reference);
+      if (data.success && data.paymentUrl) {
+        // Store payment info for verification
+        localStorage.setItem('pending_payment_email', email);
+        localStorage.setItem('pending_payment_service', 'translation');
+        localStorage.setItem('pending_payment_amount', TRANSLATION_PRICE);
+        localStorage.setItem('pending_payment_reference', data.reference);
         
-        // Save payment reference for potential retry
-        localStorage.setItem('paymentReference', paymentData.reference);
-        setPaymentReference(paymentData.reference);
-
-        // Redirect to Startbutton payment page
-        if (paymentData.authorization_url) {
-          // Store data for after redirect
-          localStorage.setItem('pending_payment_reference', paymentData.reference);
-          localStorage.setItem('pending_payment_email', email);
-          localStorage.setItem('pending_payment_service', 'translation');
-          localStorage.setItem('pending_payment_amount', TRANSLATION_PRICE);
-          
-          // Redirect to Startbutton
-          window.location.href = paymentData.authorization_url;
-        } else {
-          // If no redirect URL, try to process directly (test mode)
-          await processTranslation(paymentData.reference);
-        }
-      } catch (fetchError) {
-        clearTimeout(timeoutId);
-        if (fetchError.name === 'AbortError') {
-          throw new Error('Request timed out. Please try again.');
-        }
-        throw fetchError;
+        // Redirect to payment page
+        window.location.href = data.paymentUrl;
+      } else {
+        setError(data.message || 'Failed to initialize payment');
+        setLoading(false);
       }
     } catch (error) {
-      console.error('❌ Payment error:', error);
-      setError('Payment failed: ' + error.message);
+      console.error('❌ Payment initialization error:', error);
+      setError('Failed to initialize payment. Please try again.');
       setLoading(false);
     }
   };
 
+  const processTranslation = async (reference) => {
+    try {
+      console.log('🔄 Processing translation with reference:', reference);
+      
+      const response = await fetch(`${API_BASE_URL}/api/process-translation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reference: reference,
+          email: email,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage,
+          videoUrl: videoUrl
+        })
+      });
+
+      const data = await response.json();
+      
+      if (data.success) {
+        setSuccess('Translation completed successfully! Check your email.');
+        setTranslatedVideo(data.translatedVideoUrl);
+        setTranslatedText(data.translatedText);
+        
+        // Clear pending payment info
+        localStorage.removeItem('pending_payment_email');
+        localStorage.removeItem('pending_payment_service');
+        localStorage.removeItem('pending_payment_amount');
+        localStorage.removeItem('pending_payment_reference');
+        
+        setLoading(false);
+      } else {
+        setError(data.message || 'Translation failed');
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('❌ Translation error:', error);
+      setError('Translation failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handleFreeRetry = async () => {
+    if (!paymentReference) {
+      setError('No payment reference found');
+      return;
+    }
+    
+    setIsRetryLoading(true);
+    await processTranslation(paymentReference);
+    setIsRetryLoading(false);
+  };
+
   return (
-    <div className="translate-page">
+    <div className="translate-video-container">
       <div className="header">
-        <button className="back-btn" onClick={() => navigate('/')}>
-          ← Back to Home
-        </button>
-        <h1>🌍 Translate Video</h1>
+        <h1>🌐 Translate Video</h1>
         <p>Upload a video and translate it to another language</p>
       </div>
 
@@ -703,51 +459,9 @@ function TranslateVideo() {
           {success && <div className="success-message">✅ {success}</div>}
         </div>
 
-        {/* Video Preview */}
         <div className="right-panel">
-          <div className="video-preview">
-            <h3>📹 Video Preview</h3>
-            {videoUrl ? (
-              <video ref={videoRef} controls className="video-player">
-                <source src={videoUrl} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
-            ) : (
-              <div className="placeholder">
-                <p>Upload a video to preview</p>
-              </div>
-            )}
-          </div>
-
-          {/* Translated Text Display */}
-          {translatedText && (
-            <div className="translated-text">
-              <h4>📝 Translated Text</h4>
-              <div className="text-content">
-                <p><strong>Translated:</strong> {translatedText}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Translated Video */}
-          {translatedVideo && (
-            <div className="translated-video">
-              <h4>🎬 Translated Video</h4>
-              <video controls className="video-player">
-                <source src={translatedVideo} type="video/mp4" />
-                Your browser does not support the video tag.
-              </video>
-              <div className="video-actions">
-                <a href={translatedVideo} download className="download-btn">
-                  📥 Download Translated Video
-                </a>
-              </div>
-            </div>
-          )}
-
-          {/* How It Works */}
-          <div className="how-it-works">
-            <h4>ℹ️ How It Works</h4>
+          <div className="info-section">
+            <h4>📖 How It Works</h4>
             <ul>
               <li>📤 Upload a video with spoken audio</li>
               <li>🌍 Choose source and target languages</li>
