@@ -23,7 +23,7 @@ function MusicCaptions() {
   const [error, setError] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [email, setEmail] = useState('');
-  const [paymentStatus, setPaymentStatus] = useState(null); // 'pending', 'success', 'failed'
+  const [paymentStatus, setPaymentStatus] = useState(null);
   const fileInputRef = useRef(null);
 
   const MUSIC_CAPTIONS_PRICE = 200;
@@ -46,19 +46,17 @@ function MusicCaptions() {
       setPaymentReference(ref);
       setPaymentStatus('success');
       setError('');
-      // Clear the URL params
       navigate('/music-captions', { replace: true });
     }
   }, [location, navigate]);
 
   // ============================================
-  // FIXED: handleVideoUpload with better error handling
+  // FIXED: handleVideoUpload with proper response handling
   // ============================================
   const handleVideoUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
 
-    // Validate file size (50MB max)
     if (file.size > 50 * 1024 * 1024) {
       setError('File too large. Maximum size is 50MB.');
       return;
@@ -76,17 +74,24 @@ function MusicCaptions() {
       const response = await fetch('/api/upload-video', {
         method: 'POST',
         body: formData,
-        // Don't set Content-Type header - browser will set it with boundary
       });
 
       console.log('📥 Response status:', response.status);
       console.log('📥 Response headers:', response.headers.get('content-type'));
 
-      // First, get the raw text to debug
-      const rawText = await response.text();
-      console.log('📥 Raw response:', rawText.substring(0, 500));
+      // Check if response is OK
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('Server error response:', text);
+        throw new Error(`Server error: ${response.status} - ${text}`);
+      }
 
-      // Try to parse as JSON
+      // Get the response as text first
+      const rawText = await response.text();
+      console.log('📥 Raw response length:', rawText.length);
+      console.log('📥 Raw response:', rawText.substring(0, 200) + '...');
+
+      // Parse the JSON
       let data;
       try {
         data = JSON.parse(rawText);
@@ -181,8 +186,9 @@ function MusicCaptions() {
         if (data.authorization_url) {
           window.location.href = data.authorization_url;
         } else {
+          // Test mode - process directly
           setPaymentStatus('success');
-          handleProcessVideo(data.reference);
+          await handleProcessVideo(data.reference);
         }
       } else {
         setError(data.error || 'Payment initialization failed. Please try again.');
@@ -194,12 +200,13 @@ function MusicCaptions() {
     }
   };
 
-  // Process video after successful payment
+  // Process video after successful payment - FIXED with proper error handling
   const handleProcessVideo = async (reference) => {
     setIsProcessing(true);
     setError('');
 
     try {
+      // Verify payment first
       const verifyResponse = await fetch('/api/verify-payment', {
         method: 'POST',
         headers: {
@@ -223,17 +230,30 @@ function MusicCaptions() {
         return;
       }
 
+      // Prepare music URL - ensure we have a valid URL
+      let musicUrlToSend = null;
+      if (musicFile) {
+        // Use the object URL created earlier
+        musicUrlToSend = musicUrl;
+      }
+
       const requestBody = {
-        videoUrl,
+        videoUrl: videoUrl,
         captions: captions,
-        musicUrl: musicUrl || (musicFile ? URL.createObjectURL(musicFile) : null),
+        musicUrl: musicUrlToSend,
         musicVolume: musicVolume / 100,
-        captionStyle,
-        captionPosition,
-        captionFontSize,
+        captionStyle: captionStyle,
+        captionPosition: captionPosition,
+        captionFontSize: captionFontSize,
         paymentReference: reference,
         email: email
       };
+
+      console.log('📤 Processing video with:', {
+        ...requestBody,
+        captionsCount: captions.length,
+        hasMusic: !!musicUrlToSend
+      });
 
       const processResponse = await fetch('/api/add-music-captions', {
         method: 'POST',
@@ -243,6 +263,13 @@ function MusicCaptions() {
         body: JSON.stringify(requestBody),
       });
 
+      // Check if response is OK before parsing
+      if (!processResponse.ok) {
+        const text = await processResponse.text();
+        console.error('Server error response:', text);
+        throw new Error(`Server error: ${processResponse.status}`);
+      }
+
       const processData = await processResponse.json();
       
       if (processData.success) {
@@ -250,10 +277,13 @@ function MusicCaptions() {
         setIsProcessingComplete(true);
         setPaymentStatus('success');
         setError('');
+        console.log('✅ Video processing complete!');
       } else {
         setError(processData.error || 'Processing failed');
+        console.error('❌ Processing failed:', processData.error);
       }
     } catch (err) {
+      console.error('❌ Processing error:', err);
       setError('Processing error: ' + err.message);
     } finally {
       setIsProcessing(false);
