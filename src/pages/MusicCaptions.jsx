@@ -77,27 +77,17 @@ function MusicCaptions() {
       });
 
       console.log('📥 Response status:', response.status);
-      console.log('📥 Response headers:', response.headers.get('content-type'));
 
       // Check if response is OK
       if (!response.ok) {
         const text = await response.text();
         console.error('Server error response:', text);
-        throw new Error(`Server error: ${response.status} - ${text.substring(0, 100)}`);
+        throw new Error(`Server error: ${response.status}`);
       }
 
-      // Parse the response as JSON directly
-      let data;
-      try {
-        data = await response.json();
-        console.log('📥 Parsed JSON response:', data);
-      } catch (parseError) {
-        console.error('❌ Failed to parse JSON:', parseError);
-        // Try to get the raw text if JSON parsing fails
-        const rawText = await response.text();
-        console.error('Raw response was:', rawText.substring(0, 200));
-        throw new Error(`Server returned invalid JSON: ${rawText.substring(0, 100)}...`);
-      }
+      // Parse the response as JSON directly - ONLY ONCE
+      const data = await response.json();
+      console.log('📥 Parsed JSON response:', data);
 
       if (data.success) {
         setVideoUrl(data.videoUrl);
