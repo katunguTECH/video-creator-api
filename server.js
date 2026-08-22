@@ -862,6 +862,29 @@ if (!fs.existsSync(uploadsDir)) {
 }
 
 // ============================================
+// SIMPLE TEST UPLOAD ENDPOINT (FOR DEBUGGING)
+// ============================================
+app.post('/api/test-upload', upload.single('video'), (req, res) => {
+  console.log('🧪 Test upload received!');
+  console.log('File:', req.file ? req.file.originalname : 'No file');
+  console.log('Body:', req.body);
+  
+  if (!req.file) {
+    return res.status(400).json({
+      success: false,
+      error: 'No file received'
+    });
+  }
+  
+  res.json({
+    success: true,
+    message: 'Test upload worked!',
+    filename: req.file.originalname,
+    size: req.file.size
+  });
+});
+
+// ============================================
 // UPLOAD VIDEO ENDPOINT - WITH DEBUG LOGGING
 // ============================================
 app.post('/api/upload-video', (req, res) => {
