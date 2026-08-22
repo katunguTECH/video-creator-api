@@ -67,15 +67,24 @@ function MusicCaptions() {
         body: formData,
       });
 
+      // Check if response is OK before parsing
+      if (!response.ok) {
+        const text = await response.text();
+        console.error('Server response:', text);
+        throw new Error(`Server error: ${response.status} - ${text.substring(0, 100)}`);
+      }
+
       const data = await response.json();
       if (data.success) {
         setVideoUrl(data.videoUrl);
         setResultVideoUrl('');
         setIsProcessingComplete(false);
+        setError('');
       } else {
         setError(data.error || 'Upload failed');
       }
     } catch (err) {
+      console.error('Upload error:', err);
       setError('Upload error: ' + err.message);
     } finally {
       setIsUploading(false);
@@ -143,15 +152,12 @@ function MusicCaptions() {
       const data = await response.json();
 
       if (data.success) {
-        // Store the reference
         setPaymentReference(data.reference);
         setPaymentStatus('pending');
         
-        // Redirect to Paystack payment page
         if (data.authorization_url) {
           window.location.href = data.authorization_url;
         } else {
-          // Test mode - process directly
           setPaymentStatus('success');
           handleProcessVideo(data.reference);
         }
@@ -171,7 +177,6 @@ function MusicCaptions() {
     setError('');
 
     try {
-      // Verify payment first
       const verifyResponse = await fetch('/api/verify-payment', {
         method: 'POST',
         headers: {
@@ -195,7 +200,6 @@ function MusicCaptions() {
         return;
       }
 
-      // Now process the video with music and captions
       const requestBody = {
         videoUrl,
         captions: captions,
@@ -233,7 +237,6 @@ function MusicCaptions() {
     }
   };
 
-  // Manual payment reference input (for testing)
   const handleManualProcess = async () => {
     if (!paymentReference) {
       setError('Please enter a payment reference');

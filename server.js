@@ -20,7 +20,7 @@ const ffmpegInstaller = require('@ffmpeg-installer/ffmpeg');
 const mongoose = require('mongoose');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
-const WebSocket = require('ws'); // ADDED: WebSocket support for Supabaseapp.use(async (req, res, next) => {
+const WebSocket = require('ws');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -30,7 +30,7 @@ console.log('🚀 Starting server...');
 console.log('📡 Environment:', isProduction ? 'production' : 'development');
 
 // ============================================
-// SUPABASE CONFIGURATION (UPDATED WITH WEBSOCKET)
+// SUPABASE CONFIGURATION
 // ============================================
 const supabaseUrl = process.env.SUPABASE_URL || 'https://ocllfaqgqbpqiszkghcj.supabase.co';
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jbGxmYXFncWJwcWlzemtnaGNqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjE0NjI5OSwiZXhwIjoyMTAxNzIyMjk5fQ.uBMUxzomxE18alp1zyqd8filjet1oth_bzwZrELXq8o';
@@ -38,7 +38,6 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1
 console.log('🔗 Supabase URL:', supabaseUrl);
 console.log('🔑 Supabase Service Key:', supabaseServiceKey ? '✅ Configured' : '❌ Missing');
 
-// Create Supabase client with WebSocket transport for Node.js 22+
 const supabase = createClient(supabaseUrl, supabaseServiceKey, {
     realtime: {
         transport: WebSocket
@@ -54,314 +53,9 @@ const memoryStore = {
     revenues: [],
     videoUsages: [],
     activityLogs: [],
-    translations: []
+    translations: [],
+    siteVisits: []
 };
-// ============================================
-// SUPABASE HELPER FUNCTIONS
-// ============================================
-
-async function supabaseAddPayment(email, amount, paymentMethod, serviceType, reference) {
-    try {
-        const { data, error } = await supabase
-            .from('payments')
-            .insert({
-                email,
-                amount,
-                payment_method: paymentMethod,
-                service_type: serviceType,
-                reference,
-                status: 'completed'
-            })
-            .select()
-            .single();
-        if (error) throw error;
-        console.log('✅ Payment saved to Supabase:', data.id);
-        return data;
-    } catch (error) {
-        console.error('❌ Error adding payment to Supabase:', error.message);
-        return null;
-    }
-}
-
-async function supabaseAddRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
-    try {
-        const { data, error } = await supabase
-            .from('revenues')
-            .insert({
-                transaction_id: transactionId,
-                email,
-                amount,
-                service_type: serviceType,
-                payment_reference: paymentReference,
-                payment_method: paymentMethod || 'card'
-            })
-            .select()
-            .single();
-        if (error) throw error;
-        console.log('✅ Revenue saved to Supabase:', data.id);
-        return data;
-    } catch (error) {
-        console.error('❌ Error adding revenue to Supabase:', error.message);
-        return null;
-    }
-}
-
-async function supabaseAddVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
-    try {
-        const { data, error } = await supabase
-            .from('video_usage')
-            .insert({
-                transaction_id: transactionId,
-                user_email: userEmail || 'anonymous',
-                video_type: videoType,
-                prompt: prompt ? prompt.substring(0, 200) : '',
-                cost: cost || 0,
-                model_used: modelUsed || 'unknown',
-                provider: provider || 'unknown',
-                duration: duration || 5
-            })
-            .select()
-            .single();
-        if (error) throw error;
-        console.log('✅ Video usage saved to Supabase:', data.id);
-        return data;
-    } catch (error) {
-        console.error('❌ Error adding video usage to Supabase:', error.message);
-        return null;
-    }
-}
-
-async function supabaseAddActivityLog(userEmail, action, details, amount) {
-    try {
-        const { data, error } = await supabase
-            .from('activity_logs')
-            .insert({
-                user_email: userEmail || 'anonymous',
-                action,
-                details: details || '',
-                amount: amount || 0
-            })
-            .select()
-            .single();
-        if (error) throw error;
-        console.log('✅ Activity log saved to Supabase:', data.id);
-        return data;
-    } catch (error) {
-        console.error('❌ Error adding activity log to Supabase:', error.message);
-        return null;
-    }
-}
-
-async function supabaseFindPaymentByReference(reference) {
-    try {
-        const { data, error } = await supabase
-            .from('payments')
-            .select('*')
-            .eq('reference', reference)
-            .single();
-        if (error) {
-            if (error.code === 'PGRST116') return null;
-            throw error;
-        }
-        return data;
-    } catch (error) {
-        console.error('❌ Error finding payment in Supabase:', error.message);
-        return null;
-    }
-}
-
-async function supabaseGenerateCoupon(paymentReference, email, serviceType) {
-    const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    try {
-        const { data: existing } = await supabase
-            .from('coupons')
-            .select('code')
-            .eq('payment_reference', paymentReference)
-            .single();
-        if (existing) return existing.code;
-        const { data, error } = await supabase
-            .from('coupons')
-            .insert({
-                code: couponCode,
-                payment_reference: paymentReference,
-                email,
-                service_type: serviceType || 'photo-to-video',
-                expires_at: expiresAt.toISOString()
-            })
-            .select()
-            .single();
-        if (error) throw error;
-        console.log('✅ Coupon saved to Supabase:', data.code);
-        return data.code;
-    } catch (error) {
-        console.error('❌ Error generating coupon in Supabase:', error.message);
-        return couponCode;
-    }
-}
-
-async function supabaseValidateCoupon(couponCode, email) {
-    try {
-        const { data, error } = await supabase
-            .from('coupons')
-            .select('*')
-            .eq('code', couponCode)
-            .single();
-        if (error) {
-            if (error.code === 'PGRST116') return { valid: false, error: 'Coupon not found' };
-            throw error;
-        }
-        if (data.used) {
-            return { valid: false, error: 'This coupon has already been used' };
-        }
-        if (new Date(data.expires_at) < new Date()) {
-            return { valid: false, error: 'Coupon has expired' };
-        }
-        if (email && data.email !== email) {
-            return { valid: false, error: 'Coupon not valid for this email' };
-        }
-        return { valid: true, coupon: data };
-    } catch (error) {
-        console.error('❌ Error validating coupon in Supabase:', error.message);
-        return { valid: false, error: 'Error validating coupon' };
-    }
-}
-
-async function supabaseRedeemCoupon(couponCode, email) {
-    try {
-        const validation = await supabaseValidateCoupon(couponCode, email);
-        if (!validation || !validation.valid) {
-            return validation || { success: false, error: 'Invalid coupon' };
-        }
-        const { data, error } = await supabase
-            .from('coupons')
-            .update({ used: true, used_at: new Date().toISOString() })
-            .eq('code', couponCode)
-            .select()
-            .single();
-        if (error) throw error;
-        console.log('✅ Coupon redeemed in Supabase:', data.code);
-        return { success: true, coupon: data };
-    } catch (error) {
-        console.error('❌ Error redeeming coupon in Supabase:', error.message);
-        return { success: false, error: error.message };
-    }
-}
-// ============================================
-// DATA ACCESS FUNCTIONS (Supabase first, fallback to memory)
-// ============================================
-
-async function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
-    const result = await supabaseAddPayment(email, amount, paymentMethod, serviceType, reference);
-    if (result) return result.id;
-    memoryStore.payments.push({
-        email,
-        amount: parseFloat(amount),
-        paymentMethod,
-        serviceType,
-        reference,
-        status: 'completed',
-        createdAt: new Date().toISOString()
-    });
-    return 'memory-' + Date.now();
-}
-
-async function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
-    const result = await supabaseAddRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod);
-    if (result) return result.id;
-    memoryStore.revenues.push({
-        transactionId,
-        email,
-        amount: parseFloat(amount),
-        serviceType,
-        paymentReference,
-        paymentMethod: paymentMethod || 'card',
-        duration: 5,
-        createdAt: new Date().toISOString()
-    });
-    return 'memory-' + Date.now();
-}
-
-async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
-    const result = await supabaseAddVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration);
-    if (result) return result.id;
-    memoryStore.videoUsages.push({
-        transactionId,
-        userEmail: userEmail || 'anonymous',
-        videoType,
-        prompt: prompt ? prompt.substring(0, 200) : '',
-        cost: cost || 0,
-        modelUsed: modelUsed || 'unknown',
-        provider: provider || 'unknown',
-        duration: duration || 5,
-        createdAt: new Date().toISOString()
-    });
-    return 'memory-' + Date.now();
-}
-
-async function addActivityLog(userEmail, action, details, amount) {
-    const result = await supabaseAddActivityLog(userEmail, action, details, amount);
-    if (result) return result.id;
-    memoryStore.activityLogs.push({
-        userEmail: userEmail || 'anonymous',
-        action,
-        details: details || '',
-        amount: amount || 0,
-        createdAt: new Date().toISOString()
-    });
-    return 'memory-' + Date.now();
-}
-
-async function findPaymentByReference(reference) {
-    const result = await supabaseFindPaymentByReference(reference);
-    if (result) return result;
-    return memoryStore.payments.find(p => p.reference === reference) || null;
-}
-
-async function generateCoupon(paymentReference, email, serviceType) {
-    const result = await supabaseGenerateCoupon(paymentReference, email, serviceType);
-    if (result) return result;
-    const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
-    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    memoryStore.coupons[couponCode] = {
-        code: couponCode,
-        paymentReference,
-        email,
-        serviceType: serviceType || 'photo-to-video',
-        used: false,
-        usedAt: null,
-        expiresAt: expiresAt.toISOString(),
-        createdAt: new Date().toISOString()
-    };
-    return couponCode;
-}
-
-async function validateCoupon(couponCode, email) {
-    const result = await supabaseValidateCoupon(couponCode, email);
-    if (result) return result;
-    if (memoryStore.coupons[couponCode]) {
-        const coupon = memoryStore.coupons[couponCode];
-        if (coupon.used) return { valid: false, error: 'This coupon has already been used' };
-        if (new Date(coupon.expiresAt) < new Date()) return { valid: false, error: 'Coupon has expired' };
-        if (email && coupon.email !== email) return { valid: false, error: 'Coupon not valid for this email' };
-        return { valid: true, coupon };
-    }
-    return { valid: false, error: 'Coupon not found' };
-}
-
-async function redeemCoupon(couponCode, email) {
-    const result = await supabaseRedeemCoupon(couponCode, email);
-    if (result) return result;
-    if (memoryStore.coupons[couponCode]) {
-        const coupon = memoryStore.coupons[couponCode];
-        if (coupon.used) return { success: false, error: 'This coupon has already been used' };
-        if (new Date(coupon.expiresAt) < new Date()) return { success: false, error: 'Coupon has expired' };
-        coupon.used = true;
-        coupon.usedAt = new Date().toISOString();
-        return { success: true, coupon };
-    }
-    return { success: false, error: 'Coupon not found' };
-}
 
 // ============================================
 // TEST SUPABASE CONNECTION ENDPOINT
@@ -389,7 +83,7 @@ app.get('/api/test-supabase', async (req, res) => {
 });
 
 // ============================================
-// ✅ PRE-CREATE TEST COUPON FOR katungu1@gmail.com
+// ✅ PRE-CREATE TEST COUPONS
 // ============================================
 const TEST_COUPON = 'REDO-KATUNGU-001';
 memoryStore.coupons[TEST_COUPON] = {
@@ -475,6 +169,7 @@ async function translateText(text, targetLanguage) {
     return `[Translated to ${languageMap[targetLanguage] || targetLanguage}] ${text}`;
   }
 }
+
 // ============================================
 // TEXT-TO-SPEECH
 // ============================================
@@ -584,43 +279,6 @@ ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 console.log('✅ FFmpeg configured');
 
 // ============================================
-// ADD AUDIO NARRATION TO A SCENE-GENERATED VIDEO
-// ============================================
-async function addAudioToSceneVideo(remoteVideoUrl, script, voiceGender = 'MALE') {
-  const videoId = crypto.randomUUID();
-  const videoPath = path.join(tempDir, `${videoId}.mp4`);
-  const outputPath = path.join(tempDir, `${videoId}_with_audio.mp4`);
-
-  try {
-    console.log('📥 Downloading scene video for audio muxing...');
-    const response = await fetch(remoteVideoUrl);
-    if (!response.ok) throw new Error(`Failed to download scene video: ${response.status}`);
-    const videoBuffer = await response.arrayBuffer();
-    fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
-
-    console.log(`🔊 Generating ${voiceGender} narration audio...`);
-    const audioBuffer = await textToSpeech(script, 'en', 1.0, voiceGender);
-
-    console.log('🎬 Muxing audio onto scene video...');
-    await combineAudioWithVideo(videoPath, audioBuffer, outputPath);
-
-    console.log('☁️ Uploading video-with-audio to Cloudinary...');
-    const uploadResult = await cloudinary.uploader.upload(outputPath, {
-      resource_type: 'video',
-      folder: 'video-creator-uploads',
-      public_id: `${videoId}_narrated`
-    });
-
-    [videoPath, outputPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
-
-    return uploadResult.secure_url;
-  } catch (error) {
-    [videoPath, outputPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
-    throw error;
-  }
-}
-
-// ============================================
 // REPLICATE TOKEN VALIDATION (STARTUP)
 // ============================================
 async function validateReplicateTokenAtStartup() {
@@ -699,12 +357,20 @@ app.use((req, res, next) => {
   }
   next();
 });
+
+// ============================================
+// MIDDLEWARE
+// ============================================
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // ============================================
 // RECORD SITE VISIT FUNCTION
 // ============================================
 async function recordSiteVisit(page, ip, userAgent) {
     try {
-        // If Supabase is available, log the visit there
         if (supabase) {
             const { data, error } = await supabase
                 .from('site_visits')
@@ -721,7 +387,6 @@ async function recordSiteVisit(page, ip, userAgent) {
             return data;
         }
         
-        // Fallback: Store in memory
         if (!memoryStore.siteVisits) {
             memoryStore.siteVisits = [];
         }
@@ -737,18 +402,10 @@ async function recordSiteVisit(page, ip, userAgent) {
         return null;
     }
 }
-// ============================================
-// MIDDLEWARE
-// ============================================
-app.use(express.json({ limit: '100mb' }));
-app.use(express.urlencoded({ extended: true, limit: '100mb' }));
-
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 app.use(async (req, res, next) => {
   console.log(`${req.method} ${req.url}`);
 
-  // Only track real page visits, not assets/API requests
   const isPageRequest =
     req.method === 'GET' &&
     !req.path.startsWith('/api') &&
@@ -903,6 +560,7 @@ async function sendEmail(to, subject, html, text) {
   console.error(`❌ Failed to send email to ${to}: ${lastError || 'unknown error'}`);
   return { success: false, provider: emailProvider, error: lastError || 'No email provider available' };
 }
+
 // ============================================
 // EMAIL TEMPLATES
 // ============================================
@@ -1177,8 +835,13 @@ if (!fs.existsSync(uploadsDir)) {
   console.log('📁 Uploads directory created:', uploadsDir);
 }
 
+// ============================================
+// UPLOAD VIDEO ENDPOINT - COMPLETE
+// ============================================
 app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
+  console.log('📤 Content-Type:', req.headers['content-type']);
+  console.log('📤 Content-Length:', req.headers['content-length']);
 
   req.setTimeout(300000);
   res.setTimeout(300000);
@@ -1212,14 +875,20 @@ app.post('/api/upload-video', (req, res) => {
           folder: 'video-creator-uploads',
           public_id: `${Date.now()}-${Math.round(Math.random() * 1E9)}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`
         }, (error, result) => {
-          if (error) reject(error);
-          else resolve(result);
+          if (error) {
+            console.error('❌ Cloudinary upload error:', error.message);
+            reject(error);
+          } else {
+            resolve(result);
+          }
         });
 
         uploadStream.end(req.file.buffer);
       });
 
       console.log('✅ Video uploaded to Cloudinary successfully');
+      console.log(`   URL: ${result.secure_url}`);
+
       return res.status(200).json({
         success: true,
         videoUrl: result.secure_url,
@@ -1229,6 +898,7 @@ app.post('/api/upload-video', (req, res) => {
         sizeMB: parseFloat(fileSizeMB),
         mimetype: req.file.mimetype
       });
+      
     } catch (error) {
       console.error('❌ Upload processing error:', error.message);
       return res.status(500).json({
@@ -1238,6 +908,7 @@ app.post('/api/upload-video', (req, res) => {
     }
   });
 });
+
 // ============================================
 // VIDEO TRANSLATION PIPELINE FUNCTIONS
 // ============================================
@@ -1422,207 +1093,349 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
 }
 
 // ============================================
-// TRANSLATION LANGUAGES
+// ADD AUDIO NARRATION TO A SCENE-GENERATED VIDEO
 // ============================================
+async function addAudioToSceneVideo(remoteVideoUrl, script, voiceGender = 'MALE') {
+  const videoId = crypto.randomUUID();
+  const videoPath = path.join(tempDir, `${videoId}.mp4`);
+  const outputPath = path.join(tempDir, `${videoId}_with_audio.mp4`);
 
-const FREE_TRANSLATION_LANGUAGES = {
-  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
-  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
-  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
-  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
-  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
-  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
-  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
-  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
-  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
-  'mr': 'Marathi', 'or': 'Odia'
-};
-
-// ============================================
-// PAYMENT VERIFICATION (PAYSTACK - KEPT FOR COMPATIBILITY)
-// ============================================
-
-async function verifyPayment(reference) {
   try {
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      console.log('⚠️ No secret key, accepting test payment');
-      return true;
-    }
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
+    console.log('📥 Downloading scene video for audio muxing...');
+    const response = await fetch(remoteVideoUrl);
+    if (!response.ok) throw new Error(`Failed to download scene video: ${response.status}`);
+    const videoBuffer = await response.arrayBuffer();
+    fs.writeFileSync(videoPath, Buffer.from(videoBuffer));
+
+    console.log(`🔊 Generating ${voiceGender} narration audio...`);
+    const audioBuffer = await textToSpeech(script, 'en', 1.0, voiceGender);
+
+    console.log('🎬 Muxing audio onto scene video...');
+    await combineAudioWithVideo(videoPath, audioBuffer, outputPath);
+
+    console.log('☁️ Uploading video-with-audio to Cloudinary...');
+    const uploadResult = await cloudinary.uploader.upload(outputPath, {
+      resource_type: 'video',
+      folder: 'video-creator-uploads',
+      public_id: `${videoId}_narrated`
     });
-    if (!response.ok) return false;
-    const data = await response.json();
-    return data.status && data.data?.status === 'success';
+
+    [videoPath, outputPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+
+    return uploadResult.secure_url;
   } catch (error) {
-    console.error('❌ Payment verification error:', error.message);
-    return false;
+    [videoPath, outputPath].forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+    throw error;
   }
 }
 
 // ============================================
-// ===== STARTBUTTON PAYMENT INTEGRATION =====
+// SUPABASE DATA ACCESS FUNCTIONS
 // ============================================
 
-const STARTBUTTON_SECRET_KEY = process.env.STARTBUTTON_SECRET_KEY;
-const STARTBUTTON_PUBLIC_KEY = process.env.STARTBUTTON_PUBLIC_KEY;
-const STARTBUTTON_BASE_URL = process.env.STARTBUTTON_BASE_URL || 'https://api.startbutton.tech';
-
-console.log('🔑 Startbutton configured:', STARTBUTTON_SECRET_KEY ? '✅' : '❌');
-console.log('🔑 Startbutton Public Key:', STARTBUTTON_PUBLIC_KEY ? '✅' : '❌');
-console.log('🔑 Startbutton Base URL:', STARTBUTTON_BASE_URL);
-
-// Initialize Startbutton payment
-async function initializeStartbuttonPayment(email, amount, serviceType, metadata = {}) {
+async function supabaseAddPayment(email, amount, paymentMethod, serviceType, reference) {
     try {
-        console.log('💰 Initializing Startbutton payment...');
-        console.log(`📧 Email: ${email}`);
-        console.log(`💵 Amount: KES ${amount}`);
-
-        if (!STARTBUTTON_PUBLIC_KEY || STARTBUTTON_PUBLIC_KEY === 'your_startbutton_public_key') {
-            console.warn('⚠️ STARTBUTTON_PUBLIC_KEY not set. Using test mode.');
-            const reference = 'SB-TEST-' + Date.now();
-            return {
-                success: true,
-                reference: reference,
-                authorization_url: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success?reference=${reference}`,
-                testMode: true
-            };
-        }
-
-        const uniqueReference = `SB-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-        const amountInFractionalUnits = Math.round(amount * 100);
-
-        const requestBody = {
-            amount: amountInFractionalUnits,
-            currency: 'KES',
-            email: email,
-            reference: uniqueReference,
-            redirectUrl: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success`,
-            metadata: {
-                service_type: serviceType || 'text-to-video',
-                ...metadata,
-                custom_fields: [
-                    {
-                        display_name: "Service Type",
-                        variable_name: "service_type",
-                        value: serviceType || 'text-to-video'
-                    },
-                    {
-                        display_name: "Amount",
-                        variable_name: "amount",
-                        value: `${amount} KES`
-                    }
-                ]
-            }
-        };
-
-        console.log('📤 Sending to Startbutton:', JSON.stringify(requestBody, null, 2));
-
-        const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/initialize`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(requestBody)
-        });
-
-        const responseText = await response.text();
-        console.log('📦 Startbutton Response Status:', response.status);
-        console.log('📦 Startbutton Response Body:', responseText);
-
-        if (!response.ok) {
-            let errorMessage = `Startbutton API error: ${response.status}`;
-            try {
-                const errorData = JSON.parse(responseText);
-                errorMessage = errorData.message || errorData.error || errorMessage;
-            } catch (e) {
-                if (responseText) errorMessage = responseText;
-            }
-            throw new Error(errorMessage);
-        }
-
-        const data = JSON.parse(responseText);
-        console.log('✅ Startbutton payment initialized:', data);
-
-        const authorizationUrl = data.data || data.authorization_url;
-        
-        return {
-            success: true,
-            reference: uniqueReference,
-            authorization_url: authorizationUrl.startsWith('http') ? authorizationUrl : `https://${authorizationUrl}`,
-            testMode: false
-        };
-
+        const { data, error } = await supabase
+            .from('payments')
+            .insert({
+                email,
+                amount,
+                payment_method: paymentMethod,
+                service_type: serviceType,
+                reference,
+                status: 'completed'
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Payment saved to Supabase:', data.id);
+        return data;
     } catch (error) {
-        console.error('❌ Startbutton payment initialization error:', error.message);
-        return {
-            success: false,
-            error: error.message
-        };
+        console.error('❌ Error adding payment to Supabase:', error.message);
+        return null;
     }
 }
 
-// Verify Startbutton payment
-async function verifyStartbuttonPayment(reference) {
+async function supabaseAddRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
     try {
-        console.log(`🔍 Verifying Startbutton payment: ${reference}`);
-
-        if (!STARTBUTTON_PUBLIC_KEY || STARTBUTTON_PUBLIC_KEY === 'your_startbutton_public_key') {
-            console.warn('⚠️ STARTBUTTON_PUBLIC_KEY not set. Using test mode.');
-            return true;
-        }
-
-        const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/verify/${reference}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            console.error('❌ Startbutton verification error:', response.status);
-            return false;
-        }
-
-        const data = await response.json();
-        console.log('✅ Startbutton verification response:', data);
-
-        const status = data.status || data.data?.status;
-        return status === 'successful' || status === 'success' || status === 'completed';
-
+        const { data, error } = await supabase
+            .from('revenues')
+            .insert({
+                transaction_id: transactionId,
+                email,
+                amount,
+                service_type: serviceType,
+                payment_reference: paymentReference,
+                payment_method: paymentMethod || 'card'
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Revenue saved to Supabase:', data.id);
+        return data;
     } catch (error) {
-        console.error('❌ Startbutton verification error:', error.message);
-        return false;
+        console.error('❌ Error adding revenue to Supabase:', error.message);
+        return null;
     }
 }
+
+async function supabaseAddVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
+    try {
+        const { data, error } = await supabase
+            .from('video_usage')
+            .insert({
+                transaction_id: transactionId,
+                user_email: userEmail || 'anonymous',
+                video_type: videoType,
+                prompt: prompt ? prompt.substring(0, 200) : '',
+                cost: cost || 0,
+                model_used: modelUsed || 'unknown',
+                provider: provider || 'unknown',
+                duration: duration || 5
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Video usage saved to Supabase:', data.id);
+        return data;
+    } catch (error) {
+        console.error('❌ Error adding video usage to Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseAddActivityLog(userEmail, action, details, amount) {
+    try {
+        const { data, error } = await supabase
+            .from('activity_logs')
+            .insert({
+                user_email: userEmail || 'anonymous',
+                action,
+                details: details || '',
+                amount: amount || 0
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Activity log saved to Supabase:', data.id);
+        return data;
+    } catch (error) {
+        console.error('❌ Error adding activity log to Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseFindPaymentByReference(reference) {
+    try {
+        const { data, error } = await supabase
+            .from('payments')
+            .select('*')
+            .eq('reference', reference)
+            .single();
+        if (error) {
+            if (error.code === 'PGRST116') return null;
+            throw error;
+        }
+        return data;
+    } catch (error) {
+        console.error('❌ Error finding payment in Supabase:', error.message);
+        return null;
+    }
+}
+
+async function supabaseGenerateCoupon(paymentReference, email, serviceType) {
+    const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    try {
+        const { data: existing } = await supabase
+            .from('coupons')
+            .select('code')
+            .eq('payment_reference', paymentReference)
+            .single();
+        if (existing) return existing.code;
+        const { data, error } = await supabase
+            .from('coupons')
+            .insert({
+                code: couponCode,
+                payment_reference: paymentReference,
+                email,
+                service_type: serviceType || 'photo-to-video',
+                expires_at: expiresAt.toISOString()
+            })
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Coupon saved to Supabase:', data.code);
+        return data.code;
+    } catch (error) {
+        console.error('❌ Error generating coupon in Supabase:', error.message);
+        return couponCode;
+    }
+}
+
+async function supabaseValidateCoupon(couponCode, email) {
+    try {
+        const { data, error } = await supabase
+            .from('coupons')
+            .select('*')
+            .eq('code', couponCode)
+            .single();
+        if (error) {
+            if (error.code === 'PGRST116') return { valid: false, error: 'Coupon not found' };
+            throw error;
+        }
+        if (data.used) {
+            return { valid: false, error: 'This coupon has already been used' };
+        }
+        if (new Date(data.expires_at) < new Date()) {
+            return { valid: false, error: 'Coupon has expired' };
+        }
+        if (email && data.email !== email) {
+            return { valid: false, error: 'Coupon not valid for this email' };
+        }
+        return { valid: true, coupon: data };
+    } catch (error) {
+        console.error('❌ Error validating coupon in Supabase:', error.message);
+        return { valid: false, error: 'Error validating coupon' };
+    }
+}
+
+async function supabaseRedeemCoupon(couponCode, email) {
+    try {
+        const validation = await supabaseValidateCoupon(couponCode, email);
+        if (!validation || !validation.valid) {
+            return validation || { success: false, error: 'Invalid coupon' };
+        }
+        const { data, error } = await supabase
+            .from('coupons')
+            .update({ used: true, used_at: new Date().toISOString() })
+            .eq('code', couponCode)
+            .select()
+            .single();
+        if (error) throw error;
+        console.log('✅ Coupon redeemed in Supabase:', data.code);
+        return { success: true, coupon: data };
+    } catch (error) {
+        console.error('❌ Error redeeming coupon in Supabase:', error.message);
+        return { success: false, error: error.message };
+    }
+}
+
 // ============================================
-// HEALTH CHECK ENDPOINT
+// DATA ACCESS FUNCTIONS (Supabase first, fallback to memory)
 // ============================================
 
-app.get('/api/health', async (req, res) => {
-  res.json({
-    status: 'healthy',
-    timestamp: new Date().toISOString(),
-    environment: isProduction ? 'production' : 'development'
-  });
-});
+async function addUserPayment(email, amount, paymentMethod, serviceType, reference) {
+    const result = await supabaseAddPayment(email, amount, paymentMethod, serviceType, reference);
+    if (result) return result.id;
+    memoryStore.payments.push({
+        email,
+        amount: parseFloat(amount),
+        paymentMethod,
+        serviceType,
+        reference,
+        status: 'completed',
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
 
-// ============================================
-// TEST ENDPOINT
-// ============================================
+async function addRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod) {
+    const result = await supabaseAddRevenue(transactionId, email, amount, serviceType, paymentReference, paymentMethod);
+    if (result) return result.id;
+    memoryStore.revenues.push({
+        transactionId,
+        email,
+        amount: parseFloat(amount),
+        serviceType,
+        paymentReference,
+        paymentMethod: paymentMethod || 'card',
+        duration: 5,
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
 
-app.get('/api/test', (req, res) => {
-  res.json({ status: 'Server is running!', environment: isProduction ? 'production' : 'development' });
-});
+async function addVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration) {
+    const result = await supabaseAddVideoUsage(transactionId, userEmail, videoType, prompt, cost, modelUsed, provider, duration);
+    if (result) return result.id;
+    memoryStore.videoUsages.push({
+        transactionId,
+        userEmail: userEmail || 'anonymous',
+        videoType,
+        prompt: prompt ? prompt.substring(0, 200) : '',
+        cost: cost || 0,
+        modelUsed: modelUsed || 'unknown',
+        provider: provider || 'unknown',
+        duration: duration || 5,
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
 
-app.get('/', (req, res) => {
-  res.json({ name: 'Video Creator API', version: '2.0.5', status: 'running' });
-});
+async function addActivityLog(userEmail, action, details, amount) {
+    const result = await supabaseAddActivityLog(userEmail, action, details, amount);
+    if (result) return result.id;
+    memoryStore.activityLogs.push({
+        userEmail: userEmail || 'anonymous',
+        action,
+        details: details || '',
+        amount: amount || 0,
+        createdAt: new Date().toISOString()
+    });
+    return 'memory-' + Date.now();
+}
+
+async function findPaymentByReference(reference) {
+    const result = await supabaseFindPaymentByReference(reference);
+    if (result) return result;
+    return memoryStore.payments.find(p => p.reference === reference) || null;
+}
+
+async function generateCoupon(paymentReference, email, serviceType) {
+    const result = await supabaseGenerateCoupon(paymentReference, email, serviceType);
+    if (result) return result;
+    const couponCode = `REDO-${Date.now()}-${Math.random().toString(36).substr(2, 8).toUpperCase()}`;
+    const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    memoryStore.coupons[couponCode] = {
+        code: couponCode,
+        paymentReference,
+        email,
+        serviceType: serviceType || 'photo-to-video',
+        used: false,
+        usedAt: null,
+        expiresAt: expiresAt.toISOString(),
+        createdAt: new Date().toISOString()
+    };
+    return couponCode;
+}
+
+async function validateCoupon(couponCode, email) {
+    const result = await supabaseValidateCoupon(couponCode, email);
+    if (result) return result;
+    if (memoryStore.coupons[couponCode]) {
+        const coupon = memoryStore.coupons[couponCode];
+        if (coupon.used) return { valid: false, error: 'This coupon has already been used' };
+        if (new Date(coupon.expiresAt) < new Date()) return { valid: false, error: 'Coupon has expired' };
+        if (email && coupon.email !== email) return { valid: false, error: 'Coupon not valid for this email' };
+        return { valid: true, coupon };
+    }
+    return { valid: false, error: 'Coupon not found' };
+}
+
+async function redeemCoupon(couponCode, email) {
+    const result = await supabaseRedeemCoupon(couponCode, email);
+    if (result) return result;
+    if (memoryStore.coupons[couponCode]) {
+        const coupon = memoryStore.coupons[couponCode];
+        if (coupon.used) return { success: false, error: 'This coupon has already been used' };
+        if (new Date(coupon.expiresAt) < new Date()) return { success: false, error: 'Coupon has expired' };
+        coupon.used = true;
+        coupon.usedAt = new Date().toISOString();
+        return { success: true, coupon };
+    }
+    return { success: false, error: 'Coupon not found' };
+}
 
 // ============================================
 // TRANSLATION ENDPOINTS
@@ -1841,7 +1654,106 @@ app.post('/api/test-audio-mux', async (req, res) => {
 });
 
 // ============================================
-// PAYMENT ENDPOINTS (PAYSTACK - KEPT FOR COMPATIBILITY)
+// PAYMENT VERIFICATION
+// ============================================
+
+async function verifyPayment(reference) {
+  try {
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
+      console.log('⚠️ No secret key, accepting test payment');
+      return true;
+    }
+    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
+      method: 'GET',
+      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
+    });
+    if (!response.ok) return false;
+    const data = await response.json();
+    return data.status && data.data?.status === 'success';
+  } catch (error) {
+    console.error('❌ Payment verification error:', error.message);
+    return false;
+  }
+}
+
+// ============================================
+// TRANSLATION LANGUAGES
+// ============================================
+
+const FREE_TRANSLATION_LANGUAGES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia'
+};
+
+app.get('/api/free-languages', (req, res) => {
+  console.log('🌐 GET /api/free-languages - Returning languages');
+  res.json({
+    success: true,
+    languages: FREE_TRANSLATION_LANGUAGES,
+    count: Object.keys(FREE_TRANSLATION_LANGUAGES).length
+  });
+});
+
+app.get('/api/translation-price', (req, res) => {
+  try {
+    const duration = parseInt(req.query.duration) || 5;
+    const price = 300;
+    const cost = 50;
+
+    res.json({
+      success: true,
+      duration: duration,
+      price: price,
+      cost: cost,
+      currency: 'KES',
+      breakdown: {
+        basePrice: 300,
+        serviceFee: 300,
+        total: 300
+      },
+      message: 'Fixed price of KES 300 for video translation'
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.get('/api/translations', async (req, res) => {
+  try {
+    const { email } = req.query;
+    const translations = memoryStore.translations.filter(t => !email || t.email === email).slice(-20);
+    res.json({
+      success: true,
+      translations: translations,
+      total: translations.length
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+async function saveTranslation(translationData) {
+  memoryStore.translations.push(translationData);
+  return translationData;
+}
+
+async function sendReceiptEmail(email, amount, reference, serviceType) {
+  const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceType, 5);
+  await sendEmail(email, receiptEmail.subject, receiptEmail.html);
+  console.log(`📧 Receipt sent to ${email}`);
+}
+
+// ============================================
+// PAYMENT ENDPOINTS
 // ============================================
 
 app.post('/api/initialize-payment', async (req, res) => {
@@ -2023,8 +1935,108 @@ app.post('/api/webhook/paystack', (req, res) => {
 });
 
 // ============================================
-// ===== STARTBUTTON PAYMENT ENDPOINTS =====
+// STARTBUTTON PAYMENT ENDPOINTS
 // ============================================
+
+const STARTBUTTON_PUBLIC_KEY = process.env.STARTBUTTON_PUBLIC_KEY;
+const STARTBUTTON_BASE_URL = process.env.STARTBUTTON_BASE_URL || 'https://api.startbutton.tech';
+
+async function initializeStartbuttonPayment(email, amount, serviceType, metadata = {}) {
+    try {
+        console.log('💰 Initializing Startbutton payment...');
+
+        if (!STARTBUTTON_PUBLIC_KEY || STARTBUTTON_PUBLIC_KEY === 'your_startbutton_public_key') {
+            console.warn('⚠️ STARTBUTTON_PUBLIC_KEY not set. Using test mode.');
+            const reference = 'SB-TEST-' + Date.now();
+            return {
+                success: true,
+                reference: reference,
+                authorization_url: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success?reference=${reference}`,
+                testMode: true
+            };
+        }
+
+        const uniqueReference = `SB-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
+        const amountInFractionalUnits = Math.round(amount * 100);
+
+        const requestBody = {
+            amount: amountInFractionalUnits,
+            currency: 'KES',
+            email: email,
+            reference: uniqueReference,
+            redirectUrl: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success`,
+            metadata: {
+                service_type: serviceType || 'text-to-video',
+                ...metadata
+            }
+        };
+
+        const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/initialize`, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`,
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+
+        if (!response.ok) {
+            const errorText = await response.text();
+            throw new Error(`Startbutton API error: ${response.status} - ${errorText}`);
+        }
+
+        const data = await response.json();
+        console.log('✅ Startbutton payment initialized:', data);
+
+        return {
+            success: true,
+            reference: uniqueReference,
+            authorization_url: data.data || data.authorization_url,
+            testMode: false
+        };
+
+    } catch (error) {
+        console.error('❌ Startbutton payment initialization error:', error.message);
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+async function verifyStartbuttonPayment(reference) {
+    try {
+        console.log(`🔍 Verifying Startbutton payment: ${reference}`);
+
+        if (!STARTBUTTON_PUBLIC_KEY || STARTBUTTON_PUBLIC_KEY === 'your_startbutton_public_key') {
+            console.warn('⚠️ STARTBUTTON_PUBLIC_KEY not set. Using test mode.');
+            return true;
+        }
+
+        const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/verify/${reference}`, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`,
+                'Content-Type': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            console.error('❌ Startbutton verification error:', response.status);
+            return false;
+        }
+
+        const data = await response.json();
+        console.log('✅ Startbutton verification response:', data);
+
+        const status = data.status || data.data?.status;
+        return status === 'successful' || status === 'success' || status === 'completed';
+
+    } catch (error) {
+        console.error('❌ Startbutton verification error:', error.message);
+        return false;
+    }
+}
 
 app.post('/api/initialize-startbutton-payment', async (req, res) => {
     try {
@@ -2136,13 +2148,6 @@ app.post('/api/webhook/startbutton', async (req, res) => {
             
             if (data.metadata) {
                 const meta = data.metadata;
-                if (meta.custom_fields) {
-                    const serviceField = meta.custom_fields.find(f => f.display_name === 'Service Type' || f.variable_name === 'service_type');
-                    if (serviceField) serviceType = serviceField.value;
-                    
-                    const durationField = meta.custom_fields.find(f => f.display_name === 'Duration' || f.variable_name === 'duration');
-                    if (durationField) duration = parseInt(durationField.value) || 5;
-                }
                 if (meta.service_type) serviceType = meta.service_type;
                 if (meta.duration) duration = parseInt(meta.duration) || 5;
             }
@@ -2163,7 +2168,7 @@ app.post('/api/webhook/startbutton', async (req, res) => {
 });
 
 // ============================================
-// REDO COUPON SYSTEM - WITH FALLBACK
+// REDO COUPON SYSTEM
 // ============================================
 
 app.post('/api/generate-redo-coupon', async (req, res) => {
@@ -2345,61 +2350,6 @@ app.get('/api/coupon-status/:paymentReference', async (req, res) => {
 });
 
 // ============================================
-// TRANSLATION LANGUAGE ENDPOINTS
-// ============================================
-
-app.get('/api/free-languages', (req, res) => {
-  console.log('🌐 GET /api/free-languages - Returning languages');
-  res.json({
-    success: true,
-    languages: FREE_TRANSLATION_LANGUAGES,
-    count: Object.keys(FREE_TRANSLATION_LANGUAGES).length
-  });
-});
-
-app.get('/api/translation-price', (req, res) => {
-  try {
-    const duration = parseInt(req.query.duration) || 5;
-    const price = 300;
-    const cost = 50;
-
-    res.json({
-      success: true,
-      duration: duration,
-      price: price,
-      cost: cost,
-      currency: 'KES',
-      breakdown: {
-        basePrice: 300,
-        serviceFee: 300,
-        total: 300
-      },
-      message: 'Fixed price of KES 300 for video translation'
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-app.get('/api/translations', async (req, res) => {
-  try {
-    const { email } = req.query;
-    const translations = memoryStore.translations.filter(t => !email || t.email === email).slice(-20);
-    res.json({
-      success: true,
-      translations: translations,
-      total: translations.length
-    });
-  } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
-async function saveTranslation(translationData) {
-  memoryStore.translations.push(translationData);
-  return translationData;
-}
-// ============================================
 // SEND VIDEO EMAIL ENDPOINT
 // ============================================
 
@@ -2526,21 +2476,12 @@ app.get('/api/test-google-cloud', async (req, res) => {
   }
 });
 
-async function sendReceiptEmail(email, amount, reference, serviceType) {
-  const receiptEmail = generatePaymentReceiptEmail(email, amount, reference, serviceType, 5);
-  await sendEmail(email, receiptEmail.subject, receiptEmail.html);
-  console.log(`📧 Receipt sent to ${email}`);
-}
-
 // ============================================
-// VIDEO GENERATION WITH DURATION SUPPORT
+// VIDEO GENERATION
 // ============================================
 
 const failedGenerations = {};
 
-// ============================================
-// BYTEPLUS MODEL ID RESOLUTION
-// ============================================
 function getModelArkModelIds() {
   const raw = process.env.MODELARK_MODEL_IDS;
   if (raw && raw.trim().length > 0) {
@@ -3236,9 +3177,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
       }
     }
 
-    // ============================================
-    // ADD AUDIO NARRATION
-    // ============================================
+    // Add audio narration
     if (videoUrl) {
       let finalScript = audioScript && audioScript.trim().length > 0
         ? audioScript.trim()
@@ -3317,7 +3256,6 @@ app.post('/api/initialize-music-captions-payment', async (req, res) => {
     const amount = 200;
 
     console.log('💰 Initializing Music & Captions payment...');
-    console.log('📧 Email:', email);
 
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
@@ -3410,7 +3348,6 @@ app.post('/api/add-music-captions', async (req, res) => {
     console.log('🎬 Adding music and captions to video...');
     console.log(`📝 Captions: ${captions?.length || 0}`);
     console.log(`🎵 Music: ${musicUrl ? 'Yes' : 'No'}`);
-    console.log(`💳 Payment Reference: ${paymentReference}`);
 
     if (!paymentReference) {
       return res.status(402).json({
@@ -3570,72 +3507,6 @@ app.post('/api/add-music-captions', async (req, res) => {
       await addUserPayment(email || 'anonymous', 200, 'card', 'music-captions', paymentReference);
       await addVideoUsage(paymentReference, email || 'anonymous', 'music-captions', captions?.map(c => c.text).join(' ') || 'Music & Captions', 200, 'FFmpeg', 'custom', 5);
 
-      if (email) {
-        try {
-          const downloadUrl = uploadResult.secure_url.includes('/upload/')
-            ? uploadResult.secure_url.replace('/upload/', '/upload/fl_attachment/')
-            : uploadResult.secure_url;
-
-          const emailHtml = `
-            <!DOCTYPE html>
-            <html>
-            <head>
-              <style>
-                body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
-                .header { background: linear-gradient(135deg, #8B5CF6, #EC4899); padding: 30px; text-align: center; border-radius: 10px; color: white; }
-                .content { padding: 20px; }
-                .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
-                .video-container video { width: 100%; max-height: 400px; }
-                .button { display: inline-block; background: linear-gradient(135deg, #8B5CF6, #EC4899); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
-                .details { background: #f5f5f5; padding: 15px; border-radius: 8px; margin: 15px 0; }
-              </style>
-            </head>
-            <body>
-              <div class="header">
-                <h1>🎵 Your Video with Music & Captions is Ready!</h1>
-              </div>
-              <div class="content">
-                <p>Hi there,</p>
-                <p>Your video has been enhanced with music and captions! 🎉</p>
-                
-                <div class="details">
-                  <h3>📝 Video Details:</h3>
-                  <p><strong>Captions:</strong> ${captions?.length || 0} caption(s)</p>
-                  <p><strong>Music:</strong> ${musicUrl ? '✅ Added' : '❌ No music'}</p>
-                  <p><strong>Style:</strong> ${captionStyle || 'subtle'}</p>
-                  <p><strong>Position:</strong> ${captionPosition || 'bottom'}</p>
-                </div>
-
-                <div class="video-container">
-                  <video controls>
-                    <source src="${uploadResult.secure_url}" type="video/mp4">
-                    Your browser does not support the video tag.
-                  </video>
-                </div>
-
-                <div style="text-align: center; margin: 20px 0;">
-                  <a href="${downloadUrl}" class="button">⬇️ Download Video</a>
-                </div>
-
-                <p style="font-size: 12px; color: #666;">
-                  Or copy this link: <br>
-                  <a href="${uploadResult.secure_url}" style="word-break: break-all;">${uploadResult.secure_url}</a>
-                </p>
-
-                <p>Thank you for using VidAI Creator! 🚀</p>
-                <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
-              </div>
-            </body>
-            </html>
-          `;
-
-          await sendEmail(email, '🎵 Your Video with Music & Captions is Ready!', emailHtml);
-          console.log(`📧 Email sent to ${email}`);
-        } catch (emailErr) {
-          console.warn('⚠️ Email send failed:', emailErr.message);
-        }
-      }
-
       res.json({
         success: true,
         resultVideoUrl: uploadResult.secure_url,
@@ -3693,6 +3564,74 @@ app.post('/api/calculate-price', (req, res) => {
 });
 
 // ============================================
+// HEALTH & ROOT ENDPOINTS
+// ============================================
+
+app.get('/api/health', async (req, res) => {
+  res.json({
+    status: 'healthy',
+    timestamp: new Date().toISOString(),
+    environment: isProduction ? 'production' : 'development'
+  });
+});
+
+app.get('/api/test', (req, res) => {
+  res.json({ 
+    status: 'Server is running!', 
+    environment: isProduction ? 'production' : 'development',
+    endpoints: [
+      '/api/test', '/api/health',
+      '/api/generate-video',
+      '/api/calculate-price',
+      '/api/verify-payment',
+      '/api/initialize-payment',
+      '/api/send-video-email',
+      '/api/test-email',
+      '/api/free-languages',
+      '/api/translation-price',
+      '/api/translate-video',
+      '/api/translations',
+      '/api/upload-video',
+      '/api/admin/dashboard',
+      '/api/admin/add-credits',
+      '/api/admin/balances',
+      '/api/admin/payments',
+      '/api/admin/add-missing-payment',
+      '/api/test-google-cloud',
+      '/api/translate-video-free',
+      '/api/test-tts',
+      '/api/debug-failed',
+      '/api/debug-modelark-ids',
+      '/api/debug-scene-providers'
+    ]
+  });
+});
+
+app.get('/', (req, res) => {
+  res.json({
+    name: 'Video Creator API',
+    version: '2.0.6',
+    status: 'running',
+    contact: {
+      sales: 'sales@katareel.com',
+      support: 'support@katareel.com',
+      whatsapp: '+254710440648',
+      whatsappLink: 'https://wa.me/254710440648'
+    },
+    features: [
+      'Text-to-Video Generation',
+      'Photo-to-Video Scene Generation',
+      'Video Translation with Payment',
+      'Music & Captions',
+      'Email Delivery',
+      'Payment Integration',
+      'Admin Dashboard',
+      'Multi-language Support'
+    ]
+  });
+});
+
+// ============================================
 // SERVE FRONTEND IN PRODUCTION
 // ============================================
 const buildPath = path.join(__dirname, 'build');
@@ -3718,4 +3657,8 @@ app.use((err, req, res, next) => {
 // ============================================
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on http://0.0.0.0:${PORT}`);
+  console.log(`📡 Environment: ${isProduction ? 'production' : 'development'}`);
+  console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
+  console.log(`☁️ Cloudinary storage configured`);
+  console.log(`📁 Temp directory: ${tempDir}`);
 });
