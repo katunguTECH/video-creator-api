@@ -1,4 +1,4 @@
-// MusicCaptions.js - Updated with Paystack Integration
+// MusicCaptions.js - Updated with Paystack Integration and Fixed Upload Handling
 
 import React, { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
@@ -51,9 +51,18 @@ function MusicCaptions() {
     }
   }, [location, navigate]);
 
+  // ============================================
+  // FIXED: handleVideoUpload with better error handling
+  // ============================================
   const handleVideoUpload = async (event) => {
     const file = event.target.files[0];
     if (!file) return;
+
+    // Validate file size (50MB max)
+    if (file.size > 50 * 1024 * 1024) {
+      setError('File too large. Maximum size is 50MB.');
+      return;
+    }
 
     setIsUploading(true);
     setError('');
@@ -62,29 +71,43 @@ function MusicCaptions() {
     formData.append('video', file);
 
     try {
+      console.log('📤 Uploading file:', file.name, file.size, 'bytes');
+      
       const response = await fetch('/api/upload-video', {
         method: 'POST',
         body: formData,
+        // Don't set Content-Type header - browser will set it with boundary
       });
 
-      // Check if response is OK before parsing
-      if (!response.ok) {
-        const text = await response.text();
-        console.error('Server response:', text);
-        throw new Error(`Server error: ${response.status} - ${text.substring(0, 100)}`);
+      console.log('📥 Response status:', response.status);
+      console.log('📥 Response headers:', response.headers.get('content-type'));
+
+      // First, get the raw text to debug
+      const rawText = await response.text();
+      console.log('📥 Raw response:', rawText.substring(0, 500));
+
+      // Try to parse as JSON
+      let data;
+      try {
+        data = JSON.parse(rawText);
+      } catch (parseError) {
+        console.error('❌ Failed to parse JSON:', parseError);
+        console.error('Raw response was:', rawText);
+        throw new Error(`Server returned invalid JSON: ${rawText.substring(0, 100)}...`);
       }
 
-      const data = await response.json();
       if (data.success) {
         setVideoUrl(data.videoUrl);
         setResultVideoUrl('');
         setIsProcessingComplete(false);
         setError('');
+        console.log('✅ Upload successful! Video URL:', data.videoUrl);
       } else {
         setError(data.error || 'Upload failed');
+        console.error('❌ Upload failed:', data.error);
       }
     } catch (err) {
-      console.error('Upload error:', err);
+      console.error('❌ Upload error:', err);
       setError('Upload error: ' + err.message);
     } finally {
       setIsUploading(false);
@@ -307,7 +330,7 @@ function MusicCaptions() {
                     <div>
                       <div className="text-4xl mb-2">📤</div>
                       <div className="text-gray-300">Click to upload video</div>
-                      <div className="text-gray-500 text-sm">MP4, MOV, AVI, WEBM</div>
+                      <div className="text-gray-500 text-sm">MP4, MOV, AVI, WEBM (Max 50MB)</div>
                     </div>
                   )}
                 </label>
