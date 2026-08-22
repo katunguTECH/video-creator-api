@@ -83,21 +83,19 @@ function MusicCaptions() {
       if (!response.ok) {
         const text = await response.text();
         console.error('Server error response:', text);
-        throw new Error(`Server error: ${response.status} - ${text}`);
+        throw new Error(`Server error: ${response.status} - ${text.substring(0, 100)}`);
       }
 
-      // Get the response as text first
-      const rawText = await response.text();
-      console.log('📥 Raw response length:', rawText.length);
-      console.log('📥 Raw response:', rawText.substring(0, 200) + '...');
-
-      // Parse the JSON
+      // Parse the response as JSON directly
       let data;
       try {
-        data = JSON.parse(rawText);
+        data = await response.json();
+        console.log('📥 Parsed JSON response:', data);
       } catch (parseError) {
         console.error('❌ Failed to parse JSON:', parseError);
-        console.error('Raw response was:', rawText);
+        // Try to get the raw text if JSON parsing fails
+        const rawText = await response.text();
+        console.error('Raw response was:', rawText.substring(0, 200));
         throw new Error(`Server returned invalid JSON: ${rawText.substring(0, 100)}...`);
       }
 
@@ -186,7 +184,6 @@ function MusicCaptions() {
         if (data.authorization_url) {
           window.location.href = data.authorization_url;
         } else {
-          // Test mode - process directly
           setPaymentStatus('success');
           await handleProcessVideo(data.reference);
         }
@@ -200,7 +197,7 @@ function MusicCaptions() {
     }
   };
 
-  // Process video after successful payment - FIXED with proper error handling
+  // Process video after successful payment
   const handleProcessVideo = async (reference) => {
     setIsProcessing(true);
     setError('');
@@ -230,10 +227,9 @@ function MusicCaptions() {
         return;
       }
 
-      // Prepare music URL - ensure we have a valid URL
+      // Prepare music URL
       let musicUrlToSend = null;
       if (musicFile) {
-        // Use the object URL created earlier
         musicUrlToSend = musicUrl;
       }
 
