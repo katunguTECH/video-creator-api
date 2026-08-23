@@ -19,6 +19,7 @@ function BrandVideo() {
   const [voiceoverScript, setVoiceoverScript] = useState('');
 
   const [email, setEmail] = useState('');
+  const [couponCode, setCouponCode] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
   const [isInitializingPayment, setIsInitializingPayment] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -95,6 +96,20 @@ function BrandVideo() {
     }
   };
 
+  const handleUseCoupon = async () => {
+    if (!email) return setError('Please enter your email address');
+    if (!videoUrl) return setError('Please upload a video first');
+    if (!logoUrl) return setError('Please upload your logo first');
+    if (!companyName) return setError('Please enter your company name');
+    if (!contactPhone) return setError('Please enter a contact phone number');
+    if (!couponCode.trim()) return setError('Please enter a code');
+
+    setError('');
+    setPaymentReference(couponCode.trim());
+    setPaymentStatus('success');
+    await handleProcessVideo(couponCode.trim(), true);
+  };
+
   const handleInitializePayment = async () => {
     if (!email) return setError('Please enter your email address');
     if (!videoUrl) return setError('Please upload a video first');
@@ -132,28 +147,30 @@ function BrandVideo() {
     }
   };
 
-  const handleProcessVideo = async (reference) => {
+  const handleProcessVideo = async (reference, skipVerify = false) => {
     setIsProcessing(true);
     setError('');
 
     try {
-      const verifyResponse = await fetch(`${API_BASE_URL}/api/verify-payment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          reference,
-          email,
-          amount: BRAND_VIDEO_PRICE,
-          serviceType: 'brand-video',
-          paymentMethod: 'card',
-          duration: 5
-        })
-      });
-      const verifyData = await verifyResponse.json();
-      if (!verifyData.success) {
-        setError('Payment verification failed. Please try again.');
-        setIsProcessing(false);
-        return;
+      if (!skipVerify) {
+        const verifyResponse = await fetch(`${API_BASE_URL}/api/verify-payment`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            reference,
+            email,
+            amount: BRAND_VIDEO_PRICE,
+            serviceType: 'brand-video',
+            paymentMethod: 'card',
+            duration: 5
+          })
+        });
+        const verifyData = await verifyResponse.json();
+        if (!verifyData.success) {
+          setError('Payment verification failed. Please try again.');
+          setIsProcessing(false);
+          return;
+        }
       }
 
       const response = await fetch(`${API_BASE_URL}/api/brand-video`, {
@@ -247,6 +264,26 @@ function BrandVideo() {
             <h2 className="text-lg font-semibold mb-2">💳 Payment & Delivery</h2>
             <input type="email" value={email} onChange={e => setEmail(e.target.value)}
               placeholder="Your email (for payment & delivery)" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+
+            <div className="flex gap-2">
+              <input type="text" value={couponCode} onChange={e => setCouponCode(e.target.value)}
+                placeholder="Have a free code? Enter it here"
+                className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+              <button
+                onClick={handleUseCoupon}
+                disabled={isProcessing}
+                className="px-5 py-2 rounded-lg font-semibold bg-white/20 hover:bg-white/30 disabled:bg-gray-600 whitespace-nowrap"
+              >
+                Use Code
+              </button>
+            </div>
+
+            <div className="flex items-center gap-3 py-1">
+              <div className="flex-1 h-px bg-white/20"></div>
+              <span className="text-xs text-gray-400">OR</span>
+              <div className="flex-1 h-px bg-white/20"></div>
+            </div>
+
             <button
               onClick={handleInitializePayment}
               disabled={isInitializingPayment}
