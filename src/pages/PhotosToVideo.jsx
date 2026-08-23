@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import './PhotosToVideo.css';
 
 // API Base URL from environment
-const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
 
 // Helper function with retry logic for cold starts
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
@@ -77,10 +77,13 @@ function PhotosToVideo() {
     calculatePrice();
   }, [photos.length, duration]);
 
-  // Check for pending payment on load (return from Startbutton redirect)
+  // ============================================
+  // Check for pending payment on load (return from Paystack redirect)
+  // Paystack appends both ?reference= and ?trxref= to the callback URL
+  // ============================================
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const reference = urlParams.get('reference') || urlParams.get('payment_reference');
+    const reference = urlParams.get('reference') || urlParams.get('trxref') || urlParams.get('payment_reference');
     
     if (reference) {
       console.log('🔍 Found payment reference in URL:', reference);
@@ -94,7 +97,7 @@ function PhotosToVideo() {
       const verifyPayment = async () => {
         setLoading(true);
         try {
-          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-startbutton-payment`, {
+          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-payment`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -102,6 +105,7 @@ function PhotosToVideo() {
               email: savedEmail,
               amount: parseFloat(savedAmount),
               serviceType: savedService,
+              paymentMethod: 'card',
               duration: parseInt(savedDuration)
             })
           });
@@ -250,6 +254,9 @@ function PhotosToVideo() {
     }
   };
 
+  // ============================================
+  // PAYMENT — now uses Paystack via /api/initialize-payment
+  // ============================================
   const handlePayment = async () => {
     if (photos.length === 0) {
       setError('Please upload at least one photo');
@@ -272,16 +279,17 @@ function PhotosToVideo() {
 
     try {
       const priceAmount = price?.finalPrice || 300;
-      console.log('💰 Processing payment with Startbutton for:', priceAmount);
+      console.log('💰 Processing payment with Paystack for:', priceAmount);
 
-      // Use Startbutton instead of Paystack
-      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-startbutton-payment`, {
+      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: email,
           amount: priceAmount,
           serviceType: 'photo-to-video',
+          // tell the backend to send the user back to this exact page after paying
+          callbackUrl: `${window.location.origin}${window.location.pathname}`,
           metadata: {
             photoCount: photos.length,
             duration: duration,
@@ -318,7 +326,7 @@ function PhotosToVideo() {
       }
 
       const paymentData = await paymentResponse.json();
-      console.log('📦 Startbutton payment response:', paymentData);
+      console.log('📦 Paystack payment response:', paymentData);
 
       if (!paymentData.success) {
         throw new Error(paymentData.error || 'Payment initialization failed');
@@ -326,7 +334,7 @@ function PhotosToVideo() {
 
       setPaymentReference(paymentData.reference);
 
-      // Redirect to Startbutton payment page
+      // Redirect to Paystack payment page
       if (paymentData.authorization_url) {
         // Store data for after redirect
         localStorage.setItem('pending_payment_reference', paymentData.reference);
@@ -336,7 +344,7 @@ function PhotosToVideo() {
         localStorage.setItem('pending_payment_duration', duration);
         localStorage.setItem('pending_payment_photos', JSON.stringify(photos.map(p => p.preview)));
         
-        // Redirect to Startbutton
+        // Redirect to Paystack
         window.location.href = paymentData.authorization_url;
       } else {
         // If no redirect URL, try to process directly (test mode)
@@ -732,7 +740,7 @@ function PhotosToVideo() {
                 </div>
               </div>
               <div className="price-note">
-                <small>Complete your payment below via Startbutton (Cards, M-PESA, Bank Transfer)</small>
+                <small>Complete your payment below via Paystack (Cards, M-PESA, Bank Transfer)</small>
               </div>
             </div>
           )}
@@ -806,7 +814,7 @@ function PhotosToVideo() {
             </div>
           )}
 
-          {/* Payment Button - Now uses Startbutton */}
+          {/* Payment Button — now uses Paystack */}
           {!isRedoMode && (
             <button
               className="generate-btn"
@@ -879,7 +887,7 @@ function PhotosToVideo() {
               <li>📤 Upload a photo (JPG, PNG, WEBP)</li>
               <li>📝 Describe what you want the AI to generate</li>
               <li>🎙️ Select voice character (Male, Female, Neutral)</li>
-              <li>💰 Complete payment via Startbutton (Cards, M-PESA, Bank Transfer)</li>
+              <li>💰 Complete payment via Paystack (Cards, M-PESA, Bank Transfer)</li>
               <li>📥 Download your AI-generated video with speech</li>
               <li>🔄 Use your redo coupon for free regeneration</li>
               <li>🔒 All AI generations are secure and private</li>

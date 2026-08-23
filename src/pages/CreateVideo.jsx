@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import './CreateVideo.css';
 
 // API Base URL from environment
-const API_BASE_URL = process.env.REACT_APP_API_URL || '';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
 
 // Helper function with retry logic for cold starts
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
@@ -95,6 +95,9 @@ function CreateVideo() {
     }
   };
 
+  // ============================================
+  // PAYMENT — now uses Paystack via /api/initialize-payment
+  // ============================================
   const handlePayment = async () => {
     if (!prompt.trim()) {
       setError('Please describe what you want to generate');
@@ -112,16 +115,17 @@ function CreateVideo() {
 
     try {
       const priceAmount = price?.finalPrice || 200;
-      console.log('💰 Processing payment with Startbutton for:', priceAmount);
+      console.log('💰 Processing payment with Paystack for:', priceAmount);
 
-      // Use Startbutton instead of Paystack
-      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-startbutton-payment`, {
+      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: email,
           amount: priceAmount,
           serviceType: 'text-to-video',
+          // tell the backend to send the user back to this exact page after paying
+          callbackUrl: `${window.location.origin}${window.location.pathname}`,
           metadata: {
             duration: duration,
             prompt: prompt,
@@ -152,7 +156,7 @@ function CreateVideo() {
       }
 
       const paymentData = await paymentResponse.json();
-      console.log('📦 Startbutton payment response:', paymentData);
+      console.log('📦 Paystack payment response:', paymentData);
 
       if (!paymentData.success) {
         throw new Error(paymentData.error || 'Payment initialization failed');
@@ -160,7 +164,7 @@ function CreateVideo() {
 
       setPaymentReference(paymentData.reference);
 
-      // Redirect to Startbutton payment page
+      // Redirect to Paystack payment page
       if (paymentData.authorization_url) {
         // Store reference for after redirect
         localStorage.setItem('pending_payment_reference', paymentData.reference);
@@ -168,8 +172,7 @@ function CreateVideo() {
         localStorage.setItem('pending_payment_service', 'text-to-video');
         localStorage.setItem('pending_payment_amount', priceAmount);
         localStorage.setItem('pending_payment_duration', duration);
-        
-        // Redirect to Startbutton
+
         window.location.href = paymentData.authorization_url;
       } else {
         // If no redirect URL, try to process directly (test mode)
@@ -223,23 +226,26 @@ function CreateVideo() {
     }
   };
 
-  // Check for pending payment on load (return from Startbutton redirect)
+  // ============================================
+  // Check for pending payment on load (return from Paystack redirect)
+  // Paystack appends both ?reference= and ?trxref= to the callback URL
+  // ============================================
   useEffect(() => {
     const urlParams = new URLSearchParams(window.location.search);
-    const reference = urlParams.get('reference') || urlParams.get('payment_reference');
-    
+    const reference = urlParams.get('reference') || urlParams.get('trxref') || urlParams.get('payment_reference');
+
     if (reference) {
       console.log('🔍 Found payment reference in URL:', reference);
       const savedEmail = localStorage.getItem('pending_payment_email') || email;
       const savedService = localStorage.getItem('pending_payment_service') || 'text-to-video';
       const savedAmount = localStorage.getItem('pending_payment_amount') || '200';
       const savedDuration = localStorage.getItem('pending_payment_duration') || '5';
-      
+
       // Verify the payment
       const verifyPayment = async () => {
         setLoading(true);
         try {
-          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-startbutton-payment`, {
+          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-payment`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -247,10 +253,11 @@ function CreateVideo() {
               email: savedEmail,
               amount: parseFloat(savedAmount),
               serviceType: savedService,
+              paymentMethod: 'card',
               duration: parseInt(savedDuration)
             })
           });
-          
+
           const verifyData = await verifyResponse.json();
           if (verifyData.success) {
             // Payment verified, generate video
@@ -265,7 +272,7 @@ function CreateVideo() {
           setLoading(false);
         }
       };
-      
+
       verifyPayment();
       // Clean URL
       window.history.replaceState({}, document.title, window.location.pathname);
@@ -351,11 +358,11 @@ function CreateVideo() {
               </div>
             </div>
             <div className="price-note">
-              <small>Complete your payment below</small>
+              <small>Complete your payment below via Paystack (Cards, M-PESA, Bank Transfer)</small>
             </div>
           </div>
 
-          {/* Payment Button - Now uses Startbutton */}
+          {/* Payment Button — now uses Paystack */}
           <button 
             onClick={handlePayment}
             className="generate-btn"
@@ -390,7 +397,7 @@ function CreateVideo() {
             <h4>ℹ️ How It Works</h4>
             <ul>
               <li>📝 Describe what you want the AI to generate</li>
-              <li>💰 Complete payment via Startbutton (Cards, M-PESA, Bank Transfer)</li>
+              <li>💰 Complete payment via Paystack (Cards, M-PESA, Bank Transfer)</li>
               <li>📥 Download your AI-generated video</li>
               <li>🔒 All AI generations are secure and private</li>
             </ul>
