@@ -1958,7 +1958,7 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
 
 app.post('/api/initialize-payment', async (req, res) => {
   try {
-    const { email, amount, serviceType, metadata } = req.body;
+    const { email, amount, serviceType, metadata, callbackUrl } = req.body;
     const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
     console.log('💰 Initializing payment...');
@@ -2005,7 +2005,7 @@ app.post('/api/initialize-payment', async (req, res) => {
           ...(metadata?.custom_fields || [])
         ]
       },
-      callback_url: process.env.FRONTEND_URL || 'https://www.katareel.com/translation-success'
+      callback_url: callbackUrl || process.env.FRONTEND_URL || 'https://www.katareel.com'
     };
 
     const response = await fetch('https://api.paystack.co/transaction/initialize', {
