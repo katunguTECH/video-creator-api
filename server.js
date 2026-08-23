@@ -3860,7 +3860,9 @@ async function normalizeClip(inputPath, outputPath) {
       .videoFilters('scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30')
       .videoCodec('libx264')
       .audioCodec('aac')
-      .outputOptions(audioPresent ? ['-map', '0:v:0', '-map', '0:a:0'] : ['-map', '0:v:0', '-map', '1:a:0', '-shortest'])
+      .audioFrequency(44100)
+      .audioChannels(2)
+      .outputOptions(audioPresent ? ['-map', '0:v:0', '-map', '0:a:0', '-shortest'] : ['-map', '0:v:0', '-map', '1:a:0', '-shortest'])
       .output(outputPath)
       .on('end', resolve)
       .on('error', reject)
@@ -4040,14 +4042,20 @@ app.post('/api/brand-video', async (req, res) => {
     console.log('📝 Voiceover script:', script);
 
     console.log('🔊 Generating voiceover audio...');
-    const ttsAudioBuffer = await textToSpeech(script, 'en', 1.0, 'MALE');
+    let ttsAudioBuffer = null;
+    let voiceoverAdded = true;
+    try {
+      ttsAudioBuffer = await textToSpeech(script, 'en', 1.0, 'MALE');
+    } catch (ttsError) {
+      console.warn('⚠️ TTS failed, continuing with a silent intro card:', ttsError.message);
+      voiceoverAdded = false;
+    }
 
     const estimatedWordCount = script.split(/\s+/).filter(Boolean).length;
     const estimatedSpeechSeconds = estimatedWordCount / 2.3;
-    const introDuration = Math.min(
-      BRAND_INTRO_MAX_SECONDS,
-      Math.max(BRAND_INTRO_MIN_SECONDS, Math.ceil(estimatedSpeechSeconds + 1))
-    );
+    const introDuration = ttsAudioBuffer
+      ? Math.min(BRAND_INTRO_MAX_SECONDS, Math.max(BRAND_INTRO_MIN_SECONDS, Math.ceil(estimatedSpeechSeconds + 1)))
+      : BRAND_INTRO_MIN_SECONDS;
 
     console.log(`🎬 Building intro card (${introDuration}s)...`);
     await createTextCard({
@@ -4058,11 +4066,15 @@ app.post('/api/brand-video', async (req, res) => {
         ...(tagline ? [{ text: tagline, fontsize: 28, color: '#D1D5DB' }] : [])
       ],
       durationSeconds: introDuration,
-      withSilentAudio: false
+      withSilentAudio: !ttsAudioBuffer
     });
 
-    console.log('🎙️ Muxing voiceover onto intro card...');
-    await combineAudioWithVideo(introRawPath, ttsAudioBuffer, introFinalPath);
+    if (ttsAudioBuffer) {
+      console.log('🎙️ Muxing voiceover onto intro card...');
+      await combineAudioWithVideo(introRawPath, ttsAudioBuffer, introFinalPath);
+    } else {
+      fs.copyFileSync(introRawPath, introFinalPath);
+    }
 
     console.log(`🎬 Building outro card (${BRAND_OUTRO_SECONDS}s)...`);
     const outroLines = [{ text: companyName, fontsize: 36, color: 'white' }];
@@ -4098,7 +4110,7 @@ app.post('/api/brand-video', async (req, res) => {
     const paymentMethodLabel = isFreeReference ? 'coupon' : 'card';
     await addRevenue(jobId, email, cost, 'brand-video', paymentReference, paymentMethodLabel);
     await addUserPayment(email, cost, paymentMethodLabel, 'brand-video', paymentReference);
-    await addActivityLog(email, isFreeReference ? '🎬 Brand Video Created (Free Code)' : '🎬 Brand Video Created', `Company: ${companyName}, Intro: ${introDuration}s`, cost);
+    await addActivityLog(email, isFreeReference ? '🎬 Brand Video Created (Free Code)' : '🎬 Brand Video Created', `Company: ${companyName}, Intro: ${introDuration}s, Voiceover: ${voiceoverAdded ? 'Yes' : 'No (TTS unavailable)'}`, cost);
     await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', introDuration + BRAND_OUTRO_SECONDS);
 
     let emailResult = { success: false };
@@ -4114,6 +4126,7 @@ app.post('/api/brand-video', async (req, res) => {
       resultVideoUrl: uploadResult.secure_url,
       script,
       introDuration,
+      voiceoverAdded,
       paymentReference,
       emailSent: emailResult.success
     });
