@@ -1,4 +1,4 @@
-// Home.js - Updated with Music & Captions functionality
+// Home.js - Updated with Music & Captions and Brand Video functionality
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -31,7 +31,7 @@ function Home() {
           <p className="text-gray-400 text-sm">Upload photos and create a slideshow</p>
         </div>
         
-        {/* UPDATED: Music & Captions Card - Now navigates to dedicated page */}
+        {/* Music & Captions Card */}
         <div className="bg-gradient-to-r from-pink-500/30 to-purple-500/30 rounded-2xl p-6 text-center hover:from-pink-500/50 hover:to-purple-500/50 transition-all cursor-pointer border border-white/20" onClick={() => navigate('/music-captions')}>
           <div className="text-4xl mb-3">🎵</div>
           <h3 className="font-bold text-lg mb-1">Music & Captions</h3>
@@ -43,6 +43,14 @@ function Home() {
           <div className="text-4xl mb-3">🌍</div>
           <h3 className="font-bold text-lg mb-1">Translate Video</h3>
           <p className="text-gray-400 text-sm">Translate videos to other languages</p>
+        </div>
+
+        {/* Brand Video Card */}
+        <div className="bg-gradient-to-r from-green-500/30 to-emerald-500/30 rounded-2xl p-6 text-center hover:from-green-500/50 hover:to-emerald-500/50 transition-all cursor-pointer border border-white/20" onClick={() => navigate('/brand-video')}>
+          <div className="text-4xl mb-3">🎬</div>
+          <h3 className="font-bold text-lg mb-1">Brand Video</h3>
+          <p className="text-gray-300 text-sm">Add a logo intro/outro with AI voiceover to your video</p>
+          <span className="inline-block mt-2 text-xs bg-green-500/50 px-3 py-1 rounded-full">NEW</span>
         </div>
 
         {/* Admin Dashboard Tab */}
