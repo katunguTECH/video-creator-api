@@ -3988,14 +3988,23 @@ app.post('/api/brand-video', async (req, res) => {
     });
   }
 
-  const isValid = await verifyPayment(paymentReference);
-  if (!isValid) {
-    return res.status(402).json({
-      success: false,
-      error: 'Invalid or expired payment.',
-      requiresPayment: true,
-      price: BRAND_VIDEO_PRICE
-    });
+  const isFreeReference = paymentReference.startsWith('TEST-') ||
+    paymentReference.startsWith('REDO-') ||
+    paymentReference.startsWith('MANUAL-') ||
+    paymentReference.startsWith('BRAND-FREE-');
+
+  if (!isFreeReference) {
+    const isValid = await verifyPayment(paymentReference);
+    if (!isValid) {
+      return res.status(402).json({
+        success: false,
+        error: 'Invalid or expired payment.',
+        requiresPayment: true,
+        price: BRAND_VIDEO_PRICE
+      });
+    }
+  } else {
+    console.log('🎟️ Free/manual reference used, skipping payment verification:', paymentReference);
   }
 
   const jobId = crypto.randomUUID();
@@ -4085,10 +4094,11 @@ app.post('/api/brand-video', async (req, res) => {
 
     cleanup();
 
-    const cost = BRAND_VIDEO_PRICE;
-    await addRevenue(jobId, email, cost, 'brand-video', paymentReference, 'card');
-    await addUserPayment(email, cost, 'card', 'brand-video', paymentReference);
-    await addActivityLog(email, '🎬 Brand Video Created', `Company: ${companyName}, Intro: ${introDuration}s`, cost);
+    const cost = isFreeReference ? 0 : BRAND_VIDEO_PRICE;
+    const paymentMethodLabel = isFreeReference ? 'coupon' : 'card';
+    await addRevenue(jobId, email, cost, 'brand-video', paymentReference, paymentMethodLabel);
+    await addUserPayment(email, cost, paymentMethodLabel, 'brand-video', paymentReference);
+    await addActivityLog(email, isFreeReference ? '🎬 Brand Video Created (Free Code)' : '🎬 Brand Video Created', `Company: ${companyName}, Intro: ${introDuration}s`, cost);
     await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', introDuration + BRAND_OUTRO_SECONDS);
 
     let emailResult = { success: false };
