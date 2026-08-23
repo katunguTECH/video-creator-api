@@ -304,6 +304,15 @@ Rules:
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 console.log('✅ FFmpeg configured');
 
+// Font used for Brand Video text overlays (drawtext).
+// Place a real .ttf file at fonts/OpenSans-Bold.ttf in the repo root.
+const FONT_PATH = path.join(__dirname, 'fonts', 'OpenSans-Bold.ttf');
+if (fs.existsSync(FONT_PATH)) {
+  console.log('✅ Brand video font found:', FONT_PATH);
+} else {
+  console.warn('⚠️ Brand video font missing at', FONT_PATH, '- text overlays will fall back to the system default font');
+}
+
 // ============================================
 // REPLICATE TOKEN VALIDATION (STARTUP)
 // ============================================
@@ -596,7 +605,8 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
     'textToVideo': 'Text to Video',
     'photoToVideo': 'Photos to Video',
     'translation': 'Video Translation',
-    'music-captions': 'Music & Captions'
+    'music-captions': 'Music & Captions',
+    'brand-video': 'Brand Video'
   };
 
   return {
@@ -827,6 +837,49 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
   };
 }
 
+function generateBrandVideoDeliveryEmail(email, videoUrl, companyName) {
+  const downloadUrl = videoUrl.includes('/upload/')
+    ? videoUrl.replace('/upload/', '/upload/fl_attachment/')
+    : videoUrl;
+
+  return {
+    subject: `🎬 Your Brand Video for ${companyName} is Ready!`,
+    html: `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <style>
+          body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; }
+          .header { background: linear-gradient(135deg, #10B981, #047857); padding: 30px; text-align: center; border-radius: 10px 10px 0 0; }
+          .header h1 { color: white; margin: 0; font-size: 26px; }
+          .content { padding: 30px; background: #f8f9fa; border-radius: 0 0 10px 10px; }
+          .video-container { background: #000; border-radius: 8px; overflow: hidden; margin: 20px 0; }
+          .video-container video { width: 100%; max-height: 400px; }
+          .button { display: inline-block; background: linear-gradient(135deg, #10B981, #047857); color: white; padding: 12px 30px; text-decoration: none; border-radius: 30px; margin: 10px 0; }
+          .footer { text-align: center; color: #999; font-size: 12px; margin-top: 20px; }
+        </style>
+      </head>
+      <body>
+        <div class="header"><h1>🎬 Your Brand Video is Ready!</h1></div>
+        <div class="content">
+          <p>Hi there,</p>
+          <p>Your branded video for <strong>${companyName}</strong> has been created successfully.</p>
+          <div class="video-container">
+            <video controls>
+              <source src="${videoUrl}" type="video/mp4">
+            </video>
+          </div>
+          <p style="text-align:center;">
+            <a href="${downloadUrl}" class="button">⬇️ Download Video</a>
+          </p>
+        </div>
+        <div class="footer"><p>This email was sent to ${email}.</p></div>
+      </body>
+      </html>
+    `
+  };
+}
+
 // ============================================
 // FILE UPLOAD CONFIGURATION
 // ============================================
@@ -851,6 +904,28 @@ const upload = multer({
       cb(null, true);
     } else {
       cb(new Error(`Invalid file type. Allowed: MP4, AVI, MOV, WEBM. Got: ${file.mimetype || fileExt}`), false);
+    }
+  }
+});
+
+// Separate multer config for logo/image uploads (Brand Video feature)
+const imageUpload = multer({
+  storage: memoryStorage,
+  limits: {
+    fileSize: 10 * 1024 * 1024
+  },
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml'];
+    const allowedExtensions = ['.png', '.jpg', '.jpeg', '.webp', '.svg'];
+
+    const fileExt = path.extname(file.originalname).toLowerCase();
+    const isValidType = allowedTypes.includes(file.mimetype);
+    const isValidExt = allowedExtensions.includes(fileExt);
+
+    if (isValidType || isValidExt) {
+      cb(null, true);
+    } else {
+      cb(new Error(`Invalid image type. Allowed: PNG, JPG, WEBP, SVG. Got: ${file.mimetype || fileExt}`), false);
     }
   }
 });
@@ -967,6 +1042,68 @@ app.post('/api/upload-video', (req, res) => {
       return res.status(500).json({
         success: false,
         error: 'Server error processing upload: ' + error.message
+      });
+    }
+  });
+});
+
+// ============================================
+// UPLOAD IMAGE ENDPOINT (used by Brand Video for logo uploads)
+// ============================================
+app.post('/api/upload-image', (req, res) => {
+  imageUpload.single('image')(req, res, async function (err) {
+    if (err) {
+      console.error('❌ Image upload (multer) error:', err.message);
+      return res.status(400).json({
+        success: false,
+        error: err.message || 'Image upload failed'
+      });
+    }
+
+    if (!req.file) {
+      console.error('❌ No image file in request');
+      return res.status(400).json({
+        success: false,
+        error: 'No image file uploaded. Please select an image.'
+      });
+    }
+
+    try {
+      console.log(`☁️ Uploading image to Cloudinary... (${req.file.originalname})`);
+
+      const result = await new Promise((resolve, reject) => {
+        const uploadStream = cloudinary.uploader.upload_stream({
+          resource_type: 'image',
+          folder: 'video-creator-logos',
+          public_id: `${Date.now()}-${Math.round(Math.random() * 1E9)}-${req.file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+        }, (error, result) => {
+          if (error) {
+            console.error('❌ Cloudinary image upload error:', error.message);
+            reject(error);
+          } else {
+            resolve(result);
+          }
+        });
+
+        uploadStream.end(req.file.buffer);
+      });
+
+      console.log('✅ Image uploaded to Cloudinary:', result.secure_url);
+
+      return res.status(200).json({
+        success: true,
+        imageUrl: result.secure_url,
+        filename: result.public_id,
+        originalName: req.file.originalname,
+        size: req.file.size,
+        mimetype: req.file.mimetype
+      });
+
+    } catch (error) {
+      console.error('❌ Image upload processing error:', error.message);
+      return res.status(500).json({
+        success: false,
+        error: 'Server error processing image upload: ' + error.message
       });
     }
   });
@@ -1913,10 +2050,11 @@ app.post('/api/verify-payment', async (req, res) => {
 
     console.log(`🔍 Verifying payment: ${reference}`);
 
+    const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions', 'brand-video': 'brandVideo' };
+
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-      const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
 
       await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
@@ -1939,7 +2077,6 @@ app.post('/api/verify-payment', async (req, res) => {
     const data = await response.json();
 
     if (data.status && data.data.status === 'success') {
-      const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions' };
       const serviceKey = serviceMap[serviceType] || 'textToVideo';
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
 
@@ -2159,7 +2296,8 @@ app.post('/api/verify-startbutton-payment', async (req, res) => {
                 'text-to-video': 'textToVideo', 
                 'photo-to-video': 'photoToVideo', 
                 'translation': 'translation', 
-                'music-captions': 'music-captions' 
+                'music-captions': 'music-captions',
+                'brand-video': 'brandVideo'
             };
             const serviceKey = serviceMap[serviceType] || 'textToVideo';
             const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
@@ -3597,6 +3735,390 @@ app.post('/api/add-music-captions', async (req, res) => {
 });
 
 // ============================================
+// BRAND VIDEO GENERATION
+// ============================================
+
+const BRAND_VIDEO_PRICE = 250;
+const BRAND_INTRO_MIN_SECONDS = 3;
+const BRAND_INTRO_MAX_SECONDS = 12;
+const BRAND_OUTRO_SECONDS = 4;
+
+function escapeDrawtext(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\\/g, '\\\\\\\\')
+    .replace(/:/g, '\\:')
+    .replace(/'/g, '\u2019')
+    .replace(/%/g, '\\%')
+    .replace(/\r?\n/g, ' ');
+}
+
+function ffmpegSafePath(p) {
+  return p.replace(/\\/g, '/').replace(/:/g, '\\:');
+}
+
+function hasAudioStream(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+      const audioStream = (metadata.streams || []).find(s => s.codec_type === 'audio');
+      resolve(!!audioStream);
+    });
+  });
+}
+
+async function deriveBrandScript(companyName, tagline, durationSeconds) {
+  const wordBudget = Math.max(6, Math.floor(durationSeconds * 2.3));
+
+  if (!groq) {
+    return tagline
+      ? `${companyName}. ${tagline}.`
+      : `Welcome to ${companyName}. We're here to help you get things done.`;
+  }
+
+  try {
+    const completion = await groq.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [
+        {
+          role: 'system',
+          content: `You write short, upbeat spoken voiceover scripts for a business intro video.
+Rules:
+- Output ONLY the spoken words, no stage directions, no quotes, no formatting.
+- Maximum ${wordBudget} words. Shorter is fine.
+- Confident, friendly, professional tone suitable for a brand promo.
+- Mention the company name naturally.`
+        },
+        {
+          role: 'user',
+          content: `Company name: "${companyName}"${tagline ? `\nTagline: "${tagline}"` : ''}`
+        }
+      ],
+      max_tokens: 150,
+      temperature: 0.7
+    });
+
+    const script = completion.choices?.[0]?.message?.content?.trim();
+    if (!script) throw new Error('Groq returned no script text');
+    return script;
+  } catch (error) {
+    console.warn('⚠️ Brand script derivation failed, using fallback:', error.message);
+    return tagline
+      ? `${companyName}. ${tagline}.`
+      : `Welcome to ${companyName}.`;
+  }
+}
+
+async function createTextCard({ outputPath, logoPath, lines, durationSeconds, withSilentAudio }) {
+  return new Promise((resolve, reject) => {
+    const fontArg = fs.existsSync(FONT_PATH) ? `fontfile=${ffmpegSafePath(FONT_PATH)}:` : '';
+
+    const drawtextFilters = lines.map((line, index) => {
+      const yPos = `h*0.60+${index * 55}`;
+      return `drawtext=${fontArg}text='${escapeDrawtext(line.text)}':fontsize=${line.fontsize || 36}:fontcolor=${line.color || 'white'}:x=(w-text_w)/2:y=${yPos}`;
+    }).join(',');
+
+    const command = ffmpeg();
+    command.input(`color=c=0x111827:s=1280x720:d=${durationSeconds}`).inputFormat('lavfi');
+    command.input(logoPath);
+
+    const filters = [
+      `[1:v]scale=280:-1[logo]`,
+      `[0:v][logo]overlay=(W-w)/2:H*0.15[withlogo]`,
+      `[withlogo]${drawtextFilters}[vout]`
+    ];
+
+    const outputOptions = ['-t', String(durationSeconds), '-pix_fmt', 'yuv420p', '-map', '[vout]'];
+
+    if (withSilentAudio) {
+      command.input('anullsrc=r=44100:cl=stereo').inputFormat('lavfi');
+      outputOptions.push('-map', '2:a', '-c:a', 'aac', '-shortest');
+    }
+
+    command
+      .complexFilter(filters)
+      .videoCodec('libx264')
+      .outputOptions(outputOptions)
+      .output(outputPath)
+      .on('end', resolve)
+      .on('error', reject)
+      .run();
+  });
+}
+
+async function normalizeClip(inputPath, outputPath) {
+  const audioPresent = await hasAudioStream(inputPath);
+
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg(inputPath);
+
+    if (!audioPresent) {
+      command.input('anullsrc=r=44100:cl=stereo').inputFormat('lavfi');
+    }
+
+    command
+      .videoFilters('scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30')
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .outputOptions(audioPresent ? ['-map', '0:v:0', '-map', '0:a:0'] : ['-map', '0:v:0', '-map', '1:a:0', '-shortest'])
+      .output(outputPath)
+      .on('end', resolve)
+      .on('error', reject)
+      .run();
+  });
+}
+
+async function concatClips(clipPaths, outputPath) {
+  const listPath = outputPath + '.txt';
+  const listContent = clipPaths.map(p => `file '${p.replace(/\\/g, '/')}'`).join('\n');
+  fs.writeFileSync(listPath, listContent);
+
+  return new Promise((resolve, reject) => {
+    ffmpeg()
+      .input(listPath)
+      .inputOptions(['-f', 'concat', '-safe', '0'])
+      .outputOptions(['-c', 'copy'])
+      .output(outputPath)
+      .on('end', () => {
+        if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
+        resolve();
+      })
+      .on('error', (err) => {
+        if (fs.existsSync(listPath)) fs.unlinkSync(listPath);
+        reject(err);
+      })
+      .run();
+  });
+}
+
+app.post('/api/initialize-brand-video-payment', async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ success: false, error: 'Email is required' });
+    }
+
+    console.log('💰 Initializing Brand Video payment...');
+
+    const secretKey = process.env.PAYSTACK_SECRET_KEY;
+    if (!secretKey || secretKey === 'your_paystack_secret_key') {
+      const reference = 'BRAND-TEST-' + Date.now();
+      console.log('⚠️ Using test mode, reference:', reference);
+      return res.json({
+        success: true,
+        reference,
+        authorization_url: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/brand-video?payment=success&reference=${reference}`,
+        amount: BRAND_VIDEO_PRICE,
+        currency: 'KES',
+        testMode: true
+      });
+    }
+
+    const response = await fetch('https://api.paystack.co/transaction/initialize', {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${secretKey}`,
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        email,
+        amount: BRAND_VIDEO_PRICE * 100,
+        metadata: {
+          serviceType: 'brand-video',
+          amount: BRAND_VIDEO_PRICE,
+          custom_fields: [
+            { display_name: "Service", variable_name: "service", value: "Brand Video" },
+            { display_name: "Amount", variable_name: "amount", value: `${BRAND_VIDEO_PRICE} KES` }
+          ]
+        },
+        callback_url: (process.env.FRONTEND_URL || 'https://www.katareel.com') + '/brand-video?payment=success'
+      })
+    });
+
+    const data = await response.json();
+
+    if (data.status) {
+      console.log('✅ Brand video payment initialized!');
+      return res.json({
+        success: true,
+        reference: data.data.reference,
+        authorization_url: data.data.authorization_url,
+        amount: BRAND_VIDEO_PRICE,
+        currency: 'KES'
+      });
+    }
+
+    console.error('❌ Paystack error:', data.message);
+    return res.status(400).json({ success: false, error: data.message || 'Payment initialization failed' });
+  } catch (error) {
+    console.error('❌ Brand video payment init error:', error.message);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+app.post('/api/brand-video', async (req, res) => {
+  const {
+    videoUrl,
+    logoUrl,
+    companyName,
+    tagline,
+    contactEmail,
+    contactPhone,
+    voiceoverScript,
+    paymentReference,
+    email
+  } = req.body;
+
+  console.log('🎬 Generating brand video for:', companyName);
+
+  if (!videoUrl || !logoUrl || !companyName || !contactPhone) {
+    return res.status(400).json({
+      success: false,
+      error: 'videoUrl, logoUrl, companyName and contactPhone are required'
+    });
+  }
+
+  if (!paymentReference) {
+    return res.status(402).json({
+      success: false,
+      error: 'Payment required.',
+      requiresPayment: true,
+      price: BRAND_VIDEO_PRICE
+    });
+  }
+
+  const isValid = await verifyPayment(paymentReference);
+  if (!isValid) {
+    return res.status(402).json({
+      success: false,
+      error: 'Invalid or expired payment.',
+      requiresPayment: true,
+      price: BRAND_VIDEO_PRICE
+    });
+  }
+
+  const jobId = crypto.randomUUID();
+  const mainVideoPath = path.join(tempDir, `${jobId}_main.mp4`);
+  const logoPath = path.join(tempDir, `${jobId}_logo.png`);
+  const introRawPath = path.join(tempDir, `${jobId}_intro_raw.mp4`);
+  const introFinalPath = path.join(tempDir, `${jobId}_intro_final.mp4`);
+  const outroRawPath = path.join(tempDir, `${jobId}_outro_raw.mp4`);
+  const mainNormPath = path.join(tempDir, `${jobId}_main_norm.mp4`);
+  const introNormPath = path.join(tempDir, `${jobId}_intro_norm.mp4`);
+  const outroNormPath = path.join(tempDir, `${jobId}_outro_norm.mp4`);
+  const finalPath = path.join(tempDir, `${jobId}_brand_final.mp4`);
+
+  const cleanup = () => {
+    [mainVideoPath, logoPath, introRawPath, introFinalPath, outroRawPath, mainNormPath, introNormPath, outroNormPath, finalPath]
+      .forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
+  };
+
+  try {
+    console.log('📥 Downloading main video...');
+    const videoRes = await fetch(videoUrl);
+    if (!videoRes.ok) throw new Error(`Failed to download video: ${videoRes.status}`);
+    fs.writeFileSync(mainVideoPath, Buffer.from(await videoRes.arrayBuffer()));
+
+    console.log('📥 Downloading logo...');
+    const logoRes = await fetch(logoUrl);
+    if (!logoRes.ok) throw new Error(`Failed to download logo: ${logoRes.status}`);
+    fs.writeFileSync(logoPath, Buffer.from(await logoRes.arrayBuffer()));
+
+    const script = (voiceoverScript && voiceoverScript.trim().length > 0)
+      ? voiceoverScript.trim()
+      : await deriveBrandScript(companyName, tagline, BRAND_INTRO_MAX_SECONDS);
+    console.log('📝 Voiceover script:', script);
+
+    console.log('🔊 Generating voiceover audio...');
+    const ttsAudioBuffer = await textToSpeech(script, 'en', 1.0, 'MALE');
+
+    const estimatedWordCount = script.split(/\s+/).filter(Boolean).length;
+    const estimatedSpeechSeconds = estimatedWordCount / 2.3;
+    const introDuration = Math.min(
+      BRAND_INTRO_MAX_SECONDS,
+      Math.max(BRAND_INTRO_MIN_SECONDS, Math.ceil(estimatedSpeechSeconds + 1))
+    );
+
+    console.log(`🎬 Building intro card (${introDuration}s)...`);
+    await createTextCard({
+      outputPath: introRawPath,
+      logoPath,
+      lines: [
+        { text: companyName, fontsize: 44, color: 'white' },
+        ...(tagline ? [{ text: tagline, fontsize: 28, color: '#D1D5DB' }] : [])
+      ],
+      durationSeconds: introDuration,
+      withSilentAudio: false
+    });
+
+    console.log('🎙️ Muxing voiceover onto intro card...');
+    await combineAudioWithVideo(introRawPath, ttsAudioBuffer, introFinalPath);
+
+    console.log(`🎬 Building outro card (${BRAND_OUTRO_SECONDS}s)...`);
+    const outroLines = [{ text: companyName, fontsize: 36, color: 'white' }];
+    if (contactPhone) outroLines.push({ text: `Tel: ${contactPhone}`, fontsize: 26, color: '#D1D5DB' });
+    if (contactEmail) outroLines.push({ text: contactEmail, fontsize: 26, color: '#D1D5DB' });
+
+    await createTextCard({
+      outputPath: outroRawPath,
+      logoPath,
+      lines: outroLines,
+      durationSeconds: BRAND_OUTRO_SECONDS,
+      withSilentAudio: true
+    });
+
+    console.log('🧹 Normalizing clips for concatenation...');
+    await normalizeClip(introFinalPath, introNormPath);
+    await normalizeClip(mainVideoPath, mainNormPath);
+    await normalizeClip(outroRawPath, outroNormPath);
+
+    console.log('🔗 Concatenating intro + video + outro...');
+    await concatClips([introNormPath, mainNormPath, outroNormPath], finalPath);
+
+    console.log('☁️ Uploading brand video to Cloudinary...');
+    const uploadResult = await cloudinary.uploader.upload(finalPath, {
+      resource_type: 'video',
+      folder: 'video-creator-uploads',
+      public_id: `${jobId}_brand_video`
+    });
+
+    cleanup();
+
+    const cost = BRAND_VIDEO_PRICE;
+    await addRevenue(jobId, email, cost, 'brand-video', paymentReference, 'card');
+    await addUserPayment(email, cost, 'card', 'brand-video', paymentReference);
+    await addActivityLog(email, '🎬 Brand Video Created', `Company: ${companyName}, Intro: ${introDuration}s`, cost);
+    await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', introDuration + BRAND_OUTRO_SECONDS);
+
+    let emailResult = { success: false };
+    try {
+      const brandEmail = generateBrandVideoDeliveryEmail(email, uploadResult.secure_url, companyName);
+      emailResult = await sendEmail(email, brandEmail.subject, brandEmail.html);
+    } catch (emailErr) {
+      emailResult = { success: false, error: emailErr.message };
+    }
+
+    res.json({
+      success: true,
+      resultVideoUrl: uploadResult.secure_url,
+      script,
+      introDuration,
+      paymentReference,
+      emailSent: emailResult.success
+    });
+
+  } catch (error) {
+    console.error('❌ Brand video generation error:', error.message);
+    cleanup();
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Brand video generation failed'
+    });
+  }
+});
+
+// ============================================
 // CALCULATE PRICE ENDPOINT
 // ============================================
 
@@ -3655,6 +4177,9 @@ app.get('/api/test', (req, res) => {
       '/api/translate-video',
       '/api/translations',
       '/api/upload-video',
+      '/api/upload-image',
+      '/api/initialize-brand-video-payment',
+      '/api/brand-video',
       '/api/admin/dashboard',
       '/api/admin/add-credits',
       '/api/admin/balances',
@@ -3673,7 +4198,7 @@ app.get('/api/test', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
-    version: '2.0.6',
+    version: '2.1.0',
     status: 'running',
     contact: {
       sales: 'sales@katareel.com',
@@ -3686,6 +4211,7 @@ app.get('/', (req, res) => {
       'Photo-to-Video Scene Generation',
       'Video Translation with Payment',
       'Music & Captions',
+      'Brand Video (Logo Intro/Outro + AI Voiceover)',
       'Email Delivery',
       'Payment Integration',
       'Admin Dashboard',
