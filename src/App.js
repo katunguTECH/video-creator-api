@@ -6,7 +6,8 @@ import Preview from './pages/Preview';
 import TranslateVideo from './pages/TranslateVideo';
 import PhotosToVideo from './pages/PhotosToVideo';
 import AdminDashboard from './pages/AdminDashboard';
-import MusicCaptions from './pages/MusicCaptions';  // ADD THIS IMPORT
+import MusicCaptions from './pages/MusicCaptions';
+import BrandVideo from './pages/BrandVideo';
 
 function App() {
   return (
@@ -18,7 +19,8 @@ function App() {
         <Route path="/translate" element={<TranslateVideo />} />
         <Route path="/photos-to-video" element={<PhotosToVideo />} />
         <Route path="/admin" element={<AdminDashboard />} />
-        <Route path="/music-captions" element={<MusicCaptions />} />  {/* ADD THIS ROUTE */}
+        <Route path="/music-captions" element={<MusicCaptions />} />
+        <Route path="/brand-video" element={<BrandVideo />} />
       </Routes>
     </Router>
   );
