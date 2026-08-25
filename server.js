@@ -4172,6 +4172,299 @@ app.post('/api/calculate-price', (req, res) => {
 });
 
 // ============================================
+// ADMIN DASHBOARD ENDPOINT
+// ============================================
+
+// Normalizes the many slightly-different service_type / video_type strings
+// used across this file into the 4 buckets the admin dashboard UI expects.
+function normalizeServiceKey(rawType) {
+  const t = (rawType || '').toLowerCase();
+  if (t.includes('photo')) return 'photoToVideo';
+  if (t.includes('translat')) return 'translation';
+  if (t.includes('music') || t.includes('caption')) return 'musicCaptions';
+  if (t.includes('text') || t === 'texttovideo') return 'textToVideo';
+  return 'other'; // e.g. brand-video, brandVideo - counted in totals, not in the 4 buckets
+}
+
+async function fetchAdminTable(tableName, fallbackArray, selectCols = '*') {
+  try {
+    const { data, error } = await supabase.from(tableName).select(selectCols);
+    if (error) throw error;
+    return data || [];
+  } catch (error) {
+    console.warn(`⚠️ Admin dashboard: falling back to memory store for "${tableName}":`, error.message);
+    return fallbackArray || [];
+  }
+}
+
+async function getReplicateCreditBalance() {
+  try {
+    const token = (process.env.REPLICATE_API_TOKEN || '').trim();
+    if (!token) return 0;
+    const res = await fetch('https://api.replicate.com/v1/account', {
+      headers: { 'Authorization': `Token ${token}` }
+    });
+    if (!res.ok) return 0;
+    // Replicate's public /v1/account endpoint does not return a spendable
+    // balance, so this is a best-effort placeholder until a billing
+    // endpoint is wired up. Returns 0 rather than throwing.
+    return 0;
+  } catch (error) {
+    console.warn('⚠️ Could not fetch Replicate balance:', error.message);
+    return 0;
+  }
+}
+
+function startOfDay(d) {
+  const x = new Date(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function daysAgo(n) {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return startOfDay(d);
+}
+
+app.get('/api/admin/dashboard', async (req, res) => {
+  try {
+    const [
+      payments,
+      revenues,
+      videoUsages,
+      activityLogsRaw,
+      siteVisits
+    ] = await Promise.all([
+      fetchAdminTable('payments', memoryStore.payments),
+      fetchAdminTable('revenues', memoryStore.revenues),
+      fetchAdminTable('video_usage', memoryStore.videoUsages),
+      fetchAdminTable('activity_logs', memoryStore.activityLogs),
+      fetchAdminTable('site_visits', memoryStore.siteVisits)
+    ]);
+
+    // Normalize field names between Supabase (snake_case) and memoryStore (camelCase)
+    const normPayments = payments.map(p => ({
+      email: p.email,
+      amount: parseFloat(p.amount) || 0,
+      serviceType: p.serviceType || p.service_type,
+      reference: p.reference,
+      createdAt: p.createdAt || p.created_at
+    }));
+
+    const normRevenues = revenues.map(r => ({
+      email: r.email,
+      amount: parseFloat(r.amount) || 0,
+      serviceType: r.serviceType || r.service_type,
+      createdAt: r.createdAt || r.created_at
+    }));
+
+    const normVideoUsages = videoUsages.map(v => ({
+      userEmail: v.userEmail || v.user_email || 'anonymous',
+      videoType: v.videoType || v.video_type,
+      cost: parseFloat(v.cost) || 0,
+      createdAt: v.createdAt || v.created_at
+    }));
+
+    const normActivity = activityLogsRaw.map(a => ({
+      userEmail: a.userEmail || a.user_email || 'anonymous',
+      action: a.action,
+      details: a.details,
+      amount: parseFloat(a.amount) || 0,
+      createdAt: a.createdAt || a.created_at
+    })).sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
+
+    const normVisits = siteVisits.map(v => ({
+      page: v.page,
+      createdAt: v.createdAt || v.created_at
+    }));
+
+    // ---------- REVENUE ----------
+    const revenue = { total: 0, textToVideo: 0, photoToVideo: 0, translation: 0, musicCaptions: 0 };
+    for (const r of normRevenues) {
+      revenue.total += r.amount;
+      const key = normalizeServiceKey(r.serviceType);
+      if (key !== 'other') revenue[key] += r.amount;
+    }
+
+    // ---------- USAGE ----------
+    const usage = { totalVideos: 0, textToVideo: 0, photoToVideo: 0, translation: 0, musicCaptions: 0 };
+    for (const v of normVideoUsages) {
+      usage.totalVideos += 1;
+      const key = normalizeServiceKey(v.videoType);
+      if (key !== 'other') usage[key] += 1;
+    }
+
+    // ---------- SERVICE STATS (count + revenue per bucket) ----------
+    const serviceStats = {
+      textToVideo: { count: 0, revenue: 0 },
+      photoToVideo: { count: 0, revenue: 0 },
+      translation: { count: 0, revenue: 0 },
+      musicCaptions: { count: 0, revenue: 0 }
+    };
+    for (const v of normVideoUsages) {
+      const key = normalizeServiceKey(v.videoType);
+      if (key !== 'other') serviceStats[key].count += 1;
+    }
+    for (const r of normRevenues) {
+      const key = normalizeServiceKey(r.serviceType);
+      if (key !== 'other') serviceStats[key].revenue += r.amount;
+    }
+
+    // ---------- SITE VISITS ----------
+    const now = new Date();
+    const todayStart = startOfDay(now);
+    const weekStart = daysAgo(7);
+    const monthStart = daysAgo(30);
+
+    let visitsToday = 0, visitsWeek = 0, visitsMonth = 0;
+    const dailyBuckets = {}; // 'YYYY-MM-DD' -> count, last 7 days
+    const weeklyBuckets = [0, 0, 0, 0]; // last 4 weeks
+    const monthlyBuckets = {}; // 'YYYY-MM' -> count, last 6 months
+
+    for (let i = 6; i >= 0; i--) {
+      const d = daysAgo(i);
+      const key = d.toISOString().slice(0, 10);
+      dailyBuckets[key] = 0;
+    }
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+      monthlyBuckets[key] = 0;
+    }
+
+    for (const v of normVisits) {
+      if (!v.createdAt) continue;
+      const created = new Date(v.createdAt);
+      if (isNaN(created.getTime())) continue;
+
+      if (created >= todayStart) visitsToday++;
+      if (created >= weekStart) visitsWeek++;
+      if (created >= monthStart) visitsMonth++;
+
+      const dayKey = created.toISOString().slice(0, 10);
+      if (dayKey in dailyBuckets) dailyBuckets[dayKey]++;
+
+      const daysBack = Math.floor((todayStart - startOfDay(created)) / (1000 * 60 * 60 * 24));
+      if (daysBack >= 0 && daysBack < 28) {
+        const weekIndex = 3 - Math.floor(daysBack / 7);
+        if (weekIndex >= 0 && weekIndex < 4) weeklyBuckets[weekIndex]++;
+      }
+
+      const monthKey = `${created.getFullYear()}-${String(created.getMonth() + 1).padStart(2, '0')}`;
+      if (monthKey in monthlyBuckets) monthlyBuckets[monthKey]++;
+    }
+
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+
+    const visits = {
+      total: normVisits.length,
+      today: visitsToday,
+      week: visitsWeek,
+      month: visitsMonth,
+      daily: Object.entries(dailyBuckets).map(([date, count]) => ({
+        date: date.slice(5), // MM-DD
+        visits: count
+      })),
+      weekly: weeklyBuckets.map((count, i) => ({
+        week: `Wk ${i + 1}`,
+        visits: count
+      })),
+      monthly: Object.entries(monthlyBuckets).map(([key, count]) => {
+        const [, m] = key.split('-');
+        return { month: monthNames[parseInt(m, 10) - 1], visits: count };
+      })
+    };
+
+    // ---------- RECENT ACTIVITY (last 20) ----------
+    const recentActivity = normActivity.slice(0, 20).map((a, index) => {
+      let service = 'general';
+      const text = `${a.action || ''} ${a.details || ''}`.toLowerCase();
+      if (text.includes('photo')) service = 'photo-to-video';
+      else if (text.includes('translat')) service = 'translation';
+      else if (text.includes('music') || text.includes('caption')) service = 'music-captions';
+      else if (text.includes('text') || text.includes('paid') || text.includes('video')) service = 'text-to-video';
+
+      return {
+        id: `${a.createdAt || Date.now()}-${index}`,
+        user: a.userEmail || 'anonymous',
+        action: a.action || a.details || 'Activity',
+        service,
+        amount: a.amount || 0,
+        time: a.createdAt ? new Date(a.createdAt).toLocaleString() : 'N/A'
+      };
+    });
+
+    // ---------- USERS (aggregate by email) ----------
+    const userMap = {};
+    const touchUser = (email) => {
+      const key = (email || 'anonymous').toLowerCase();
+      if (!userMap[key]) {
+        userMap[key] = {
+          id: key,
+          email: email || 'Anonymous',
+          totalSpent: 0,
+          videoCount: 0,
+          joined: null,
+          lastActivity: null
+        };
+      }
+      return userMap[key];
+    };
+
+    for (const p of normPayments) {
+      const u = touchUser(p.email);
+      u.totalSpent += p.amount;
+      const created = p.createdAt ? new Date(p.createdAt) : null;
+      if (created && (!u.joined || created < new Date(u.joined))) u.joined = p.createdAt;
+      if (created && (!u.lastActivity || created > new Date(u.lastActivity))) u.lastActivity = p.createdAt;
+    }
+    for (const v of normVideoUsages) {
+      const u = touchUser(v.userEmail);
+      u.videoCount += 1;
+      const created = v.createdAt ? new Date(v.createdAt) : null;
+      if (created && (!u.lastActivity || created > new Date(u.lastActivity))) u.lastActivity = v.createdAt;
+    }
+    for (const a of normActivity) {
+      const u = touchUser(a.userEmail);
+      const created = a.createdAt ? new Date(a.createdAt) : null;
+      if (created && (!u.lastActivity || created > new Date(u.lastActivity))) u.lastActivity = a.createdAt;
+    }
+
+    const users = Object.values(userMap)
+      .filter(u => u.email !== 'Anonymous')
+      .map(u => ({
+        ...u,
+        joined: u.joined ? new Date(u.joined).toLocaleDateString() : 'N/A',
+        lastActivity: u.lastActivity ? new Date(u.lastActivity).toLocaleString() : 'N/A'
+      }))
+      .sort((a, b) => b.totalSpent - a.totalSpent);
+
+    // ---------- CREDITS ----------
+    const replicateBalance = await getReplicateCreditBalance();
+    const credits = {
+      replicate: replicateBalance,
+      byteplus: 0,
+      total: replicateBalance
+    };
+
+    res.json({
+      credits,
+      revenue,
+      usage,
+      visits,
+      recentActivity,
+      users,
+      serviceStats
+    });
+
+  } catch (error) {
+    console.error('❌ Admin dashboard error:', error.message);
+    res.status(500).json({ error: error.message || 'Failed to load dashboard data' });
+  }
+});
+
+// ============================================
 // HEALTH & ROOT ENDPOINTS
 // ============================================
 
