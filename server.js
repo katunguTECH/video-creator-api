@@ -3739,8 +3739,10 @@ app.post('/api/add-music-captions', async (req, res) => {
 // ============================================
 
 const BRAND_VIDEO_PRICE = 250;
-const BRAND_INTRO_MIN_SECONDS = 3;
-const BRAND_INTRO_MAX_SECONDS = 12;
+// Intro is just a brief logo reveal — it no longer stretches to match the
+// voiceover length. The full voiceover is layered over the whole video instead
+// (see overlayFullVoiceover), so it's never truncated.
+const BRAND_INTRO_SECONDS = 4;
 const BRAND_OUTRO_SECONDS = 4;
 
 function escapeDrawtext(text) {
@@ -3866,6 +3868,53 @@ async function normalizeClip(inputPath, outputPath) {
       .output(outputPath)
       .on('end', resolve)
       .on('error', reject)
+      .run();
+  });
+}
+
+async function overlayFullVoiceover(videoPath, audioBuffer, outputPath) {
+  const tempAudioPath = path.join(tempDir, `${crypto.randomUUID()}_vo.mp3`);
+  fs.writeFileSync(tempAudioPath, audioBuffer);
+
+  const videoDuration = await getDuration(videoPath);
+  const audioDuration = await getDuration(tempAudioPath);
+  console.log(`📏 Final video: ${videoDuration.toFixed(2)}s | Voiceover: ${audioDuration.toFixed(2)}s`);
+
+  // If the narration runs longer than the assembled video, freeze the last
+  // frame for the extra seconds so the voiceover is never cut off mid-sentence.
+  const padSeconds = Math.max(0, (audioDuration + 1) - videoDuration);
+  if (padSeconds > 0) {
+    console.log(`🧊 Extending final video by ${padSeconds.toFixed(2)}s so the voiceover finishes naturally`);
+  }
+
+  return new Promise((resolve, reject) => {
+    const command = ffmpeg(videoPath).input(tempAudioPath);
+
+    const filters = [
+      padSeconds > 0
+        ? `[0:v]tpad=stop_mode=clone:stop_duration=${padSeconds.toFixed(2)}[vout]`
+        : `[0:v]null[vout]`,
+      // Duck the video's own audio (background music / ambient sound from the
+      // uploaded footage) under the voiceover instead of replacing it outright.
+      `[0:a]volume=0.25[bg]`,
+      `[1:a]volume=1.0[vo]`,
+      `[bg][vo]amix=inputs=2:duration=longest:dropout_transition=3[aout]`
+    ];
+
+    command
+      .complexFilter(filters)
+      .outputOptions(['-map', '[vout]', '-map', '[aout]'])
+      .videoCodec('libx264')
+      .audioCodec('aac')
+      .output(outputPath)
+      .on('end', () => {
+        if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+        resolve();
+      })
+      .on('error', (err) => {
+        if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
+        reject(err);
+      })
       .run();
   });
 }
@@ -4019,9 +4068,10 @@ app.post('/api/brand-video', async (req, res) => {
   const introNormPath = path.join(tempDir, `${jobId}_intro_norm.mp4`);
   const outroNormPath = path.join(tempDir, `${jobId}_outro_norm.mp4`);
   const finalPath = path.join(tempDir, `${jobId}_brand_final.mp4`);
+  const finalWithVoicePath = path.join(tempDir, `${jobId}_brand_final_vo.mp4`);
 
   const cleanup = () => {
-    [mainVideoPath, logoPath, introRawPath, introFinalPath, outroRawPath, mainNormPath, introNormPath, outroNormPath, finalPath]
+    [mainVideoPath, logoPath, introRawPath, introFinalPath, outroRawPath, mainNormPath, introNormPath, outroNormPath, finalPath, finalWithVoicePath]
       .forEach(f => { if (fs.existsSync(f)) fs.unlinkSync(f); });
   };
 
@@ -4038,7 +4088,7 @@ app.post('/api/brand-video', async (req, res) => {
 
     const script = (voiceoverScript && voiceoverScript.trim().length > 0)
       ? voiceoverScript.trim()
-      : await deriveBrandScript(companyName, tagline, BRAND_INTRO_MAX_SECONDS);
+      : await deriveBrandScript(companyName, tagline, 15);
     console.log('📝 Voiceover script:', script);
 
     console.log('🔊 Generating voiceover audio...');
@@ -4051,11 +4101,7 @@ app.post('/api/brand-video', async (req, res) => {
       voiceoverAdded = false;
     }
 
-    const estimatedWordCount = script.split(/\s+/).filter(Boolean).length;
-    const estimatedSpeechSeconds = estimatedWordCount / 2.3;
-    const introDuration = ttsAudioBuffer
-      ? Math.min(BRAND_INTRO_MAX_SECONDS, Math.max(BRAND_INTRO_MIN_SECONDS, Math.ceil(estimatedSpeechSeconds + 1)))
-      : BRAND_INTRO_MIN_SECONDS;
+    const introDuration = BRAND_INTRO_SECONDS;
 
     console.log(`🎬 Building intro card (${introDuration}s)...`);
     await createTextCard({
@@ -4066,15 +4112,9 @@ app.post('/api/brand-video', async (req, res) => {
         ...(tagline ? [{ text: tagline, fontsize: 28, color: '#D1D5DB' }] : [])
       ],
       durationSeconds: introDuration,
-      withSilentAudio: !ttsAudioBuffer
+      withSilentAudio: true
     });
-
-    if (ttsAudioBuffer) {
-      console.log('🎙️ Muxing voiceover onto intro card...');
-      await combineAudioWithVideo(introRawPath, ttsAudioBuffer, introFinalPath);
-    } else {
-      fs.copyFileSync(introRawPath, introFinalPath);
-    }
+    fs.copyFileSync(introRawPath, introFinalPath);
 
     console.log(`🎬 Building outro card (${BRAND_OUTRO_SECONDS}s)...`);
     const outroLines = [{ text: companyName, fontsize: 36, color: 'white' }];
@@ -4097,8 +4137,26 @@ app.post('/api/brand-video', async (req, res) => {
     console.log('🔗 Concatenating intro + video + outro...');
     await concatClips([introNormPath, mainNormPath, outroNormPath], finalPath);
 
+    // Layer the full voiceover across the ENTIRE assembled video (intro + main
+    // + outro), instead of squeezing it onto just the intro card. If the
+    // narration runs longer than the visuals, the final frame is held so the
+    // voiceover always finishes naturally instead of being cut off.
+    let finalVideoForUpload = finalPath;
+    if (ttsAudioBuffer) {
+      console.log('🎙️ Layering voiceover across the full video...');
+      try {
+        await overlayFullVoiceover(finalPath, ttsAudioBuffer, finalWithVoicePath);
+        finalVideoForUpload = finalWithVoicePath;
+      } catch (overlayError) {
+        console.warn('⚠️ Voiceover overlay failed, delivering video without narration:', overlayError.message);
+        voiceoverAdded = false;
+      }
+    }
+
+    const finalDurationSeconds = await getDuration(finalVideoForUpload).catch(() => introDuration + BRAND_OUTRO_SECONDS);
+
     console.log('☁️ Uploading brand video to Cloudinary...');
-    const uploadResult = await cloudinary.uploader.upload(finalPath, {
+    const uploadResult = await cloudinary.uploader.upload(finalVideoForUpload, {
       resource_type: 'video',
       folder: 'video-creator-uploads',
       public_id: `${jobId}_brand_video`
@@ -4110,8 +4168,8 @@ app.post('/api/brand-video', async (req, res) => {
     const paymentMethodLabel = isFreeReference ? 'coupon' : 'card';
     await addRevenue(jobId, email, cost, 'brand-video', paymentReference, paymentMethodLabel);
     await addUserPayment(email, cost, paymentMethodLabel, 'brand-video', paymentReference);
-    await addActivityLog(email, isFreeReference ? '🎬 Brand Video Created (Free Code)' : '🎬 Brand Video Created', `Company: ${companyName}, Intro: ${introDuration}s, Voiceover: ${voiceoverAdded ? 'Yes' : 'No (TTS unavailable)'}`, cost);
-    await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', introDuration + BRAND_OUTRO_SECONDS);
+    await addActivityLog(email, isFreeReference ? '🎬 Brand Video Created (Free Code)' : '🎬 Brand Video Created', `Company: ${companyName}, Duration: ${finalDurationSeconds.toFixed(1)}s, Voiceover: ${voiceoverAdded ? 'Yes (full video)' : 'No (TTS unavailable)'}`, cost);
+    await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', finalDurationSeconds);
 
     let emailResult = { success: false };
     try {
