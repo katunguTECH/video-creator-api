@@ -4154,6 +4154,7 @@ app.post('/api/brand-video', async (req, res) => {
     }
 
     const finalDurationSeconds = await getDuration(finalVideoForUpload).catch(() => introDuration + BRAND_OUTRO_SECONDS);
+    const finalDurationForDb = Math.round(finalDurationSeconds);
 
     console.log('☁️ Uploading brand video to Cloudinary...');
     const uploadResult = await cloudinary.uploader.upload(finalVideoForUpload, {
@@ -4169,7 +4170,7 @@ app.post('/api/brand-video', async (req, res) => {
     await addRevenue(jobId, email, cost, 'brand-video', paymentReference, paymentMethodLabel);
     await addUserPayment(email, cost, paymentMethodLabel, 'brand-video', paymentReference);
     await addActivityLog(email, isFreeReference ? '🎬 Brand Video Created (Free Code)' : '🎬 Brand Video Created', `Company: ${companyName}, Duration: ${finalDurationSeconds.toFixed(1)}s, Voiceover: ${voiceoverAdded ? 'Yes (full video)' : 'No (TTS unavailable)'}`, cost);
-    await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', finalDurationSeconds);
+    await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', finalDurationForDb);
 
     let emailResult = { success: false };
     try {
