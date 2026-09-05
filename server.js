@@ -3939,28 +3939,43 @@ async function overlayFullVoiceover(videoPath, audioBuffer, outputPath) {
     console.log(`🧊 Extending final video by ${padSeconds.toFixed(2)}s so the voiceover finishes naturally`);
   }
 
+  const audioFilters = [
+    // Duck the video's own audio (background music / ambient sound from the
+    // uploaded footage) under the voiceover instead of replacing it outright.
+    `[0:a]volume=0.25[bg]`,
+    `[1:a]volume=1.6[vo]`,
+    `[bg][vo]amix=inputs=2:duration=longest:dropout_transition=3[mixed]`,
+    // Boosting the voiceover can clip on louder syllables — a limiter caps
+    // peaks so the louder mix never distorts.
+    `[mixed]alimiter=limit=0.95[aout]`
+  ];
+
   return new Promise((resolve, reject) => {
     const command = ffmpeg(videoPath).input(tempAudioPath);
+    let outputOptions;
 
-    const filters = [
-      padSeconds > 0
-        ? `[0:v]tpad=stop_mode=clone:stop_duration=${padSeconds.toFixed(2)}[vout]`
-        : `[0:v]null[vout]`,
-      // Duck the video's own audio (background music / ambient sound from the
-      // uploaded footage) under the voiceover instead of replacing it outright.
-      `[0:a]volume=0.25[bg]`,
-      `[1:a]volume=1.6[vo]`,
-      `[bg][vo]amix=inputs=2:duration=longest:dropout_transition=3[mixed]`,
-      // Boosting the voiceover can clip on louder syllables — a limiter caps
-      // peaks so the louder mix never distorts.
-      `[mixed]alimiter=limit=0.95[aout]`
-    ];
+    if (padSeconds > 0) {
+      // Video must be re-encoded here since we're extending its length.
+      const filters = [
+        `[0:v]tpad=stop_mode=clone:stop_duration=${padSeconds.toFixed(2)}[vout]`,
+        ...audioFilters
+      ];
+      command.complexFilter(filters);
+      outputOptions = ['-map', '[vout]', '-map', '[aout]', '-preset', 'veryfast'];
+      command.videoCodec('libx264');
+    } else {
+      // Common case: the voiceover already fits inside the video, so the
+      // video stream doesn't need to change at all. Stream-copying it instead
+      // of routing it through a re-encode avoids by far the most expensive
+      // step in the whole pipeline — important on a memory-constrained
+      // free-tier instance, where a full re-encode was crashing the process.
+      command.complexFilter(audioFilters);
+      outputOptions = ['-map', '0:v:0', '-map', '[aout]', '-c:v', 'copy'];
+    }
 
     command
-      .complexFilter(filters)
-      .outputOptions(['-map', '[vout]', '-map', '[aout]'])
-      .videoCodec('libx264')
       .audioCodec('aac')
+      .outputOptions(outputOptions)
       .output(outputPath)
       .on('end', () => {
         if (fs.existsSync(tempAudioPath)) fs.unlinkSync(tempAudioPath);
