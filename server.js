@@ -3847,21 +3847,26 @@ Rules:
   }
 }
 
-async function createTextCard({ outputPath, logoPath, lines, durationSeconds, withSilentAudio }) {
+async function createTextCard({ outputPath, logoPath, lines, durationSeconds, withSilentAudio, canvasWidth = 1280, canvasHeight = 720 }) {
   return new Promise((resolve, reject) => {
     const fontArg = fs.existsSync(FONT_PATH) ? `fontfile=${ffmpegSafePath(FONT_PATH)}:` : '';
+    // Logo width scales with the canvas so it isn't oversized/undersized when
+    // switching between portrait and landscape cards.
+    const logoWidth = Math.round(canvasWidth * 0.28);
 
     const drawtextFilters = lines.map((line, index) => {
-      const yPos = `h*0.60+${index * 55}`;
+      // Text block starts right under the logo instead of leaving a large
+      // empty gap in the middle of the card.
+      const yPos = `h*0.40+${index * Math.round(canvasHeight * 0.07)}`;
       return `drawtext=${fontArg}text='${escapeDrawtext(line.text)}':fontsize=${line.fontsize || 36}:fontcolor=${line.color || 'white'}:x=(w-text_w)/2:y=${yPos}`;
     }).join(',');
 
     const command = ffmpeg();
-    command.input(`color=c=0x111827:s=1280x720:d=${durationSeconds}`).inputFormat('lavfi');
+    command.input(`color=c=0x111827:s=${canvasWidth}x${canvasHeight}:d=${durationSeconds}`).inputFormat('lavfi');
     command.input(logoPath);
 
     const filters = [
-      `[1:v]scale=280:-1[logo]`,
+      `[1:v]scale=${logoWidth}:-1[logo]`,
       `[0:v][logo]overlay=(W-w)/2:H*0.15[withlogo]`,
       `[withlogo]${drawtextFilters}[vout]`
     ];
@@ -3884,7 +3889,18 @@ async function createTextCard({ outputPath, logoPath, lines, durationSeconds, wi
   });
 }
 
-async function normalizeClip(inputPath, outputPath) {
+async function getVideoDimensions(filePath) {
+  return new Promise((resolve, reject) => {
+    ffmpeg.ffprobe(filePath, (err, metadata) => {
+      if (err) return reject(err);
+      const videoStream = (metadata.streams || []).find(s => s.codec_type === 'video');
+      if (!videoStream) return reject(new Error('No video stream found'));
+      resolve({ width: videoStream.width, height: videoStream.height });
+    });
+  });
+}
+
+async function normalizeClip(inputPath, outputPath, canvasWidth = 1280, canvasHeight = 720) {
   const audioPresent = await hasAudioStream(inputPath);
 
   return new Promise((resolve, reject) => {
@@ -3895,7 +3911,7 @@ async function normalizeClip(inputPath, outputPath) {
     }
 
     command
-      .videoFilters('scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30')
+      .videoFilters(`scale=${canvasWidth}:${canvasHeight}:force_original_aspect_ratio=decrease,pad=${canvasWidth}:${canvasHeight}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=30`)
       .videoCodec('libx264')
       .audioCodec('aac')
       .audioFrequency(44100)
@@ -3933,8 +3949,11 @@ async function overlayFullVoiceover(videoPath, audioBuffer, outputPath) {
       // Duck the video's own audio (background music / ambient sound from the
       // uploaded footage) under the voiceover instead of replacing it outright.
       `[0:a]volume=0.25[bg]`,
-      `[1:a]volume=1.0[vo]`,
-      `[bg][vo]amix=inputs=2:duration=longest:dropout_transition=3[aout]`
+      `[1:a]volume=1.6[vo]`,
+      `[bg][vo]amix=inputs=2:duration=longest:dropout_transition=3[mixed]`,
+      // Boosting the voiceover can clip on louder syllables — a limiter caps
+      // peaks so the louder mix never distorts.
+      `[mixed]alimiter=limit=0.95[aout]`
     ];
 
     command
@@ -4122,6 +4141,24 @@ app.post('/api/brand-video', async (req, res) => {
     if (!logoRes.ok) throw new Error(`Failed to download logo: ${logoRes.status}`);
     fs.writeFileSync(logoPath, Buffer.from(await logoRes.arrayBuffer()));
 
+    // Match the intro/outro card orientation to the uploaded footage instead
+    // of forcing everything into landscape — a portrait phone video squeezed
+    // into a 1280x720 canvas ends up tiny with thick black bars on the sides.
+    let canvasWidth = 1280;
+    let canvasHeight = 720;
+    try {
+      const dims = await getVideoDimensions(mainVideoPath);
+      if (dims.height > dims.width) {
+        canvasWidth = 720;
+        canvasHeight = 1280;
+        console.log(`📱 Portrait video detected (${dims.width}x${dims.height}) — using a portrait canvas`);
+      } else {
+        console.log(`🖥️ Landscape video detected (${dims.width}x${dims.height}) — using a landscape canvas`);
+      }
+    } catch (dimError) {
+      console.warn('⚠️ Could not read main video dimensions, defaulting to landscape:', dimError.message);
+    }
+
     const script = (voiceoverScript && voiceoverScript.trim().length > 0)
       ? voiceoverScript.trim()
       : await deriveBrandScript(companyName, tagline, 15);
@@ -4152,7 +4189,9 @@ app.post('/api/brand-video', async (req, res) => {
         ...(tagline ? [{ text: tagline, fontsize: 28, color: '#D1D5DB' }] : [])
       ],
       durationSeconds: introDuration,
-      withSilentAudio: true
+      withSilentAudio: true,
+      canvasWidth,
+      canvasHeight
     });
     fs.copyFileSync(introRawPath, introFinalPath);
 
@@ -4166,13 +4205,15 @@ app.post('/api/brand-video', async (req, res) => {
       logoPath,
       lines: outroLines,
       durationSeconds: BRAND_OUTRO_SECONDS,
-      withSilentAudio: true
+      withSilentAudio: true,
+      canvasWidth,
+      canvasHeight
     });
 
     console.log('🧹 Normalizing clips for concatenation...');
-    await normalizeClip(introFinalPath, introNormPath);
-    await normalizeClip(mainVideoPath, mainNormPath);
-    await normalizeClip(outroRawPath, outroNormPath);
+    await normalizeClip(introFinalPath, introNormPath, canvasWidth, canvasHeight);
+    await normalizeClip(mainVideoPath, mainNormPath, canvasWidth, canvasHeight);
+    await normalizeClip(outroRawPath, outroNormPath, canvasWidth, canvasHeight);
 
     console.log('🔗 Concatenating intro + video + outro...');
     await concatClips([introNormPath, mainNormPath, outroNormPath], finalPath);
@@ -4207,8 +4248,13 @@ app.post('/api/brand-video', async (req, res) => {
 
     const cost = isFreeReference ? 0 : BRAND_VIDEO_PRICE;
     const paymentMethodLabel = isFreeReference ? 'coupon' : 'card';
+    // Free/coupon codes (e.g. "REDO-KATUNGU-001") get reused across multiple
+    // videos, but the payments table has a unique constraint on `reference`.
+    // Suffixing with the jobId keeps each row unique without touching the
+    // paid-payment path, where paymentReference is already unique per charge.
+    const paymentRecordReference = isFreeReference ? `${paymentReference}-${jobId}` : paymentReference;
     await addRevenue(jobId, email, cost, 'brand-video', paymentReference, paymentMethodLabel);
-    await addUserPayment(email, cost, paymentMethodLabel, 'brand-video', paymentReference);
+    await addUserPayment(email, cost, paymentMethodLabel, 'brand-video', paymentRecordReference);
     await addActivityLog(email, isFreeReference ? '🎬 Brand Video Created (Free Code)' : '🎬 Brand Video Created', `Company: ${companyName}, Duration: ${finalDurationSeconds.toFixed(1)}s, Voiceover: ${voiceoverAdded ? 'Yes (full video)' : 'No (TTS unavailable)'}`, cost);
     await addVideoUsage(paymentReference, email || 'anonymous', 'brand-video', `Brand video for ${companyName}`, cost, 'FFmpeg + TTS', 'custom', finalDurationForDb);
 
