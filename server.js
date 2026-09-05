@@ -4063,6 +4063,12 @@ app.post('/api/initialize-brand-video-payment', async (req, res) => {
   }
 });
 
+// Prevents duplicate submissions (e.g. double-clicking "Pay" or "Use Code")
+// from starting two simultaneous FFmpeg encoding jobs, which is enough to
+// exhaust memory on a free-tier instance and crash the whole server.
+const brandVideoInProgress = new Set();
+const MAX_CONCURRENT_BRAND_VIDEOS = 1;
+
 app.post('/api/brand-video', async (req, res) => {
   const {
     videoUrl,
@@ -4112,6 +4118,22 @@ app.post('/api/brand-video', async (req, res) => {
   } else {
     console.log('🎟️ Free/manual reference used, skipping payment verification:', paymentReference);
   }
+
+  if (brandVideoInProgress.has(paymentReference)) {
+    return res.status(409).json({
+      success: false,
+      error: 'This video is already being generated. Please wait for it to finish before submitting again.'
+    });
+  }
+
+  if (brandVideoInProgress.size >= MAX_CONCURRENT_BRAND_VIDEOS) {
+    return res.status(429).json({
+      success: false,
+      error: 'Another brand video is currently being processed. Please try again in a minute or two.'
+    });
+  }
+
+  brandVideoInProgress.add(paymentReference);
 
   const jobId = crypto.randomUUID();
   const mainVideoPath = path.join(tempDir, `${jobId}_main.mp4`);
@@ -4283,6 +4305,8 @@ app.post('/api/brand-video', async (req, res) => {
       success: false,
       error: error.message || 'Brand video generation failed'
     });
+  } finally {
+    brandVideoInProgress.delete(paymentReference);
   }
 });
 
