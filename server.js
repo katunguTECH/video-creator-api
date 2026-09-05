@@ -199,7 +199,7 @@ async function translateText(text, targetLanguage) {
 // ============================================
 // TEXT-TO-SPEECH
 // ============================================
-async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGender = 'MALE') {
+async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGender = 'MALE', useSsml = false, voiceName = null) {
   try {
     const apiKey = process.env.GOOGLE_API_KEY;
     if (!apiKey) {
@@ -218,16 +218,21 @@ async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGende
 
     const clampedRate = Math.min(Math.max(speakingRate, 0.25), 4.0);
 
+    const voiceConfig = {
+      languageCode: languageCode,
+      ssmlGender: voiceGender.toUpperCase()
+    };
+    // An explicit voice name (e.g. a Neural2 voice) gives noticeably more
+    // natural results than letting Google pick its default Standard voice.
+    if (voiceName) voiceConfig.name = voiceName;
+
     const requestBody = {
-      input: { text: text },
-      voice: {
-        languageCode: languageCode,
-        ssmlGender: voiceGender.toUpperCase()
-      },
+      input: useSsml ? { ssml: text } : { text: text },
+      voice: voiceConfig,
       audioConfig: { audioEncoding: 'MP3', speakingRate: clampedRate }
     };
 
-    console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode}), Gender: ${voiceGender}, rate: ${clampedRate}`);
+    console.log(`🔊 Calling TTS API for language: ${targetLanguage} (${languageCode}), Gender: ${voiceGender}${voiceName ? `, Voice: ${voiceName}` : ''}, rate: ${clampedRate}, SSML: ${useSsml}`);
 
     const response = await axios.post(url, requestBody, {
       headers: { 'Content-Type': 'application/json' },
@@ -3745,6 +3750,37 @@ const BRAND_VIDEO_PRICE = 250;
 const BRAND_INTRO_SECONDS = 4;
 const BRAND_OUTRO_SECONDS = 4;
 
+// Converts a plain voiceover script into SSML so Google's TTS can actually
+// follow basic delivery direction (pauses, emphasis) instead of reading
+// everything in a flat monotone. Wrap a word or phrase in *asterisks* in the
+// script to add emphasis to it, e.g. "we *go the extra mile* to source them".
+// If the script already starts with <speak>, it's treated as hand-written
+// SSML and passed through unchanged.
+function buildVoiceoverSsml(rawScript) {
+  const trimmed = (rawScript || '').trim();
+  if (!trimmed) return '<speak></speak>';
+  if (trimmed.toLowerCase().startsWith('<speak')) return trimmed;
+
+  let s = trimmed
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  // *emphasized text* -> SSML emphasis
+  s = s.replace(/\*(.+?)\*/g, '<emphasis level="moderate">$1</emphasis>');
+
+  // "..." -> a slightly longer natural pause
+  s = s.replace(/\.\.\.+/g, '<break time="450ms"/>');
+
+  // End of sentence -> short pause before the next one
+  s = s.replace(/([.!?])(\s+)/g, '$1<break time="350ms"/>$2');
+
+  // Comma -> brief pause
+  s = s.replace(/,(\s+)/g, ',<break time="180ms"/>$1');
+
+  return `<speak>${s}</speak>`;
+}
+
 function escapeDrawtext(text) {
   if (!text) return '';
   return String(text)
@@ -4095,7 +4131,11 @@ app.post('/api/brand-video', async (req, res) => {
     let ttsAudioBuffer = null;
     let voiceoverAdded = true;
     try {
-      ttsAudioBuffer = await textToSpeech(script, 'en', 1.0, 'MALE');
+      const ssmlScript = buildVoiceoverSsml(script);
+      // en-US-Neural2-F: a warmer, more natural female voice than Google's
+      // default Standard voice. SSML lets the pauses/emphasis in the script
+      // (via *word* markup, sentence breaks, commas) actually come through.
+      ttsAudioBuffer = await textToSpeech(ssmlScript, 'en', 1.0, 'FEMALE', true, 'en-US-Neural2-F');
     } catch (ttsError) {
       console.warn('⚠️ TTS failed, continuing with a silent intro card:', ttsError.message);
       voiceoverAdded = false;
