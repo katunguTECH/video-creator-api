@@ -78,7 +78,8 @@ function TranslateVideo() {
     const fetchLanguages = async () => {
       try {
         console.log('🌍 Fetching languages...');
-        const response = await fetch(`${API_BASE_URL}/api/languages`);
+        // NOTE: the backend exposes this list at /api/free-languages
+        const response = await fetch(`${API_BASE_URL}/api/free-languages`);
         if (response.ok) {
           const data = await response.json();
           if (data.languages) {
@@ -93,46 +94,32 @@ function TranslateVideo() {
     fetchLanguages();
   }, []);
 
-  // Check for payment reference in URL
+  // ============================================
+  // Check for payment reference in URL (return from Paystack redirect)
+  // Paystack appends both ?reference= and ?trxref= to the callback URL
+  // ============================================
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-    const reference = params.get('reference');
+    const reference = params.get('reference') || params.get('trxref');
+
     if (reference) {
       console.log('🌐 Found payment reference in URL:', reference);
+
       const savedEmail = localStorage.getItem('pending_payment_email') || email;
-      const savedService = localStorage.getItem('pending_payment_service') || 'translation';
-      const savedAmount = localStorage.getItem('pending_payment_amount') || TRANSLATION_PRICE;
+      const savedSource = localStorage.getItem('pending_payment_source_language') || sourceLanguage;
+      const savedTarget = localStorage.getItem('pending_payment_target_language') || targetLanguage;
+      const savedVideoUrl = localStorage.getItem('pending_payment_video_url') || videoUrl;
 
-      const verifyPayment = async () => {
-        setLoading(true);
-        try {
-          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-startbutton-payment`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reference: reference,
-              email: savedEmail,
-              amount: parseFloat(savedAmount),
-              serviceType: savedService,
-              duration: 5
-            })
-          });
+      if (savedEmail) setEmail(savedEmail);
+      if (savedSource) setSourceLanguage(savedSource);
+      if (savedTarget) setTargetLanguage(savedTarget);
+      if (savedVideoUrl) setVideoUrl(savedVideoUrl);
 
-          const verifyData = await verifyResponse.json();
-          if (verifyData.success) {
-            await processTranslation(reference);
-          } else {
-            setError('Payment verification failed. Please try again.');
-            setLoading(false);
-          }
-        } catch (error) {
-          console.error('❌ Payment verification error:', error);
-          setError('Error verifying payment. Please try again.');
-          setLoading(false);
-        }
-      };
+      // /api/translate-video verifies the Paystack payment AND runs the
+      // translation pipeline in one call, so there's no separate verify step.
+      processTranslation(reference, savedVideoUrl, savedSource, savedTarget, savedEmail);
 
-      verifyPayment();
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
   }, []);
 
@@ -182,8 +169,8 @@ function TranslateVideo() {
       const data = await response.json();
       console.log('✅ Upload successful:', data);
 
-      if (data.success && data.url) {
-        setVideoUrl(data.url);
+      if (data.success && data.videoUrl) {
+        setVideoUrl(data.videoUrl);
         setSuccess('Video uploaded successfully!');
       } else {
         throw new Error(data.message || 'Upload failed');
@@ -206,6 +193,9 @@ function TranslateVideo() {
     }
   };
 
+  // ============================================
+  // PAYMENT — now uses Paystack via /api/initialize-payment
+  // ============================================
   const handlePayment = async () => {
     if (!selectedFile) {
       setError('Please select a video first');
@@ -222,33 +212,61 @@ function TranslateVideo() {
       return;
     }
 
+    if (!videoUrl) {
+      setError('Please wait for the video to finish uploading');
+      return;
+    }
+
     setLoading(true);
     setError('');
     setSuccess('');
 
     try {
-      const response = await fetch(`${API_BASE_URL}/api/initialize-translation-payment`, {
+      const response = await fetch(`${API_BASE_URL}/api/initialize-payment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           email: email,
           amount: TRANSLATION_PRICE,
-          sourceLanguage: sourceLanguage,
-          targetLanguage: targetLanguage,
-          videoUrl: videoUrl
+          serviceType: 'translation',
+          // tell the backend to send the user back to this exact page after paying
+          callbackUrl: `${window.location.origin}${window.location.pathname}`,
+          metadata: {
+            sourceLanguage: sourceLanguage,
+            targetLanguage: targetLanguage,
+            custom_fields: [
+              {
+                display_name: "Video Type",
+                variable_name: "video_type",
+                value: "translation"
+              },
+              {
+                display_name: "Target Language",
+                variable_name: "target_language",
+                value: targetLanguage
+              },
+              {
+                display_name: "Amount",
+                variable_name: "amount",
+                value: `${TRANSLATION_PRICE} KES`
+              }
+            ]
+          }
         })
       });
 
       const data = await response.json();
 
-      if (data.success && data.paymentUrl) {
+      if (data.success && data.authorization_url) {
         localStorage.setItem('pending_payment_email', email);
-        localStorage.setItem('pending_payment_service', 'translation');
-        localStorage.setItem('pending_payment_amount', TRANSLATION_PRICE);
         localStorage.setItem('pending_payment_reference', data.reference);
-        window.location.href = data.paymentUrl;
+        localStorage.setItem('pending_payment_video_url', videoUrl);
+        localStorage.setItem('pending_payment_source_language', sourceLanguage);
+        localStorage.setItem('pending_payment_target_language', targetLanguage);
+
+        window.location.href = data.authorization_url;
       } else {
-        setError(data.message || 'Failed to initialize payment');
+        setError(data.error || data.message || 'Failed to initialize payment');
         setLoading(false);
       }
     } catch (error) {
@@ -258,46 +276,63 @@ function TranslateVideo() {
     }
   };
 
-  const processTranslation = async (reference) => {
+  // /api/translate-video verifies the payment against Paystack AND runs the
+  // full translation pipeline (transcribe → translate → TTS → mux → upload)
+  // in a single call, so no separate /api/verify-payment call is needed here.
+  const processTranslation = async (reference, videoUrlOverride, sourceOverride, targetOverride, emailOverride) => {
+    setLoading(true);
+    setError('');
+    setSuccess('🔄 Processing your translation... This can take a few minutes.');
+
     try {
       console.log('🔄 Processing translation with reference:', reference);
 
-      const response = await fetch(`${API_BASE_URL}/api/process-translation`, {
+      const response = await fetch(`${API_BASE_URL}/api/translate-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          reference: reference,
-          email: email,
-          sourceLanguage: sourceLanguage,
-          targetLanguage: targetLanguage,
-          videoUrl: videoUrl
+          videoUrl: videoUrlOverride || videoUrl,
+          targetLanguage: targetOverride || targetLanguage,
+          sourceLanguage: sourceOverride || sourceLanguage,
+          paymentReference: reference,
+          email: emailOverride || email,
+          duration: 5
         })
       });
 
       const data = await response.json();
 
       if (data.success) {
-        setSuccess('Translation completed successfully! Check your email.');
-        setTranslatedVideo(data.translatedVideoUrl);
-        setTranslatedText(data.translatedText);
+        setSuccess('✅ Translation completed successfully! Check your email.');
+        setTranslatedVideo(data.videoUrl);
+        setTranslatedText(`Video translated to ${data.languageName || targetLanguage}`);
+        setPaymentReference(reference);
+        setShowRetry(false);
 
         localStorage.removeItem('pending_payment_email');
-        localStorage.removeItem('pending_payment_service');
-        localStorage.removeItem('pending_payment_amount');
         localStorage.removeItem('pending_payment_reference');
+        localStorage.removeItem('pending_payment_video_url');
+        localStorage.removeItem('pending_payment_source_language');
+        localStorage.removeItem('pending_payment_target_language');
 
         setLoading(false);
       } else {
-        setError(data.message || 'Translation failed');
+        // Keep the reference around so the person can retry for free
+        setPaymentReference(reference);
+        setShowRetry(true);
+        setError(data.error || data.message || 'Translation failed');
         setLoading(false);
       }
     } catch (error) {
       console.error('❌ Translation error:', error);
+      setPaymentReference(reference);
+      setShowRetry(true);
       setError('Translation failed. Please try again.');
       setLoading(false);
     }
   };
 
+  // Free retry for a payment that already succeeded but the pipeline failed
   const handleFreeRetry = async () => {
     if (!paymentReference) {
       setError('No payment reference found');
@@ -305,8 +340,38 @@ function TranslateVideo() {
     }
 
     setIsRetryLoading(true);
-    await processTranslation(paymentReference);
-    setIsRetryLoading(false);
+    setError('');
+    setSuccess('🔄 Retrying your translation...');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/translate-video-free`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          videoUrl: videoUrl,
+          targetLanguage: targetLanguage,
+          sourceLanguage: sourceLanguage,
+          paymentReference: paymentReference,
+          email: email,
+          duration: 5
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSuccess('✅ Translation complete! Check your email for the download link.');
+        setTranslatedVideo(data.videoUrl);
+        setShowRetry(false);
+      } else {
+        setError(data.error || 'Retry failed. Please try again.');
+      }
+    } catch (error) {
+      console.error('❌ Retry error:', error);
+      setError('Retry failed: ' + error.message);
+    } finally {
+      setIsRetryLoading(false);
+    }
   };
 
   return (
@@ -410,7 +475,7 @@ function TranslateVideo() {
               </div>
             </div>
             <div className="price-note">
-              <small>💰 Fixed price of KES 300 for all video translations</small>
+              <small>💰 Fixed price of KES 300 for all video translations · Paid via Paystack (Cards, M-PESA, Bank Transfer)</small>
             </div>
           </div>
 
@@ -450,7 +515,7 @@ function TranslateVideo() {
             <ul>
               <li>📤 Upload a video with spoken audio</li>
               <li>🌍 Choose source and target languages</li>
-              <li>💰 Complete payment via Startbutton (Cards, M-PESA, Bank Transfer)</li>
+              <li>💰 Complete payment via Paystack (Cards, M-PESA, Bank Transfer)</li>
               <li>🤖 AI will translate the audio</li>
               <li>📥 Download the translated video</li>
               <li>📧 Video link sent to your email</li>

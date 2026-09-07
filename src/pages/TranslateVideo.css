@@ -1,698 +1,471 @@
-/* ============================================
-   TRANSLATE VIDEO PAGE - COMPLETE STYLES
-   ============================================ */
-
-.translate-page {
-  min-height: 100vh;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  padding: 20px;
-}
-
-.header {
-  max-width: 1200px;
-  margin: 0 auto 30px;
-  padding: 30px 40px;
-  background: rgba(255, 255, 255, 0.12);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-radius: 20px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  color: white;
-  text-align: center;
-  position: relative;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.2);
-}
-
-.back-btn {
-  position: absolute;
-  left: 30px;
-  top: 50%;
-  transform: translateY(-50%);
-  background: rgba(255, 255, 255, 0.15);
-  backdrop-filter: blur(10px);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  color: white;
-  padding: 10px 22px;
-  border-radius: 12px;
-  cursor: pointer;
-  font-size: 15px;
-  font-weight: 500;
-  transition: all 0.3s ease;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.back-btn:hover {
-  background: rgba(255, 255, 255, 0.25);
-  transform: translateY(-50%) translateX(-5px);
-  box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
-}
-
-.header h1 {
-  margin: 0;
-  font-size: 2.8em;
-  font-weight: 800;
-  text-shadow: 0 2px 20px rgba(0, 0, 0, 0.2);
-  letter-spacing: -0.5px;
-}
-
-.header p {
-  margin: 10px 0 0;
-  opacity: 0.9;
-  font-size: 1.15em;
-  font-weight: 400;
-}
-
-.main-content {
-  max-width: 1200px;
-  margin: 0 auto;
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 30px;
-}
-
-.left-panel, .right-panel {
-  background: rgba(255, 255, 255, 0.95);
-  backdrop-filter: blur(20px);
-  border-radius: 20px;
-  padding: 35px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15);
-  border: 1px solid rgba(255, 255, 255, 0.2);
-  transition: transform 0.3s ease, box-shadow 0.3s ease;
-}
-
-.left-panel:hover, .right-panel:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 25px 70px rgba(0, 0, 0, 0.2);
-}
-
-.email-section {
-  margin-bottom: 25px;
-}
-
-.email-section label {
-  display: block;
-  font-weight: 600;
-  margin-bottom: 8px;
-  color: #1a1a2e;
-  font-size: 15px;
-}
-
-.email-section input {
-  width: 100%;
-  padding: 14px 18px;
-  border: 2px solid #e8ecf1;
-  border-radius: 12px;
-  font-size: 16px;
-  transition: all 0.3s ease;
-  background: #f8f9fc;
-  color: #1a1a2e;
-}
-
-.email-section input:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
-  background: white;
-}
-
-.email-section small {
-  display: block;
-  margin-top: 6px;
-  color: #6b7280;
-  font-size: 13px;
-}
-
-.upload-section {
-  margin-bottom: 25px;
-}
-
-.upload-area {
-  border: 2.5px dashed #d1d5db;
-  border-radius: 16px;
-  padding: 50px 20px;
-  text-align: center;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  background: #fafbfc;
-  position: relative;
-  min-height: 160px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-}
-
-.upload-area:hover {
-  border-color: #667eea;
-  background: #f0f3ff;
-  transform: scale(1.01);
-}
-
-.upload-icon {
-  font-size: 52px;
-  margin-bottom: 12px;
-}
-
-.upload-area p {
-  margin: 0;
-  font-size: 16px;
-  font-weight: 500;
-  color: #1a1a2e;
-}
-
-.upload-area small {
-  margin-top: 8px;
-  font-size: 13px;
-  color: #6b7280;
-}
-
-.file-info {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  flex-wrap: wrap;
-  padding: 10px;
-  background: #f0f3ff;
-  border-radius: 12px;
-  width: 100%;
-}
-
-.file-info span {
-  font-weight: 500;
-  color: #1a1a2e;
-}
-
-.file-size {
-  font-size: 13px;
-  color: #6b7280;
-  font-weight: 400;
-}
-
-.remove-file {
-  background: #fee2e2;
-  color: #dc2626;
-  border: none;
-  padding: 6px 16px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 13px;
-  font-weight: 500;
-  transition: all 0.3s ease;
-}
-
-.remove-file:hover {
-  background: #fecaca;
-  transform: scale(1.05);
-}
-
-.spinner {
-  text-align: center;
-  padding: 12px;
-  color: #667eea;
-  font-weight: 600;
-  font-size: 14px;
-}
-
-.spinner::after {
-  content: '';
-  display: inline-block;
-  width: 20px;
-  height: 20px;
-  border: 3px solid #e8ecf1;
-  border-top: 3px solid #667eea;
-  border-radius: 50%;
-  animation: spin 0.8s linear infinite;
-  margin-left: 10px;
-  vertical-align: middle;
-}
-
-@keyframes spin {
-  0% { transform: rotate(0deg); }
-  100% { transform: rotate(360deg); }
-}
-
-.language-section {
-  margin-bottom: 25px;
-}
-
-.language-group {
-  margin-bottom: 16px;
-}
-
-.language-group label {
-  display: block;
-  font-weight: 600;
-  margin-bottom: 6px;
-  color: #1a1a2e;
-  font-size: 14px;
-}
-
-.language-group select {
-  width: 100%;
-  padding: 13px 16px;
-  border: 2px solid #e8ecf1;
-  border-radius: 12px;
-  font-size: 15px;
-  background: #f8f9fc;
-  color: #1a1a2e;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%236b7280' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 16px center;
-  padding-right: 40px;
-}
-
-.language-group select:focus {
-  outline: none;
-  border-color: #667eea;
-  box-shadow: 0 0 0 4px rgba(102, 126, 234, 0.15);
-  background-color: white;
-}
-
-.language-count {
-  text-align: center;
-  color: #6b7280;
-  font-size: 13px;
-  margin-top: 12px;
-  padding: 10px;
-  background: #f0f3ff;
-  border-radius: 10px;
-  font-weight: 500;
-}
-
-.price-section {
-  margin: 25px 0;
-  padding: 20px;
-  background: linear-gradient(135deg, #f8f9fc 0%, #f0f3ff 100%);
-  border-radius: 16px;
-  border: 1px solid #e8ecf1;
-}
-
-.price-section h3 {
-  margin: 0 0 15px;
-  color: #1a1a2e;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.price-card {
-  background: white;
-  padding: 20px;
-  border-radius: 14px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
-}
-
-.price-amount {
-  font-size: 40px;
-  font-weight: 800;
-  color: #667eea;
-  text-align: center;
-  margin-bottom: 15px;
-  letter-spacing: -1px;
-}
-
-.price-details {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 8px;
-}
-
-.price-details p {
-  margin: 5px 0;
-  font-size: 14px;
-  color: #374151;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.price-details p::before {
-  content: "✅";
-  color: #10b981;
-  font-size: 16px;
-}
-
-.price-note {
-  text-align: center;
-  margin-top: 12px;
-  color: #6b7280;
-}
-
-.price-note small {
-  background: #f0f3ff;
-  padding: 4px 16px;
-  border-radius: 20px;
-  font-size: 13px;
-  color: #4b5563;
-}
-
-.retry-section {
-  margin-top: 15px;
-  padding: 16px 20px;
-  background: #fffbeb;
-  border-radius: 14px;
-  border: 1.5px solid #f59e0b;
-  text-align: center;
-}
-
-.retry-info {
-  margin-bottom: 10px;
-}
-
-.retry-info p {
-  margin: 4px 0;
-  color: #92400e;
-  font-size: 14px;
-}
-
-.retry-info p:first-child {
-  font-weight: 600;
-}
-
-.retry-btn {
-  width: 100%;
-  padding: 14px;
-  background: linear-gradient(135deg, #f59e0b, #d97706);
-  color: white;
-  border: none;
-  border-radius: 12px;
-  font-size: 16px;
-  font-weight: 600;
-  cursor: pointer;
-  transition: all 0.3s ease;
-}
-
-.retry-btn:hover:not(:disabled) {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(245, 158, 11, 0.4);
-}
-
-.retry-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-}
-
-.translate-btn {
-  width: 100%;
-  padding: 18px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  color: white;
-  border: none;
-  border-radius: 14px;
-  font-size: 18px;
-  font-weight: 700;
-  cursor: pointer;
-  transition: all 0.3s ease;
-  margin-top: 10px;
-  letter-spacing: 0.3px;
-  box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
-}
-
-.translate-btn:hover:not(:disabled) {
-  transform: translateY(-3px);
-  box-shadow: 0 8px 30px rgba(102, 126, 234, 0.45);
-}
-
-.translate-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-  transform: none;
-  box-shadow: none;
-}
-
-.error-message {
-  margin-top: 15px;
-  padding: 14px 18px;
-  background: #fee2e2;
-  color: #991b1b;
-  border-radius: 12px;
-  border-left: 4px solid #dc2626;
-  font-weight: 500;
-}
-
-.success-message {
-  margin-top: 15px;
-  padding: 14px 18px;
-  background: #d1fae5;
-  color: #065f46;
-  border-radius: 12px;
-  border-left: 4px solid #10b981;
-  font-weight: 500;
-}
-
-.video-preview {
-  margin-bottom: 25px;
-}
-
-.video-preview h3 {
-  margin: 0 0 15px;
-  color: #1a1a2e;
-  font-size: 18px;
-  font-weight: 700;
-}
-
-.video-player {
-  width: 100%;
-  max-height: 400px;
-  border-radius: 14px;
-  background: #000;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
-}
-
-.placeholder {
-  background: linear-gradient(135deg, #f8f9fc 0%, #e8ecf1 100%);
-  border-radius: 14px;
-  padding: 80px 20px;
-  text-align: center;
-  color: #6b7280;
-  border: 2px dashed #d1d5db;
-}
-
-.placeholder p {
-  margin: 0;
-  font-size: 16px;
-}
-
-.translated-text {
-  margin: 20px 0;
-  padding: 18px 20px;
-  background: #f0f3ff;
-  border-radius: 14px;
-  border-left: 4px solid #667eea;
-}
-
-.translated-text h4 {
-  margin: 0 0 10px;
-  color: #1a1a2e;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.text-content p {
-  margin: 6px 0;
-  font-size: 14px;
-  color: #374151;
-}
-
-.text-content p strong {
-  color: #1a1a2e;
-}
-
-.translated-video {
-  margin: 20px 0;
-}
-
-.translated-video h4 {
-  margin: 0 0 12px;
-  color: #1a1a2e;
-  font-size: 16px;
-  font-weight: 600;
-}
-
-.video-actions {
-  margin-top: 12px;
-  text-align: center;
-}
-
-.download-btn {
-  display: inline-block;
-  padding: 12px 32px;
-  background: linear-gradient(135deg, #10b981, #059669);
-  color: white;
-  text-decoration: none;
-  border-radius: 12px;
-  font-weight: 600;
-  font-size: 15px;
-  transition: all 0.3s ease;
-}
-
-.download-btn:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(16, 185, 129, 0.4);
-}
-
-.how-it-works {
-  margin-top: 25px;
-  padding: 22px 25px;
-  background: #f8f9fc;
-  border-radius: 16px;
-  border: 1px solid #e8ecf1;
-}
-
-.how-it-works h4 {
-  margin: 0 0 12px;
-  color: #1a1a2e;
-  font-size: 17px;
-  font-weight: 700;
-}
-
-.how-it-works ul {
-  margin: 10px 0;
-  padding-left: 24px;
-}
-
-.how-it-works li {
-  margin: 6px 0;
-  color: #374151;
-  font-size: 14px;
-}
-
-.languages-info {
-  margin-top: 15px;
-  padding: 12px;
-  background: linear-gradient(135deg, #e8edff, #f0f3ff);
-  border-radius: 10px;
-  text-align: center;
-  font-weight: 600;
-  color: #667eea;
-  font-size: 14px;
-}
-
-.support-info {
-  margin-top: 12px;
-  text-align: center;
-  color: #6b7280;
-  font-size: 13px;
-}
-
-@media (max-width: 1024px) {
-  .main-content {
-    grid-template-columns: 1fr;
-    gap: 25px;
+import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
+import './TranslateVideo.css';
+
+// ============================================
+// API Base URL from environment
+// ============================================
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
+
+// ============================================
+// SIMPLIFIED helper function with retry logic
+// ============================================
+const fetchWithRetry = async (url, options, maxRetries = 2) => {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      console.log(`🔄 Fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
+      const response = await fetch(url, options);
+      if (response.ok) return response;
+      if (response.status === 404 || response.status === 400) {
+        return response;
+      }
+      if (attempt < maxRetries) {
+        const waitTime = (attempt + 1) * 1000;
+        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${waitTime}ms...`);
+        await new Promise(resolve => setTimeout(resolve, waitTime));
+      }
+    } catch (error) {
+      console.error(`❌ Attempt ${attempt + 1} failed:`, error);
+      if (attempt === maxRetries) {
+        throw error;
+      }
+      const waitTime = (attempt + 1) * 1000;
+      console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${waitTime}ms...`);
+      await new Promise(resolve => setTimeout(resolve, waitTime));
+    }
   }
+  throw new Error('Max retries exceeded');
+};
 
-  .header h1 {
-    font-size: 2.2em;
-  }
+// Hardcoded languages as fallback
+const FALLBACK_LANGUAGES = {
+  'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
+  'it': 'Italian', 'pt': 'Portuguese', 'ru': 'Russian', 'ja': 'Japanese',
+  'ko': 'Korean', 'zh': 'Chinese (Simplified)', 'zh-TW': 'Chinese (Traditional)',
+  'ar': 'Arabic', 'hi': 'Hindi', 'bn': 'Bengali', 'ur': 'Urdu',
+  'id': 'Indonesian', 'ms': 'Malay', 'tl': 'Tagalog', 'vi': 'Vietnamese',
+  'th': 'Thai', 'sw': 'Swahili', 'ha': 'Hausa', 'yo': 'Yoruba',
+  'ig': 'Igbo', 'zu': 'Zulu', 'af': 'Afrikaans', 'am': 'Amharic',
+  'ne': 'Nepali', 'si': 'Sinhala', 'ta': 'Tamil', 'te': 'Telugu',
+  'ml': 'Malayalam', 'kn': 'Kannada', 'pa': 'Punjabi', 'gu': 'Gujarati',
+  'mr': 'Marathi', 'or': 'Odia'
+};
 
-  .back-btn {
-    position: static;
-    transform: none;
-    margin-bottom: 15px;
-    display: inline-flex;
-  }
+function TranslateVideo() {
+  const navigate = useNavigate();
+  const [email, setEmail] = useState('katungu1@gmail.com');
+  const [selectedFile, setSelectedFile] = useState(null);
+  const [videoUrl, setVideoUrl] = useState(null);
+  const [sourceLanguage, setSourceLanguage] = useState('auto');
+  const [targetLanguage, setTargetLanguage] = useState('fr');
+  const [languages, setLanguages] = useState(FALLBACK_LANGUAGES);
+  const [loading, setLoading] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [translatedVideo, setTranslatedVideo] = useState(null);
+  const [translatedText, setTranslatedText] = useState('');
+  const [showRetry, setShowRetry] = useState(false);
+  const [paymentReference, setPaymentReference] = useState('');
+  const [isRetryLoading, setIsRetryLoading] = useState(false);
+  const fileInputRef = useRef(null);
+  const videoRef = useRef(null);
 
-  .back-btn:hover {
-    transform: none;
-  }
+  const TRANSLATION_PRICE = 300;
 
-  .price-details {
-    grid-template-columns: 1fr;
-  }
+  // Load available languages
+  useEffect(() => {
+    const fetchLanguages = async () => {
+      try {
+        console.log('🌍 Fetching languages...');
+        const response = await fetch(`${API_BASE_URL}/api/languages`);
+        if (response.ok) {
+          const data = await response.json();
+          if (data.languages) {
+            setLanguages(data.languages);
+          }
+        }
+      } catch (error) {
+        console.error('Error fetching languages:', error);
+        // Keep using fallback languages
+      }
+    };
+    fetchLanguages();
+  }, []);
+
+  // Check for payment reference in URL
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const reference = params.get('reference');
+    if (reference) {
+      console.log('🌐 Found payment reference in URL:', reference);
+      const savedEmail = localStorage.getItem('pending_payment_email') || email;
+      const savedService = localStorage.getItem('pending_payment_service') || 'translation';
+      const savedAmount = localStorage.getItem('pending_payment_amount') || TRANSLATION_PRICE;
+
+      const verifyPayment = async () => {
+        setLoading(true);
+        try {
+          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-startbutton-payment`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              reference: reference,
+              email: savedEmail,
+              amount: parseFloat(savedAmount),
+              serviceType: savedService,
+              duration: 5
+            })
+          });
+
+          const verifyData = await verifyResponse.json();
+          if (verifyData.success) {
+            await processTranslation(reference);
+          } else {
+            setError('Payment verification failed. Please try again.');
+            setLoading(false);
+          }
+        } catch (error) {
+          console.error('❌ Payment verification error:', error);
+          setError('Error verifying payment. Please try again.');
+          setLoading(false);
+        }
+      };
+
+      verifyPayment();
+    }
+  }, []);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    if (file.size > 50 * 1024 * 1024) {
+      setError('File size exceeds 50MB limit');
+      return;
+    }
+
+    const validTypes = ['video/mp4', 'video/avi', 'video/quicktime', 'video/webm', 'video/mov'];
+    if (!validTypes.includes(file.type)) {
+      setError('Invalid file format. Please upload MP4, AVI, MOV, or WEBM');
+      return;
+    }
+
+    setSelectedFile(file);
+    setVideoUrl(URL.createObjectURL(file));
+    setError('');
+    setSuccess('');
+    await uploadVideo(file);
+  };
+
+  const uploadVideo = async (file) => {
+    setUploading(true);
+    setError('');
+
+    try {
+      const formData = new FormData();
+      formData.append('video', file);
+
+      console.log('📤 Uploading video to:', `${API_BASE_URL}/api/upload-video`);
+
+      const response = await fetch(`${API_BASE_URL}/api/upload-video`, {
+        method: 'POST',
+        body: formData,
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('❌ Upload failed:', errorText);
+        throw new Error(`Upload failed: ${response.status} ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log('✅ Upload successful:', data);
+
+      if (data.success && data.url) {
+        setVideoUrl(data.url);
+        setSuccess('Video uploaded successfully!');
+      } else {
+        throw new Error(data.message || 'Upload failed');
+      }
+    } catch (error) {
+      console.error('❌ Upload error:', error);
+      setError(`Upload failed: ${error.message}`);
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setVideoUrl(null);
+    setError('');
+    setSuccess('');
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  const handlePayment = async () => {
+    if (!selectedFile) {
+      setError('Please select a video first');
+      return;
+    }
+
+    if (!targetLanguage) {
+      setError('Please select a target language');
+      return;
+    }
+
+    if (!email) {
+      setError('Please enter your email');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setSuccess('');
+
+    try {
+      const response = await fetch(`${API_BASE_URL}/api/initialize-translation-payment`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          email: email,
+          amount: TRANSLATION_PRICE,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage,
+          videoUrl: videoUrl
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success && data.paymentUrl) {
+        localStorage.setItem('pending_payment_email', email);
+        localStorage.setItem('pending_payment_service', 'translation');
+        localStorage.setItem('pending_payment_amount', TRANSLATION_PRICE);
+        localStorage.setItem('pending_payment_reference', data.reference);
+        window.location.href = data.paymentUrl;
+      } else {
+        setError(data.message || 'Failed to initialize payment');
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('❌ Payment initialization error:', error);
+      setError('Failed to initialize payment. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const processTranslation = async (reference) => {
+    try {
+      console.log('🔄 Processing translation with reference:', reference);
+
+      const response = await fetch(`${API_BASE_URL}/api/process-translation`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          reference: reference,
+          email: email,
+          sourceLanguage: sourceLanguage,
+          targetLanguage: targetLanguage,
+          videoUrl: videoUrl
+        })
+      });
+
+      const data = await response.json();
+
+      if (data.success) {
+        setSuccess('Translation completed successfully! Check your email.');
+        setTranslatedVideo(data.translatedVideoUrl);
+        setTranslatedText(data.translatedText);
+
+        localStorage.removeItem('pending_payment_email');
+        localStorage.removeItem('pending_payment_service');
+        localStorage.removeItem('pending_payment_amount');
+        localStorage.removeItem('pending_payment_reference');
+
+        setLoading(false);
+      } else {
+        setError(data.message || 'Translation failed');
+        setLoading(false);
+      }
+    } catch (error) {
+      console.error('❌ Translation error:', error);
+      setError('Translation failed. Please try again.');
+      setLoading(false);
+    }
+  };
+
+  const handleFreeRetry = async () => {
+    if (!paymentReference) {
+      setError('No payment reference found');
+      return;
+    }
+
+    setIsRetryLoading(true);
+    await processTranslation(paymentReference);
+    setIsRetryLoading(false);
+  };
+
+  return (
+    <div className="translate-video-container">
+      <div className="header">
+        <h1>🌐 Translate Video</h1>
+        <p>Upload a video and translate it to another language</p>
+      </div>
+
+      <div className="main-content">
+        <div className="left-panel">
+          <div className="email-section">
+            <label>📧 Your Email</label>
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Enter your email"
+              disabled={loading}
+            />
+            <small>Your translated video will be sent to this email</small>
+          </div>
+
+          <div className="upload-section">
+            <div className="upload-area" onClick={() => fileInputRef.current?.click()}>
+              {!selectedFile ? (
+                <>
+                  <div className="upload-icon">📹</div>
+                  <p>Click or drag to upload a video</p>
+                  <small>Supported formats: MP4, AVI, MOV, WEBM (Max 50MB)</small>
+                </>
+              ) : (
+                <div className="file-info">
+                  <span>📹 {selectedFile.name}</span>
+                  <span className="file-size">({(selectedFile.size / 1024 / 1024).toFixed(2)} MB)</span>
+                  <button
+                    className="remove-file"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleRemoveFile();
+                    }}
+                  >
+                    Remove
+                  </button>
+                </div>
+              )}
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                accept="video/*"
+                style={{ display: 'none' }}
+                disabled={loading}
+              />
+            </div>
+            {uploading && <div className="spinner">Uploading...</div>}
+          </div>
+
+          <div className="language-section">
+            <div className="language-group">
+              <label>🔍 Source Language</label>
+              <select
+                value={sourceLanguage}
+                onChange={(e) => setSourceLanguage(e.target.value)}
+                disabled={loading}
+              >
+                <option value="auto">Auto-detect</option>
+                {Object.entries(languages).map(([code, name]) => (
+                  <option key={code} value={code}>{name} ({code})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="language-group">
+              <label>🎯 Target Language</label>
+              <select
+                value={targetLanguage}
+                onChange={(e) => setTargetLanguage(e.target.value)}
+                disabled={loading}
+              >
+                <option value="">Select target language...</option>
+                {Object.entries(languages).map(([code, name]) => (
+                  <option key={code} value={code}>{name} ({code})</option>
+                ))}
+              </select>
+            </div>
+            <div className="language-count">
+              🌍 {Object.keys(languages).length} languages available
+            </div>
+          </div>
+
+          <div className="price-section">
+            <h3>💰 Total Cost</h3>
+            <div className="price-card">
+              <div className="price-amount">KES {TRANSLATION_PRICE}</div>
+              <div className="price-details">
+                <p>✅ AI video translation</p>
+                <p>✅ Audio processing</p>
+                <p>✅ Email delivery</p>
+                <p>✅ {Object.keys(languages).length} languages supported</p>
+              </div>
+            </div>
+            <div className="price-note">
+              <small>💰 Fixed price of KES 300 for all video translations</small>
+            </div>
+          </div>
+
+          <button
+            className="translate-btn"
+            onClick={handlePayment}
+            disabled={loading || !selectedFile || !targetLanguage}
+          >
+            {loading ? '⏳ Processing...' : `💰 Pay KES ${TRANSLATION_PRICE} & Translate 🚀`}
+          </button>
+
+          {showRetry && paymentReference && (
+            <div className="retry-section">
+              <div className="retry-info">
+                <p>🔄 You have a pending payment (Ref: {paymentReference})</p>
+                <p style={{ fontSize: '12px', color: '#666' }}>
+                  Click below to retry translation for free
+                </p>
+              </div>
+              <button
+                className="retry-btn"
+                onClick={handleFreeRetry}
+                disabled={isRetryLoading || !videoUrl || !targetLanguage}
+              >
+                {isRetryLoading ? '⏳ Processing...' : '🔄 Retry Translation (Free)'}
+              </button>
+            </div>
+          )}
+
+          {error && <div className="error-message">❌ {error}</div>}
+          {success && <div className="success-message">✅ {success}</div>}
+        </div>
+
+        <div className="right-panel">
+          <div className="info-section">
+            <h4>📖 How It Works</h4>
+            <ul>
+              <li>📤 Upload a video with spoken audio</li>
+              <li>🌍 Choose source and target languages</li>
+              <li>💰 Complete payment via Startbutton (Cards, M-PESA, Bank Transfer)</li>
+              <li>🤖 AI will translate the audio</li>
+              <li>📥 Download the translated video</li>
+              <li>📧 Video link sent to your email</li>
+            </ul>
+            <div className="languages-info">
+              🌍 {Object.keys(languages).length} languages available for translation
+            </div>
+            <div className="support-info">
+              <small>Need help? Contact us at support@katareel.com</small>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
-@media (max-width: 768px) {
-  .translate-page {
-    padding: 15px;
-  }
-
-  .header {
-    padding: 25px 20px;
-  }
-
-  .header h1 {
-    font-size: 1.8em;
-  }
-
-  .header p {
-    font-size: 1em;
-  }
-
-  .left-panel, .right-panel {
-    padding: 25px 20px;
-  }
-
-  .price-amount {
-    font-size: 32px;
-  }
-
-  .upload-area {
-    padding: 30px 15px;
-  }
-
-  .file-info {
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .translate-btn {
-    font-size: 16px;
-    padding: 16px;
-  }
-
-  .language-group select {
-    font-size: 14px;
-    padding: 12px 14px;
-  }
-}
-
-@media (max-width: 480px) {
-  .translate-page {
-    padding: 10px;
-  }
-
-  .header {
-    padding: 20px 15px;
-  }
-
-  .header h1 {
-    font-size: 1.5em;
-  }
-
-  .left-panel, .right-panel {
-    padding: 20px 15px;
-  }
-
-  .price-amount {
-    font-size: 28px;
-  }
-
-  .upload-area {
-    padding: 20px 10px;
-    min-height: 120px;
-  }
-
-  .upload-icon {
-    font-size: 38px;
-  }
-
-  .translate-btn {
-    font-size: 15px;
-    padding: 14px;
-  }
-
-  .price-details p {
-    font-size: 13px;
-  }
-
-  .retry-btn {
-    font-size: 14px;
-    padding: 12px;
-  }
-}
+export default TranslateVideo;
