@@ -37,6 +37,13 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
   throw new Error('Max retries exceeded');
 };
 
+// Cloudinary supports forcing a download instead of inline playback
+// by inserting fl_attachment into the URL path.
+const getDownloadUrl = (url) => {
+  if (!url) return url;
+  return url.includes('/upload/') ? url.replace('/upload/', '/upload/fl_attachment/') : url;
+};
+
 // Hardcoded languages as fallback
 const FALLBACK_LANGUAGES = {
   'en': 'English', 'es': 'Spanish', 'fr': 'French', 'de': 'German',
@@ -502,6 +509,39 @@ function TranslateVideo() {
               >
                 {isRetryLoading ? '⏳ Processing...' : '🔄 Retry Translation (Free)'}
               </button>
+            </div>
+          )}
+
+          {translatedVideo && (
+            <div className="translated-video-section">
+              <h3>🎉 Your Translated Video is Ready</h3>
+              <div className="video-preview">
+                <video
+                  controls
+                  src={translatedVideo}
+                  style={{ width: '100%', borderRadius: '8px', maxHeight: '400px' }}
+                />
+              </div>
+              <a
+                href={getDownloadUrl(translatedVideo)}
+                download
+                className="download-btn"
+                style={{
+                  display: 'inline-block',
+                  background: 'linear-gradient(135deg, #8B5CF6, #EC4899)',
+                  color: 'white',
+                  padding: '12px 30px',
+                  textDecoration: 'none',
+                  borderRadius: '30px',
+                  marginTop: '12px',
+                  fontWeight: 'bold'
+                }}
+              >
+                ⬇️ Download Video
+              </a>
+              <p style={{ fontSize: '12px', color: '#666', marginTop: '8px' }}>
+                Also sent to {email}
+              </p>
             </div>
           )}
 

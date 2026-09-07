@@ -1709,6 +1709,31 @@ app.post('/api/translate-video', async (req, res) => {
     await addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
     await addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
 
+    // Send the translated-video email to the user (this was previously missing,
+    // which is why users never received an email even on success)
+    let emailResult = { success: false };
+    try {
+      const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French';
+      const translationEmail = generateTranslationEmail(
+        email,
+        translatedVideoUrl,
+        `Video translated to ${languageName}`,
+        languageName,
+        TRANSLATION_PRICE
+      );
+      emailResult = await sendEmail(email, translationEmail.subject, translationEmail.html);
+      console.log(`📧 Email sent to ${email}: ${emailResult.success}`);
+    } catch (emailErr) {
+      console.error('❌ Email error:', emailErr);
+      emailResult = { success: false, error: emailErr.message };
+    }
+
+    try {
+      await sendReceiptEmail(email, TRANSLATION_PRICE, paymentReference, 'translation');
+    } catch (receiptErr) {
+      console.error('❌ Receipt error:', receiptErr);
+    }
+
     res.json({
       success: true,
       videoUrl: translatedVideoUrl,
@@ -1717,7 +1742,9 @@ app.post('/api/translate-video', async (req, res) => {
       duration: duration || 5,
       paymentReference,
       translationId,
-      price: TRANSLATION_PRICE
+      price: TRANSLATION_PRICE,
+      emailSent: emailResult.success,
+      emailError: emailResult.error || null
     });
 
   } catch (error) {
