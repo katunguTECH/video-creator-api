@@ -1,7 +1,13 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
+import { usePayment } from '../hooks/usePayment';
+import PaymentOptions from '../components/PaymentOptions';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
+
+const BRAND_VIDEO_PRICE = 250;
 
 function BrandVideo() {
   const navigate = useNavigate();
@@ -11,56 +17,69 @@ function BrandVideo() {
   const [logoUrl, setLogoUrl] = useState('');
   const [isUploadingVideo, setIsUploadingVideo] = useState(false);
   const [isUploadingLogo, setIsUploadingLogo] = useState(false);
-
   const [companyName, setCompanyName] = useState('');
   const [tagline, setTagline] = useState('');
   const [contactEmail, setContactEmail] = useState('');
   const [contactPhone, setContactPhone] = useState('');
   const [voiceoverScript, setVoiceoverScript] = useState('');
-
   const [email, setEmail] = useState('');
   const [couponCode, setCouponCode] = useState('');
   const [paymentReference, setPaymentReference] = useState('');
-  const [isInitializingPayment, setIsInitializingPayment] = useState(false);
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultVideoUrl, setResultVideoUrl] = useState('');
   const [error, setError] = useState('');
-  const [paymentStatus, setPaymentStatus] = useState(null);
+  const [success, setSuccess] = useState('');
+  const [exchangeRate, setExchangeRate] = useState(129.55);
 
-  const BRAND_VIDEO_PRICE = 250;
+  useEffect(() => {
+    getUsdToKesRate().then(setExchangeRate).catch(() => {});
+  }, []);
 
-  React.useEffect(() => {
+  // Handle Pesapal / Paystack redirect
+  useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const paymentSuccess = params.get('payment');
-    const ref = params.get('reference');
-    if (paymentSuccess === 'success' && ref) {
-      setPaymentReference(ref);
-      setPaymentStatus('success');
-      navigate('/brand-video', { replace: true });
+    const orderTrackingId = params.get('OrderTrackingId');
+    const merchantRef = params.get('OrderMerchantReference');
+    const provider = localStorage.getItem('pending_payment_provider');
+
+    if (orderTrackingId && provider === 'pesapal') {
+      (async () => {
+        setIsProcessing(true);
+        try {
+          const res = await fetch(`${API_BASE_URL}/api/pesapal/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderTrackingId, merchantReference: merchantRef }),
+          });
+          const data = await res.json();
+          if (data.success && data.status === 'completed') {
+            setPaymentReference(merchantRef || data.reference);
+            await processBrandVideo(merchantRef || data.reference);
+          } else {
+            setError('Card payment was not completed.');
+            setIsProcessing(false);
+          }
+        } catch (e) {
+          setError('Payment verification error: ' + e.message);
+          setIsProcessing(false);
+        }
+        navigate('/brand-video', { replace: true });
+      })();
     }
-  }, [location, navigate]);
+  }, [location, navigate]); // eslint-disable-line
 
   const handleVideoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 50 * 1024 * 1024) {
-      setError('Video too large. Maximum size is 50MB.');
-      return;
-    }
-
+    if (file.size > 50 * 1024 * 1024) return setError('Video exceeds 50MB');
     setIsUploadingVideo(true);
-    setError('');
-    const formData = new FormData();
-    formData.append('video', file);
-
+    const fd = new FormData();
+    fd.append('video', file);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/upload-video`, { method: 'POST', body: formData });
-      const data = await response.json();
-      if (data.success && data.videoUrl) {
-        setVideoUrl(data.videoUrl);
-      } else {
-        throw new Error(data.error || 'Video upload failed');
-      }
+      const res = await fetch(`${API_BASE_URL}/api/upload-video`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.success) setVideoUrl(data.videoUrl);
+      else throw new Error(data.error);
     } catch (err) {
       setError('Video upload error: ' + err.message);
     } finally {
@@ -71,24 +90,15 @@ function BrandVideo() {
   const handleLogoUpload = async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    if (file.size > 10 * 1024 * 1024) {
-      setError('Logo too large. Maximum size is 10MB.');
-      return;
-    }
-
+    if (file.size > 10 * 1024 * 1024) return setError('Logo exceeds 10MB');
     setIsUploadingLogo(true);
-    setError('');
-    const formData = new FormData();
-    formData.append('image', file);
-
+    const fd = new FormData();
+    fd.append('image', file);
     try {
-      const response = await fetch(`${API_BASE_URL}/api/upload-image`, { method: 'POST', body: formData });
-      const data = await response.json();
-      if (data.success && data.imageUrl) {
-        setLogoUrl(data.imageUrl);
-      } else {
-        throw new Error(data.error || 'Logo upload failed');
-      }
+      const res = await fetch(`${API_BASE_URL}/api/upload-image`, { method: 'POST', body: fd });
+      const data = await res.json();
+      if (data.success) setLogoUrl(data.imageUrl);
+      else throw new Error(data.error);
     } catch (err) {
       setError('Logo upload error: ' + err.message);
     } finally {
@@ -96,84 +106,11 @@ function BrandVideo() {
     }
   };
 
-  const handleUseCoupon = async () => {
-    if (!email) return setError('Please enter your email address');
-    if (!videoUrl) return setError('Please upload a video first');
-    if (!logoUrl) return setError('Please upload your logo first');
-    if (!companyName) return setError('Please enter your company name');
-    if (!contactPhone) return setError('Please enter a contact phone number');
-    if (!couponCode.trim()) return setError('Please enter a code');
-
-    setError('');
-    setPaymentReference(couponCode.trim());
-    setPaymentStatus('success');
-    await handleProcessVideo(couponCode.trim(), true);
-  };
-
-  const handleInitializePayment = async () => {
-    if (!email) return setError('Please enter your email address');
-    if (!videoUrl) return setError('Please upload a video first');
-    if (!logoUrl) return setError('Please upload your logo first');
-    if (!companyName) return setError('Please enter your company name');
-    if (!contactPhone) return setError('Please enter a contact phone number');
-
-    setIsInitializingPayment(true);
-    setError('');
-
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/initialize-brand-video-payment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email })
-      });
-      const data = await response.json();
-
-      if (data.success) {
-        setPaymentReference(data.reference);
-        setPaymentStatus('pending');
-        if (data.authorization_url) {
-          window.location.href = data.authorization_url;
-        } else {
-          setPaymentStatus('success');
-          await handleProcessVideo(data.reference);
-        }
-      } else {
-        setError(data.error || 'Payment initialization failed');
-      }
-    } catch (err) {
-      setError('Payment error: ' + err.message);
-    } finally {
-      setIsInitializingPayment(false);
-    }
-  };
-
-  const handleProcessVideo = async (reference, skipVerify = false) => {
+  const processBrandVideo = async (reference) => {
     setIsProcessing(true);
     setError('');
-
     try {
-      if (!skipVerify) {
-        const verifyResponse = await fetch(`${API_BASE_URL}/api/verify-payment`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            reference,
-            email,
-            amount: BRAND_VIDEO_PRICE,
-            serviceType: 'brand-video',
-            paymentMethod: 'card',
-            duration: 5
-          })
-        });
-        const verifyData = await verifyResponse.json();
-        if (!verifyData.success) {
-          setError('Payment verification failed. Please try again.');
-          setIsProcessing(false);
-          return;
-        }
-      }
-
-      const response = await fetch(`${API_BASE_URL}/api/brand-video`, {
+      const res = await fetch(`${API_BASE_URL}/api/brand-video`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -185,28 +122,40 @@ function BrandVideo() {
           contactPhone,
           voiceoverScript,
           paymentReference: reference,
-          email
-        })
+          email,
+        }),
       });
-
-      if (!response.ok) {
-        const text = await response.text();
-        throw new Error(`Server error: ${response.status} ${text}`);
-      }
-
-      const data = await response.json();
+      if (!res.ok) throw new Error(`Server error: ${res.status}`);
+      const data = await res.json();
       if (data.success) {
         setResultVideoUrl(data.resultVideoUrl);
-        setPaymentStatus('success');
-      } else {
-        setError(data.error || 'Processing failed');
-      }
+        setSuccess('✅ Brand video ready!');
+      } else throw new Error(data.error || 'Processing failed');
     } catch (err) {
       setError('Processing error: ' + err.message);
     } finally {
       setIsProcessing(false);
     }
   };
+
+  const handleUseCoupon = async () => {
+    if (!email || !videoUrl || !logoUrl || !companyName || !contactPhone)
+      return setError('Please fill in all required fields first');
+    if (!couponCode.trim()) return setError('Please enter a code');
+    setPaymentReference(couponCode.trim());
+    await processBrandVideo(couponCode.trim());
+  };
+
+  const payment = usePayment({
+    email,
+    amount: BRAND_VIDEO_PRICE,
+    serviceType: 'brand-video',
+    metadata: { companyName, tagline },
+    onMpesaSuccess: (ref) => processBrandVideo(ref),
+  });
+
+  const canPay =
+    email && videoUrl && logoUrl && companyName && contactPhone;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-900 via-black to-emerald-900 text-white p-6">
@@ -219,60 +168,83 @@ function BrandVideo() {
           <div className="w-20"></div>
         </div>
 
-        {paymentStatus === 'success' && !resultVideoUrl && (
-          <div className="bg-green-500/20 border border-green-500 rounded-lg p-4 mb-6 text-green-300">
-            ✅ Payment successful! Your video is being processed.
-          </div>
-        )}
-        {paymentStatus === 'pending' && (
-          <div className="bg-yellow-500/20 border border-yellow-500 rounded-lg p-4 mb-6 text-yellow-300">
-            ⏳ Payment in progress. Complete it on the Paystack page.
-          </div>
-        )}
-
         <div className="space-y-6">
           <div className="bg-white/10 rounded-xl p-6">
             <h2 className="text-lg font-semibold mb-4">📹 Your Video</h2>
-            <input type="file" accept="video/*" onChange={handleVideoUpload} disabled={isUploadingVideo} className="w-full text-sm" />
-            {isUploadingVideo && <div className="text-gray-400 mt-2">⏳ Uploading video...</div>}
+            <input type="file" accept="video/*" onChange={handleVideoUpload} disabled={isUploadingVideo} />
+            {isUploadingVideo && <div className="text-gray-400 mt-2">⏳ Uploading...</div>}
             {videoUrl && <div className="text-green-400 mt-2">✅ Video uploaded</div>}
           </div>
 
           <div className="bg-white/10 rounded-xl p-6">
             <h2 className="text-lg font-semibold mb-4">🖼️ Your Logo</h2>
-            <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={isUploadingLogo} className="w-full text-sm" />
-            {isUploadingLogo && <div className="text-gray-400 mt-2">⏳ Uploading logo...</div>}
-            {logoUrl && <img src={logoUrl} alt="Logo preview" className="mt-3 max-h-24 rounded" />}
+            <input type="file" accept="image/*" onChange={handleLogoUpload} disabled={isUploadingLogo} />
+            {isUploadingLogo && <div className="text-gray-400 mt-2">⏳ Uploading...</div>}
+            {logoUrl && <img src={logoUrl} alt="logo" className="mt-3 max-h-24 rounded" />}
           </div>
 
           <div className="bg-white/10 rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-semibold mb-2">🏢 Company Details</h2>
-            <input type="text" value={companyName} onChange={e => setCompanyName(e.target.value)}
-              placeholder="Company name" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
-            <input type="text" value={tagline} onChange={e => setTagline(e.target.value)}
-              placeholder="Tagline (optional)" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
-            <input type="text" value={contactPhone} onChange={e => setContactPhone(e.target.value)}
-              placeholder="Contact phone (e.g. +254700000000)" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
-            <input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)}
-              placeholder="Contact email (shown in video)" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
-            <textarea value={voiceoverScript} onChange={e => setVoiceoverScript(e.target.value)}
+            <input
+              type="text"
+              value={companyName}
+              onChange={(e) => setCompanyName(e.target.value)}
+              placeholder="Company name"
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+            />
+            <input
+              type="text"
+              value={tagline}
+              onChange={(e) => setTagline(e.target.value)}
+              placeholder="Tagline (optional)"
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+            />
+            <input
+              type="text"
+              value={contactPhone}
+              onChange={(e) => setContactPhone(e.target.value)}
+              placeholder="Contact phone"
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+            />
+            <input
+              type="email"
+              value={contactEmail}
+              onChange={(e) => setContactEmail(e.target.value)}
+              placeholder="Contact email (shown in video)"
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+            />
+            <textarea
+              value={voiceoverScript}
+              onChange={(e) => setVoiceoverScript(e.target.value)}
               placeholder="Custom voiceover script (optional — leave blank to auto-generate)"
-              rows={3} className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+              rows={3}
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+            />
           </div>
 
           <div className="bg-white/10 rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-semibold mb-2">💳 Payment & Delivery</h2>
-            <input type="email" value={email} onChange={e => setEmail(e.target.value)}
-              placeholder="Your email (for payment & delivery)" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+            <input
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="Your email"
+              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+            />
 
+            {/* Coupon */}
             <div className="flex gap-2">
-              <input type="text" value={couponCode} onChange={e => setCouponCode(e.target.value)}
+              <input
+                type="text"
+                value={couponCode}
+                onChange={(e) => setCouponCode(e.target.value)}
                 placeholder="Have a free code? Enter it here"
-                className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+                className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2"
+              />
               <button
                 onClick={handleUseCoupon}
                 disabled={isProcessing}
-                className="px-5 py-2 rounded-lg font-semibold bg-white/20 hover:bg-white/30 disabled:bg-gray-600 whitespace-nowrap"
+                className="px-5 py-2 rounded-lg font-semibold bg-white/20 hover:bg-white/30"
               >
                 Use Code
               </button>
@@ -284,34 +256,52 @@ function BrandVideo() {
               <div className="flex-1 h-px bg-white/20"></div>
             </div>
 
-            <button
-              onClick={handleInitializePayment}
-              disabled={isInitializingPayment}
-              className="w-full py-3 rounded-lg font-bold text-lg bg-gradient-to-r from-green-500 to-emerald-600 hover:from-green-600 hover:to-emerald-700 disabled:bg-gray-600"
-            >
-              {isInitializingPayment ? '⏳ Initializing...' : `💰 Pay KES ${BRAND_VIDEO_PRICE} & Create Video`}
-            </button>
+            <div className="text-center text-sm text-gray-300">
+              Total: <span className="font-bold">{formatKes(BRAND_VIDEO_PRICE)}</span>{' '}
+              <span className="text-gray-400">
+                (≈ {formatUsd(BRAND_VIDEO_PRICE, exchangeRate)} USD)
+              </span>
+            </div>
+
+            <PaymentOptions
+              method={payment.method}
+              setMethod={payment.setMethod}
+              phone={payment.phone}
+              setPhone={payment.setPhone}
+              amountKes={BRAND_VIDEO_PRICE}
+              exchangeRate={exchangeRate}
+              loading={isProcessing || payment.loading}
+              status={payment.status}
+              message={payment.message}
+              error={payment.error || error}
+              onPay={payment.start}
+              disabled={!canPay}
+            />
           </div>
 
           {isProcessing && (
             <div className="bg-white/10 rounded-xl p-6 text-center text-gray-300">
-              ⏳ Creating your branded video... this may take a minute or two.
+              ⏳ Creating your branded video...
             </div>
           )}
 
           {resultVideoUrl && (
             <div className="bg-white/10 rounded-xl p-6">
               <h2 className="text-xl font-bold mb-4">✅ Video Ready!</h2>
-              <video src={resultVideoUrl} controls autoPlay className="w-full rounded-lg max-h-96 bg-black" />
-              <a href={resultVideoUrl} download className="block text-center bg-green-500 hover:bg-green-600 mt-4 py-2 rounded-lg">
+              <video src={resultVideoUrl} controls className="w-full rounded-lg max-h-96 bg-black" />
+              <a
+                href={resultVideoUrl.replace('/upload/', '/upload/fl_attachment/')}
+                download
+                className="block text-center bg-green-500 mt-4 py-2 rounded-lg"
+              >
                 ⬇️ Download
               </a>
             </div>
           )}
 
-          {error && (
-            <div className="bg-red-500/20 border border-red-500 rounded-lg p-3 text-red-300 text-sm">
-              ❌ {error}
+          {success && (
+            <div className="bg-green-500/20 border border-green-500 rounded-lg p-3 text-green-300 text-sm">
+              {success}
             </div>
           )}
         </div>

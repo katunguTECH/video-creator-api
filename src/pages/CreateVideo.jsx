@@ -1,33 +1,28 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import './CreateVideo.css';
+import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
+import { usePayment } from '../hooks/usePayment';
+import PaymentOptions from '../components/PaymentOptions';
 
-// API Base URL from environment
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
+const API_BASE_URL =
+  process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
 
-// Helper function with retry logic for cold starts
 const fetchWithRetry = async (url, options, maxRetries = 2) => {
   let lastError;
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
-      console.log(`🔄 Fetch attempt ${attempt + 1}/${maxRetries + 1} for ${url}`);
       const response = await fetch(url, options);
-      if (response.ok) return response;
-      if (response.status === 404 || response.status === 400) {
+      if (response.ok || response.status === 400 || response.status === 404) {
         return response;
       }
       if (attempt < maxRetries) {
-        const delay = (attempt + 1) * 1000;
-        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 1000));
       }
     } catch (error) {
       lastError = error;
-      console.log(`❌ Attempt ${attempt + 1} failed:`, error.message);
       if (attempt < maxRetries) {
-        const delay = (attempt + 1) * 1000;
-        console.log(`⏳ Retry ${attempt + 1}/${maxRetries} after ${delay}ms...`);
-        await new Promise(resolve => setTimeout(resolve, delay));
+        await new Promise((r) => setTimeout(r, (attempt + 1) * 1000));
       }
     }
   }
@@ -45,244 +40,125 @@ function CreateVideo() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [videoUrl, setVideoUrl] = useState(null);
-  const [paymentReference, setPaymentReference] = useState('');
+  const [exchangeRate, setExchangeRate] = useState(129.55);
 
-  // Calculate price whenever prompt or duration changes
+  // Load exchange rate once
   useEffect(() => {
-    calculatePrice();
+    getUsdToKesRate().then(setExchangeRate).catch(() => {});
+  }, []);
+
+  // Price recalculation
+  useEffect(() => {
+    if (!prompt.trim()) return setPrice(null);
+    const amount = duration === 5 ? 200 : duration === 10 ? 400 : 600;
+    setPrice({ finalPrice: amount, formatted: formatKes(amount), currency: 'KES' });
   }, [prompt, duration]);
 
-  const calculatePrice = async () => {
-    if (!prompt.trim()) {
-      setPrice(null);
-      return;
-    }
-
-    try {
-      console.log('💰 Calculating price for text-to-video...');
-      console.log(`📝 Prompt length: ${prompt.length}, Duration: ${duration}s`);
-
-      const response = await fetchWithRetry(`${API_BASE_URL}/api/calculate-price`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          serviceType: 'text_to_video',
-          options: {
-            duration: duration
-          }
-        })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      console.log('📦 Price response:', data);
-
-      if (data.success) {
-        setPrice(data.price);
-      } else {
-        throw new Error(data.error || 'Price calculation failed');
-      }
-    } catch (error) {
-      console.error('❌ Price calculation error:', error);
-      setPrice({
-        finalPrice: 200,
-        formatted: 'KES 200',
-        currency: 'KES'
-      });
-    }
-  };
-
-  // ============================================
-  // PAYMENT — now uses Paystack via /api/initialize-payment
-  // ============================================
-  const handlePayment = async () => {
-    if (!prompt.trim()) {
-      setError('Please describe what you want to generate');
-      return;
-    }
-
-    if (!email) {
-      setError('Please enter your email address');
-      return;
-    }
-
-    setLoading(true);
-    setError('');
-    setSuccess('');
-
-    try {
-      const priceAmount = price?.finalPrice || 200;
-      console.log('💰 Processing payment with Paystack for:', priceAmount);
-
-      const paymentResponse = await fetchWithRetry(`${API_BASE_URL}/api/initialize-payment`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          email: email,
-          amount: priceAmount,
-          serviceType: 'text-to-video',
-          // tell the backend to send the user back to this exact page after paying
-          callbackUrl: `${window.location.origin}${window.location.pathname}`,
-          metadata: {
-            duration: duration,
-            prompt: prompt,
-            aspectRatio: aspectRatio,
-            custom_fields: [
-              {
-                display_name: "Video Type",
-                variable_name: "video_type",
-                value: "text-to-video"
-              },
-              {
-                display_name: "Duration",
-                variable_name: "duration",
-                value: `${duration}s`
-              },
-              {
-                display_name: "Amount",
-                variable_name: "amount",
-                value: `${priceAmount} KES`
-              }
-            ]
-          }
-        })
-      });
-
-      if (!paymentResponse.ok) {
-        throw new Error(`Server error: ${paymentResponse.status}`);
-      }
-
-      const paymentData = await paymentResponse.json();
-      console.log('📦 Paystack payment response:', paymentData);
-
-      if (!paymentData.success) {
-        throw new Error(paymentData.error || 'Payment initialization failed');
-      }
-
-      setPaymentReference(paymentData.reference);
-
-      // Redirect to Paystack payment page
-      if (paymentData.authorization_url) {
-        // Store reference for after redirect
-        localStorage.setItem('pending_payment_reference', paymentData.reference);
-        localStorage.setItem('pending_payment_email', email);
-        localStorage.setItem('pending_payment_service', 'text-to-video');
-        localStorage.setItem('pending_payment_amount', priceAmount);
-        localStorage.setItem('pending_payment_duration', duration);
-
-        window.location.href = paymentData.authorization_url;
-      } else {
-        // If no redirect URL, try to process directly (test mode)
-        await processVideoGeneration(paymentData.reference);
-      }
-    } catch (error) {
-      console.error('❌ Payment error:', error);
-      setError('Payment failed: ' + error.message);
-      setLoading(false);
-    }
-  };
-
-  const processVideoGeneration = async (reference) => {
-    try {
-      setSuccess('🔄 Processing your video... This may take a few moments.');
-
-      const generateResponse = await fetchWithRetry(`${API_BASE_URL}/api/generate-video`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          prompt: prompt,
-          duration: duration,
-          aspectRatio: aspectRatio,
-          paymentReference: reference,
-          email: email
-        })
-      });
-
-      if (!generateResponse.ok) {
-        throw new Error(`Server error: ${generateResponse.status}`);
-      }
-
-      const data = await generateResponse.json();
-      if (data.success) {
-        setVideoUrl(data.videoUrl);
-        setSuccess('✅ Video generated successfully! Check your email for the download link.');
-        setLoading(false);
-        // Clear pending data
-        localStorage.removeItem('pending_payment_reference');
-        localStorage.removeItem('pending_payment_email');
-        localStorage.removeItem('pending_payment_service');
-        localStorage.removeItem('pending_payment_amount');
-        localStorage.removeItem('pending_payment_duration');
-      } else {
-        throw new Error(data.error || 'Video generation failed');
-      }
-    } catch (error) {
-      console.error('❌ Video generation error:', error);
-      setError('Video generation failed: ' + error.message);
-      setLoading(false);
-    }
-  };
-
-  // ============================================
-  // Check for pending payment on load (return from Paystack redirect)
-  // Paystack appends both ?reference= and ?trxref= to the callback URL
-  // ============================================
+  // Handle redirects back from Pesapal or Paystack
   useEffect(() => {
-    const urlParams = new URLSearchParams(window.location.search);
-    const reference = urlParams.get('reference') || urlParams.get('trxref') || urlParams.get('payment_reference');
+    const params = new URLSearchParams(window.location.search);
 
-    if (reference) {
-      console.log('🔍 Found payment reference in URL:', reference);
-      const savedEmail = localStorage.getItem('pending_payment_email') || email;
-      const savedService = localStorage.getItem('pending_payment_service') || 'text-to-video';
-      const savedAmount = localStorage.getItem('pending_payment_amount') || '200';
-      const savedDuration = localStorage.getItem('pending_payment_duration') || '5';
+    // Pesapal callback
+    const orderTrackingId = params.get('OrderTrackingId');
+    const merchantRef = params.get('OrderMerchantReference');
+    const provider = localStorage.getItem('pending_payment_provider');
 
-      // Verify the payment
-      const verifyPayment = async () => {
+    if (orderTrackingId && provider === 'pesapal') {
+      (async () => {
         setLoading(true);
         try {
-          const verifyResponse = await fetchWithRetry(`${API_BASE_URL}/api/verify-payment`, {
+          const res = await fetch(`${API_BASE_URL}/api/pesapal/verify`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ orderTrackingId, merchantReference: merchantRef }),
+          });
+          const data = await res.json();
+          if (data.success && data.status === 'completed') {
+            await processVideoGeneration(merchantRef || data.reference);
+          } else {
+            setError('Card payment was not completed.');
+            setLoading(false);
+          }
+        } catch (e) {
+          setError('Payment verification error: ' + e.message);
+          setLoading(false);
+        }
+        window.history.replaceState({}, document.title, window.location.pathname);
+      })();
+      return;
+    }
+
+    // Paystack (card or mpesa) callback
+    const reference = params.get('reference') || params.get('trxref');
+    if (reference && provider !== 'pesapal') {
+      (async () => {
+        setLoading(true);
+        try {
+          const v = await fetch(`${API_BASE_URL}/api/verify-payment`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              reference: reference,
-              email: savedEmail,
-              amount: parseFloat(savedAmount),
-              serviceType: savedService,
+              reference,
+              email: localStorage.getItem('pending_payment_email') || email,
+              amount: Number(localStorage.getItem('pending_payment_amount') || 200),
+              serviceType: 'text-to-video',
               paymentMethod: 'card',
-              duration: parseInt(savedDuration)
-            })
+              duration,
+            }),
           });
-
-          const verifyData = await verifyResponse.json();
-          if (verifyData.success) {
-            // Payment verified, generate video
-            await processVideoGeneration(reference);
-          } else {
-            setError('Payment verification failed. Please try again.');
+          const vd = await v.json();
+          if (vd.success) await processVideoGeneration(reference);
+          else {
+            setError('Payment verification failed.');
             setLoading(false);
           }
-        } catch (error) {
-          console.error('❌ Verification error:', error);
-          setError('Payment verification failed: ' + error.message);
+        } catch (e) {
+          setError('Payment verification error: ' + e.message);
           setLoading(false);
         }
-      };
-
-      verifyPayment();
-      // Clean URL
-      window.history.replaceState({}, document.title, window.location.pathname);
+        window.history.replaceState({}, document.title, window.location.pathname);
+      })();
     }
-  }, []);
+  }, []); // eslint-disable-line
 
-  const getPriceDisplay = () => {
-    if (!price) return 'Calculating price...';
-    return `KES ${Math.round(price.finalPrice)}`;
+  const processVideoGeneration = async (reference) => {
+    try {
+      setSuccess('🔄 Processing your video...');
+      const gen = await fetchWithRetry(`${API_BASE_URL}/api/generate-video`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          duration,
+          aspectRatio,
+          paymentReference: reference,
+          email,
+        }),
+      });
+      const data = await gen.json();
+      if (data.success) {
+        setVideoUrl(data.videoUrl);
+        setSuccess('✅ Video generated! Check your email.');
+      } else {
+        throw new Error(data.error || 'Generation failed');
+      }
+    } catch (err) {
+      setError('Video generation failed: ' + err.message);
+    } finally {
+      setLoading(false);
+    }
   };
+
+  // Payment hook
+  const payment = usePayment({
+    email,
+    amount: price?.finalPrice || 200,
+    serviceType: 'text-to-video',
+    metadata: { duration, aspectRatio },
+    onMpesaSuccess: (ref) => processVideoGeneration(ref),
+  });
+
+  const canPay = prompt.trim() && email && !loading;
 
   return (
     <div className="create-video-page">
@@ -296,7 +172,6 @@ function CreateVideo() {
 
       <div className="main-content">
         <div className="left-panel">
-          {/* Email Input */}
           <div className="email-section">
             <label>📧 Your Email</label>
             <input
@@ -309,7 +184,6 @@ function CreateVideo() {
             <small>Your generated video will be sent to this email</small>
           </div>
 
-          {/* Prompt Input */}
           <div className="prompt-section">
             <label>📝 Describe what you want to generate</label>
             <textarea
@@ -319,26 +193,29 @@ function CreateVideo() {
               rows={6}
               disabled={loading}
             />
-            <div className="prompt-hint">
-              <small>Be as descriptive as possible for better results</small>
-            </div>
           </div>
 
-          {/* AI Settings */}
           <div className="settings-section">
             <h3>⚙️ Video Settings</h3>
             <div className="setting-group">
               <label>Video Duration</label>
-              <select value={duration} onChange={(e) => setDuration(parseInt(e.target.value))} disabled={loading}>
+              <select
+                value={duration}
+                onChange={(e) => setDuration(parseInt(e.target.value))}
+                disabled={loading}
+              >
                 <option value={5}>5 seconds</option>
                 <option value={10}>10 seconds</option>
                 <option value={15}>15 seconds</option>
               </select>
             </div>
-
             <div className="setting-group">
               <label>Aspect Ratio</label>
-              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={loading}>
+              <select
+                value={aspectRatio}
+                onChange={(e) => setAspectRatio(e.target.value)}
+                disabled={loading}
+              >
                 <option value="16:9">16:9 (Widescreen)</option>
                 <option value="1:1">1:1 (Square)</option>
                 <option value="9:16">9:16 (Vertical)</option>
@@ -346,44 +223,47 @@ function CreateVideo() {
             </div>
           </div>
 
-          {/* Price Display */}
           <div className="price-section">
             <h3>💰 Total Cost</h3>
             <div className="price-card">
-              <div className="price-amount">{getPriceDisplay()}</div>
+              <div className="price-amount">
+                {price ? formatKes(price.finalPrice) : '—'}
+              </div>
               <div className="price-details">
                 <p>✅ AI video generation</p>
                 <p>✅ HD quality</p>
                 <p>✅ {duration}-second video</p>
+                <p>
+                  💵 ≈ {price ? formatUsd(price.finalPrice, exchangeRate) : '—'} USD
+                </p>
               </div>
-            </div>
-            <div className="price-note">
-              <small>Complete your payment below via Paystack (Cards, M-PESA, Bank Transfer)</small>
             </div>
           </div>
 
-          {/* Payment Button — now uses Paystack */}
-          <button 
-            onClick={handlePayment}
-            className="generate-btn"
-            disabled={loading || !prompt.trim()}
-          >
-            {loading ? '⏳ Processing...' : `🤖 Generate Video (${getPriceDisplay()})`}
-          </button>
+          <PaymentOptions
+            method={payment.method}
+            setMethod={payment.setMethod}
+            phone={payment.phone}
+            setPhone={payment.setPhone}
+            amountKes={price?.finalPrice || 200}
+            exchangeRate={exchangeRate}
+            loading={loading || payment.loading}
+            status={payment.status}
+            message={payment.message}
+            error={payment.error || error}
+            onPay={payment.start}
+            disabled={!canPay}
+          />
 
-          {/* Messages */}
-          {error && <div className="error-message">❌ {error}</div>}
           {success && <div className="success-message">✅ {success}</div>}
         </div>
 
         <div className="right-panel">
-          {/* Video Preview */}
           <div className="video-preview">
             <h3>📹 Video Preview</h3>
             {videoUrl ? (
               <video controls className="video-player">
                 <source src={videoUrl} type="video/mp4" />
-                Your browser does not support the video tag.
               </video>
             ) : (
               <div className="placeholder">
@@ -392,14 +272,13 @@ function CreateVideo() {
             )}
           </div>
 
-          {/* How It Works */}
           <div className="how-it-works">
             <h4>ℹ️ How It Works</h4>
             <ul>
               <li>📝 Describe what you want the AI to generate</li>
-              <li>💰 Complete payment via Paystack (Cards, M-PESA, Bank Transfer)</li>
+              <li>💳 Pay by card via Pesapal, or by M-Pesa via Paystack</li>
               <li>📥 Download your AI-generated video</li>
-              <li>🔒 All AI generations are secure and private</li>
+              <li>🔒 All payments are secure and PCI-DSS compliant</li>
             </ul>
             <div className="support-info">
               <small>Need help? Contact us at support@katareel.com</small>

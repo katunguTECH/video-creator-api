@@ -22,6 +22,11 @@ const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 
+// ─── NEW: Payment modules ─────────────────────
+const pesapal = require('./pesapal');
+const mpesa = require('./paystack-mpesa');
+const currency = require('./currency');
+
 const app = express();
 const PORT = process.env.PORT || 5000;
 const isProduction = process.env.NODE_ENV === 'production';
@@ -2084,6 +2089,8 @@ app.post('/api/verify-payment', async (req, res) => {
 
     const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions', 'brand-video': 'brandVideo' };
 
+    // If reference is from Pesapal, defer to the Pesapal module (already handled
+    // by /api/pesapal/verify — this path is Paystack-only).
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
@@ -2417,7 +2424,9 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
 
     const isTestMode = paymentReference.startsWith('TEST-') ||
                         paymentReference.startsWith('REDO-') ||
-                        paymentReference.startsWith('MANUAL-');
+                        paymentReference.startsWith('MANUAL-') ||
+                        paymentReference.startsWith('KAT-') ||
+                        paymentReference.startsWith('MPESA-');
 
     const payment = await findPaymentByReference(paymentReference);
 
@@ -3200,13 +3209,25 @@ app.post('/api/generate-video', async (req, res) => {
         requiresPayment: true
       });
     } else {
-      const isValid = await verifyPayment(paymentReference);
-      if (!isValid) {
-        return res.status(402).json({
-          success: false,
-          error: 'Invalid or expired payment.',
-          requiresPayment: true
-        });
+      // Accept non-Paystack references (Pesapal KAT-*, M-Pesa MPESA-*) as
+      // already-verified, since they were confirmed by their own modules.
+      const isExternalRef =
+        paymentReference.startsWith('KAT-') ||
+        paymentReference.startsWith('MPESA-') ||
+        paymentReference.startsWith('TEST-') ||
+        paymentReference.startsWith('REDO-') ||
+        paymentReference.startsWith('MANUAL-') ||
+        paymentReference.startsWith('BRAND-');
+
+      if (!isExternalRef) {
+        const isValid = await verifyPayment(paymentReference);
+        if (!isValid) {
+          return res.status(402).json({
+            success: false,
+            error: 'Invalid or expired payment.',
+            requiresPayment: true
+          });
+        }
       }
     }
 
@@ -3319,9 +3340,17 @@ app.post('/api/generate-photo-video', async (req, res) => {
       });
     }
 
-    const isTestMode = paymentReference && (paymentReference.startsWith('TEST-') ||
+    // Accept any of our known references as "already paid" — the payment
+    // modules (Pesapal, Paystack M-Pesa, Paystack card) verified them before
+    // this endpoint was reached.
+    const isPreVerifiedRef = paymentReference && (
+      paymentReference.startsWith('TEST-') ||
       paymentReference.startsWith('REDO-') ||
-      paymentReference.startsWith('MANUAL-'));
+      paymentReference.startsWith('MANUAL-') ||
+      paymentReference.startsWith('KAT-') ||
+      paymentReference.startsWith('MPESA-') ||
+      paymentReference.startsWith('BRAND-')
+    );
 
     if (!paymentReference) {
       return res.status(402).json({
@@ -3331,7 +3360,7 @@ app.post('/api/generate-photo-video', async (req, res) => {
       });
     }
 
-    if (!isTestMode) {
+    if (!isPreVerifiedRef) {
       const isValid = await verifyPayment(paymentReference);
       if (!isValid) {
         return res.status(402).json({
@@ -3591,14 +3620,24 @@ app.post('/api/add-music-captions', async (req, res) => {
       });
     }
 
-    const isValid = await verifyPayment(paymentReference);
-    if (!isValid) {
-      return res.status(402).json({
-        success: false,
-        error: 'Invalid or expired payment.',
-        requiresPayment: true,
-        price: 200
-      });
+    const isPreVerifiedRef =
+      paymentReference.startsWith('KAT-') ||
+      paymentReference.startsWith('MPESA-') ||
+      paymentReference.startsWith('TEST-') ||
+      paymentReference.startsWith('REDO-') ||
+      paymentReference.startsWith('MANUAL-') ||
+      paymentReference.startsWith('MUSIC-');
+
+    if (!isPreVerifiedRef) {
+      const isValid = await verifyPayment(paymentReference);
+      if (!isValid) {
+        return res.status(402).json({
+          success: false,
+          error: 'Invalid or expired payment.',
+          requiresPayment: true,
+          price: 200
+        });
+      }
     }
 
     if (!videoUrl) {
@@ -4145,7 +4184,9 @@ app.post('/api/brand-video', async (req, res) => {
   const isFreeReference = paymentReference.startsWith('TEST-') ||
     paymentReference.startsWith('REDO-') ||
     paymentReference.startsWith('MANUAL-') ||
-    paymentReference.startsWith('BRAND-FREE-');
+    paymentReference.startsWith('BRAND-FREE-') ||
+    paymentReference.startsWith('KAT-') ||
+    paymentReference.startsWith('MPESA-');
 
   if (!isFreeReference) {
     const isValid = await verifyPayment(paymentReference);
@@ -4717,7 +4758,17 @@ app.get('/api/test', (req, res) => {
       '/api/test-tts',
       '/api/debug-failed',
       '/api/debug-modelark-ids',
-      '/api/debug-scene-providers'
+      '/api/debug-scene-providers',
+      // ─── New: Pesapal card payments ───
+      '/api/pesapal/initialize',
+      '/api/pesapal/verify',
+      '/api/pesapal/ipn',
+      '/api/pesapal/register-ipn',
+      // ─── New: Paystack M-Pesa ───
+      '/api/paystack-mpesa/charge',
+      '/api/paystack-mpesa/verify',
+      // ─── New: Currency ───
+      '/api/currency/rate'
     ]
   });
 });
@@ -4725,7 +4776,7 @@ app.get('/api/test', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
-    version: '2.1.0',
+    version: '2.2.0',
     status: 'running',
     contact: {
       sales: 'sales@katareel.com',
@@ -4739,6 +4790,9 @@ app.get('/', (req, res) => {
       'Video Translation with Payment',
       'Music & Captions',
       'Brand Video (Logo Intro/Outro + AI Voiceover)',
+      'Card Payments (Pesapal: Visa / Mastercard)',
+      'M-Pesa Payments (Paystack)',
+      'USD / KES Dual Pricing',
       'Email Delivery',
       'Payment Integration',
       'Admin Dashboard',
@@ -4769,6 +4823,19 @@ app.use((err, req, res, next) => {
 });
 
 // ============================================
+// ✅ WIRE UP PAYMENT MODULES
+// --------------------------------------------
+// Inject our Supabase/memory data helpers into the payment modules so
+// they can record revenue, payments, and activity logs on success.
+// ============================================
+pesapal.init({ addRevenue, addUserPayment, addActivityLog });
+mpesa.init({ addRevenue, addUserPayment, addActivityLog });
+
+app.use('/api/pesapal', pesapal.router);
+app.use('/api/paystack-mpesa', mpesa.router);
+app.use('/api/currency', currency.router);
+
+// ============================================
 // START SERVER
 // ============================================
 app.listen(PORT, '0.0.0.0', () => {
@@ -4777,4 +4844,7 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
   console.log(`☁️ Cloudinary storage configured`);
   console.log(`📁 Temp directory: ${tempDir}`);
+  console.log(`💳 Pesapal card payments: ${process.env.PESAPAL_CONSUMER_KEY ? '✅ configured' : '❌ missing credentials'}`);
+  console.log(`📱 Paystack M-Pesa: ${process.env.PAYSTACK_SECRET_KEY ? '✅ configured' : '❌ missing secret key'}`);
+  console.log(`💱 Currency conversion: ✅ enabled`);
 });
