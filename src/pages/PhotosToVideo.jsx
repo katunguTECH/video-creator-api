@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import './PhotosToVideo.css';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
-import PaymentOptions from '../components/PaymentOptions';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -51,10 +50,8 @@ function PhotosToVideo() {
   const [exchangeRate, setExchangeRate] = useState(129.55);
   const fileInputRef = useRef(null);
 
-  // Redo / coupon states
   const [showRedoSection, setShowRedoSection] = useState(false);
   const [couponCode, setCouponCode] = useState('');
-  const [couponValid, setCouponValid] = useState(false);
   const [isRedoMode, setIsRedoMode] = useState(false);
   const [redoLoading, setRedoLoading] = useState(false);
   const [savedCoupon, setSavedCoupon] = useState('');
@@ -73,7 +70,6 @@ function PhotosToVideo() {
     setPrice(n ? { finalPrice: p, currency: 'KES' } : null);
   }, [photos.length, duration]);
 
-  // Handle redirects from Pesapal / Paystack
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const orderTrackingId = params.get('OrderTrackingId');
@@ -93,39 +89,7 @@ function PhotosToVideo() {
           if (data.success && data.status === 'completed') {
             await processPhotoVideo(merchantRef || data.reference);
           } else {
-            setError('Card payment was not completed.');
-            setLoading(false);
-          }
-        } catch (e) {
-          setError('Payment verification error: ' + e.message);
-          setLoading(false);
-        }
-        window.history.replaceState({}, document.title, window.location.pathname);
-      })();
-      return;
-    }
-
-    const reference = params.get('reference') || params.get('trxref');
-    if (reference && provider !== 'pesapal') {
-      (async () => {
-        setLoading(true);
-        try {
-          const v = await fetch(`${API_BASE_URL}/api/verify-payment`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reference,
-              email: localStorage.getItem('pending_payment_email') || email,
-              amount: Number(localStorage.getItem('pending_payment_amount') || 300),
-              serviceType: 'photo-to-video',
-              paymentMethod: 'card',
-              duration,
-            }),
-          });
-          const vd = await v.json();
-          if (vd.success) await processPhotoVideo(reference);
-          else {
-            setError('Payment verification failed.');
+            setError('Payment was not completed.');
             setLoading(false);
           }
         } catch (e) {
@@ -161,16 +125,15 @@ function PhotosToVideo() {
   const processPhotoVideo = async (reference) => {
     try {
       setSuccess('🔄 Processing your video...');
-
       const photoUrls = [];
       for (const photo of photos) {
         const formData = new FormData();
         formData.append('file', photo.file);
         formData.append('upload_preset', 'vidai_uploads');
-        const up = await fetch(
-          'https://api.cloudinary.com/v1_1/y7d1nk2i/image/upload',
-          { method: 'POST', body: formData }
-        );
+        const up = await fetch('https://api.cloudinary.com/v1_1/y7d1nk2i/image/upload', {
+          method: 'POST',
+          body: formData,
+        });
         const upd = await up.json();
         if (upd.secure_url) photoUrls.push(upd.secure_url);
       }
@@ -217,7 +180,6 @@ function PhotosToVideo() {
     amount: price?.finalPrice || 300,
     serviceType: 'photo-to-video',
     metadata: { photoCount: photos.length, duration, aspectRatio, prompt },
-    onMpesaSuccess: (ref) => processPhotoVideo(ref),
   });
 
   const checkCoupon = async () => {
@@ -231,11 +193,9 @@ function PhotosToVideo() {
       });
       const data = await res.json();
       if (data.success && data.valid) {
-        setCouponValid(true);
         setIsRedoMode(true);
         setSuccess('✅ Coupon valid! Regenerate for free.');
       } else {
-        setCouponValid(false);
         setError(data.error || 'Invalid coupon');
       }
     } catch (e) {
@@ -274,12 +234,7 @@ function PhotosToVideo() {
         <div className="left-panel">
           <div className="email-section">
             <label>📧 Your Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={loading || redoLoading}
-            />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={loading || redoLoading} />
           </div>
 
           <div className="upload-section">
@@ -287,15 +242,7 @@ function PhotosToVideo() {
               <div className="upload-icon">🖼️</div>
               <p>Click to upload photos</p>
               <small>JPG, PNG, WEBP (Max 10MB each)</small>
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                accept="image/*"
-                multiple
-                style={{ display: 'none' }}
-                disabled={loading || redoLoading}
-              />
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="image/*" multiple style={{ display: 'none' }} disabled={loading || redoLoading} />
             </div>
             {photos.length > 0 && (
               <div className="photo-grid">
@@ -305,43 +252,25 @@ function PhotosToVideo() {
                     <button className="remove-photo" onClick={() => removePhoto(p.id)}>✕</button>
                   </div>
                 ))}
-                <button className="add-more-btn" onClick={() => fileInputRef.current?.click()}>
-                  + Add More
-                </button>
+                <button className="add-more-btn" onClick={() => fileInputRef.current?.click()}>+ Add More</button>
               </div>
             )}
-            <div className="photo-count">
-              {photos.length} Photo{photos.length !== 1 ? 's' : ''} Selected
-            </div>
+            <div className="photo-count">{photos.length} Photo{photos.length !== 1 ? 's' : ''} Selected</div>
           </div>
 
           <div className="settings-section">
             <h3>🤖 AI Video Settings</h3>
             <div className="setting-group">
               <label>Describe what you want to generate</label>
-              <textarea
-                value={prompt}
-                onChange={(e) => setPrompt(e.target.value)}
-                rows={4}
-                disabled={loading || redoLoading}
-              />
+              <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} disabled={loading || redoLoading} />
             </div>
             <div className="setting-group">
               <label>🎙️ Speech / narration text (optional)</label>
-              <textarea
-                value={audioScript}
-                onChange={(e) => setAudioScript(e.target.value)}
-                rows={3}
-                disabled={loading || redoLoading}
-              />
+              <textarea value={audioScript} onChange={(e) => setAudioScript(e.target.value)} rows={3} disabled={loading || redoLoading} />
             </div>
             <div className="setting-group">
               <label>🎙️ Narration Voice</label>
-              <select
-                value={voiceGender}
-                onChange={(e) => setVoiceGender(e.target.value)}
-                disabled={loading || redoLoading}
-              >
+              <select value={voiceGender} onChange={(e) => setVoiceGender(e.target.value)} disabled={loading || redoLoading}>
                 <option value="MALE">Male</option>
                 <option value="FEMALE">Female</option>
                 <option value="NEUTRAL">Neutral</option>
@@ -349,11 +278,7 @@ function PhotosToVideo() {
             </div>
             <div className="setting-group">
               <label>Video Duration</label>
-              <select
-                value={duration}
-                onChange={(e) => setDuration(parseInt(e.target.value))}
-                disabled={loading || redoLoading}
-              >
+              <select value={duration} onChange={(e) => setDuration(parseInt(e.target.value))} disabled={loading || redoLoading}>
                 <option value={5}>5 seconds</option>
                 <option value={10}>10 seconds</option>
                 <option value={15}>15 seconds</option>
@@ -361,11 +286,7 @@ function PhotosToVideo() {
             </div>
             <div className="setting-group">
               <label>Aspect Ratio</label>
-              <select
-                value={aspectRatio}
-                onChange={(e) => setAspectRatio(e.target.value)}
-                disabled={loading || redoLoading}
-              >
+              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={loading || redoLoading}>
                 <option value="16:9">16:9 (Widescreen)</option>
                 <option value="1:1">1:1 (Square)</option>
                 <option value="9:16">9:16 (Vertical)</option>
@@ -390,33 +311,16 @@ function PhotosToVideo() {
 
           {(savedCoupon || isRedoMode) && (
             <div className="redo-section">
-              <button
-                className="redo-toggle-btn"
-                onClick={() => setShowRedoSection(!showRedoSection)}
-              >
+              <button className="redo-toggle-btn" onClick={() => setShowRedoSection(!showRedoSection)}>
                 {showRedoSection ? '🔼 Hide' : '🔄 Need to redo? Click here'}
-                {savedCoupon && !showRedoSection && (
-                  <span className="coupon-badge">💳 Coupon available!</span>
-                )}
+                {savedCoupon && !showRedoSection && <span className="coupon-badge">💳 Coupon available!</span>}
               </button>
               {showRedoSection && (
                 <div className="redo-container">
-                  {savedCoupon && (
-                    <p className="saved-coupon-info">
-                      💡 Saved coupon: <strong>{savedCoupon}</strong>
-                    </p>
-                  )}
+                  {savedCoupon && <p className="saved-coupon-info">💡 Saved coupon: <strong>{savedCoupon}</strong></p>}
                   <div className="coupon-input-group">
-                    <input
-                      type="text"
-                      value={couponCode}
-                      onChange={(e) => setCouponCode(e.target.value)}
-                      placeholder="Enter redo coupon"
-                      disabled={loading || redoLoading}
-                    />
-                    <button onClick={checkCoupon} disabled={!couponCode.trim()} className="check-coupon-btn">
-                      Check Coupon
-                    </button>
+                    <input type="text" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="Enter redo coupon" disabled={loading || redoLoading} />
+                    <button onClick={checkCoupon} disabled={!couponCode.trim()} className="check-coupon-btn">Check Coupon</button>
                   </div>
                 </div>
               )}
@@ -426,35 +330,33 @@ function PhotosToVideo() {
           {isRedoMode && (
             <div className="redo-mode-active">
               <div className="redo-badge">🔄 REDO MODE</div>
-              <button
-                className="generate-btn redo-generate-btn"
-                onClick={handleRedoGeneration}
-                disabled={redoLoading || !photos.length || !prompt.trim()}
-              >
+              <button className="generate-btn redo-generate-btn" onClick={handleRedoGeneration} disabled={redoLoading || !photos.length || !prompt.trim()}>
                 {redoLoading ? '⏳ Processing...' : '🔄 Regenerate for Free'}
               </button>
-              <button className="cancel-redo-btn" onClick={() => setIsRedoMode(false)}>
-                Cancel Redo
-              </button>
+              <button className="cancel-redo-btn" onClick={() => setIsRedoMode(false)}>Cancel Redo</button>
             </div>
           )}
 
           {!isRedoMode && (
-            <PaymentOptions
-              method={payment.method}
-              setMethod={payment.setMethod}
-              phone={payment.phone}
-              setPhone={payment.setPhone}
-              amountKes={price?.finalPrice || 300}
-              exchangeRate={exchangeRate}
-              loading={loading || payment.loading}
-              status={payment.status}
-              message={payment.message}
-              error={payment.error || error}
-              onPay={payment.start}
-              disabled={!canPay}
-              accent="from-purple-500 to-pink-600"
-            />
+            <div className="payment-section" style={{ marginTop: 16 }}>
+              <div style={{ textAlign: 'center', fontSize: 14, color: '#334155', marginBottom: 8 }}>
+                You will be charged{' '}
+                <strong>{price ? formatKes(price.finalPrice) : '—'}</strong>{' '}
+                <span style={{ color: '#64748b' }}>(≈ {price ? formatUsd(price.finalPrice, exchangeRate) : '—'} USD)</span>
+              </div>
+              <button
+                type="button"
+                onClick={payment.start}
+                disabled={loading || payment.loading || !canPay}
+                className="generate-btn"
+                style={{ background: 'linear-gradient(135deg, #8B5CF6, #EC4899)' }}
+              >
+                {loading || payment.loading
+                  ? '⏳ Processing...'
+                  : `💳 Pay ${price ? formatKes(price.finalPrice) : '—'} (${price ? formatUsd(price.finalPrice, exchangeRate) : '—'})`}
+              </button>
+              {(payment.error || error) && <div className="error-message" style={{ marginTop: 12 }}>❌ {payment.error || error}</div>}
+            </div>
           )}
 
           {success && <div className="success-message">✅ {success}</div>}
@@ -470,15 +372,11 @@ function PhotosToVideo() {
                     <source src={videoUrl} type="video/mp4" />
                   </video>
                   {getDownloadUrl(videoUrl) && (
-                    <a href={getDownloadUrl(videoUrl)} className="download-btn">
-                      📥 Download Video
-                    </a>
+                    <a href={getDownloadUrl(videoUrl)} className="download-btn">📥 Download Video</a>
                   )}
                 </>
               ) : (
-                <div className="placeholder">
-                  <p>Upload photos and generate a video</p>
-                </div>
+                <div className="placeholder"><p>Upload photos and generate a video</p></div>
               )}
             </div>
           </div>
@@ -487,7 +385,7 @@ function PhotosToVideo() {
             <ul>
               <li>📤 Upload a photo</li>
               <li>📝 Describe what you want</li>
-              <li>💳 Pay by card (Pesapal) or M-Pesa (Paystack)</li>
+              <li>💳 Pay securely via Pesapal (Card or M-Pesa)</li>
               <li>📥 Download your video</li>
               <li>🔄 Use your redo coupon for free regeneration</li>
             </ul>

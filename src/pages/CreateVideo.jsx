@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import './CreateVideo.css';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
-import PaymentOptions from '../components/PaymentOptions';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -42,23 +41,18 @@ function CreateVideo() {
   const [videoUrl, setVideoUrl] = useState(null);
   const [exchangeRate, setExchangeRate] = useState(129.55);
 
-  // Load exchange rate once
   useEffect(() => {
     getUsdToKesRate().then(setExchangeRate).catch(() => {});
   }, []);
 
-  // Price recalculation
   useEffect(() => {
     if (!prompt.trim()) return setPrice(null);
     const amount = duration === 5 ? 200 : duration === 10 ? 400 : 600;
-    setPrice({ finalPrice: amount, formatted: formatKes(amount), currency: 'KES' });
+    setPrice({ finalPrice: amount, currency: 'KES' });
   }, [prompt, duration]);
 
-  // Handle redirects back from Pesapal or Paystack
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
-
-    // Pesapal callback
     const orderTrackingId = params.get('OrderTrackingId');
     const merchantRef = params.get('OrderMerchantReference');
     const provider = localStorage.getItem('pending_payment_provider');
@@ -76,40 +70,7 @@ function CreateVideo() {
           if (data.success && data.status === 'completed') {
             await processVideoGeneration(merchantRef || data.reference);
           } else {
-            setError('Card payment was not completed.');
-            setLoading(false);
-          }
-        } catch (e) {
-          setError('Payment verification error: ' + e.message);
-          setLoading(false);
-        }
-        window.history.replaceState({}, document.title, window.location.pathname);
-      })();
-      return;
-    }
-
-    // Paystack (card or mpesa) callback
-    const reference = params.get('reference') || params.get('trxref');
-    if (reference && provider !== 'pesapal') {
-      (async () => {
-        setLoading(true);
-        try {
-          const v = await fetch(`${API_BASE_URL}/api/verify-payment`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              reference,
-              email: localStorage.getItem('pending_payment_email') || email,
-              amount: Number(localStorage.getItem('pending_payment_amount') || 200),
-              serviceType: 'text-to-video',
-              paymentMethod: 'card',
-              duration,
-            }),
-          });
-          const vd = await v.json();
-          if (vd.success) await processVideoGeneration(reference);
-          else {
-            setError('Payment verification failed.');
+            setError('Payment was not completed.');
             setLoading(false);
           }
         } catch (e) {
@@ -149,13 +110,11 @@ function CreateVideo() {
     }
   };
 
-  // Payment hook
   const payment = usePayment({
     email,
     amount: price?.finalPrice || 200,
     serviceType: 'text-to-video',
     metadata: { duration, aspectRatio },
-    onMpesaSuccess: (ref) => processVideoGeneration(ref),
   });
 
   const canPay = prompt.trim() && email && !loading;
@@ -163,9 +122,7 @@ function CreateVideo() {
   return (
     <div className="create-video-page">
       <div className="header">
-        <button className="back-btn" onClick={() => navigate('/')}>
-          ← Back to Home
-        </button>
+        <button className="back-btn" onClick={() => navigate('/')}>← Back to Home</button>
         <h1>🎬 AI Text to Video</h1>
         <p>Describe your idea and AI will bring it to life</p>
       </div>
@@ -199,11 +156,7 @@ function CreateVideo() {
             <h3>⚙️ Video Settings</h3>
             <div className="setting-group">
               <label>Video Duration</label>
-              <select
-                value={duration}
-                onChange={(e) => setDuration(parseInt(e.target.value))}
-                disabled={loading}
-              >
+              <select value={duration} onChange={(e) => setDuration(parseInt(e.target.value))} disabled={loading}>
                 <option value={5}>5 seconds</option>
                 <option value={10}>10 seconds</option>
                 <option value={15}>15 seconds</option>
@@ -211,11 +164,7 @@ function CreateVideo() {
             </div>
             <div className="setting-group">
               <label>Aspect Ratio</label>
-              <select
-                value={aspectRatio}
-                onChange={(e) => setAspectRatio(e.target.value)}
-                disabled={loading}
-              >
+              <select value={aspectRatio} onChange={(e) => setAspectRatio(e.target.value)} disabled={loading}>
                 <option value="16:9">16:9 (Widescreen)</option>
                 <option value="1:1">1:1 (Square)</option>
                 <option value="9:16">9:16 (Vertical)</option>
@@ -226,34 +175,37 @@ function CreateVideo() {
           <div className="price-section">
             <h3>💰 Total Cost</h3>
             <div className="price-card">
-              <div className="price-amount">
-                {price ? formatKes(price.finalPrice) : '—'}
-              </div>
+              <div className="price-amount">{price ? formatKes(price.finalPrice) : '—'}</div>
               <div className="price-details">
                 <p>✅ AI video generation</p>
                 <p>✅ HD quality</p>
                 <p>✅ {duration}-second video</p>
-                <p>
-                  💵 ≈ {price ? formatUsd(price.finalPrice, exchangeRate) : '—'} USD
-                </p>
+                <p>💵 ≈ {price ? formatUsd(price.finalPrice, exchangeRate) : '—'} USD</p>
               </div>
             </div>
           </div>
 
-          <PaymentOptions
-            method={payment.method}
-            setMethod={payment.setMethod}
-            phone={payment.phone}
-            setPhone={payment.setPhone}
-            amountKes={price?.finalPrice || 200}
-            exchangeRate={exchangeRate}
-            loading={loading || payment.loading}
-            status={payment.status}
-            message={payment.message}
-            error={payment.error || error}
-            onPay={payment.start}
-            disabled={!canPay}
-          />
+          <div className="payment-section" style={{ marginTop: 16 }}>
+            <div style={{ textAlign: 'center', fontSize: 14, color: '#cbd5e1', marginBottom: 8 }}>
+              You will be charged{' '}
+              <strong style={{ color: '#fff' }}>{price ? formatKes(price.finalPrice) : '—'}</strong>{' '}
+              <span style={{ color: '#94a3b8' }}>(≈ {price ? formatUsd(price.finalPrice, exchangeRate) : '—'} USD)</span>
+            </div>
+            <button
+              type="button"
+              onClick={payment.start}
+              disabled={loading || payment.loading || !canPay}
+              className="generate-btn"
+              style={{ background: 'linear-gradient(135deg, #EC4899, #8B5CF6)' }}
+            >
+              {loading || payment.loading
+                ? '⏳ Processing...'
+                : `💳 Pay ${price ? formatKes(price.finalPrice) : '—'} (${price ? formatUsd(price.finalPrice, exchangeRate) : '—'})`}
+            </button>
+            {(payment.error || error) && (
+              <div className="error-message" style={{ marginTop: 12 }}>❌ {payment.error || error}</div>
+            )}
+          </div>
 
           {success && <div className="success-message">✅ {success}</div>}
         </div>
@@ -266,17 +218,14 @@ function CreateVideo() {
                 <source src={videoUrl} type="video/mp4" />
               </video>
             ) : (
-              <div className="placeholder">
-                <p>Describe your idea and generate a video</p>
-              </div>
+              <div className="placeholder"><p>Describe your idea and generate a video</p></div>
             )}
           </div>
-
           <div className="how-it-works">
             <h4>ℹ️ How It Works</h4>
             <ul>
               <li>📝 Describe what you want the AI to generate</li>
-              <li>💳 Pay by card via Pesapal, or by M-Pesa via Paystack</li>
+              <li>💳 Pay securely via Pesapal (Card or M-Pesa)</li>
               <li>📥 Download your AI-generated video</li>
               <li>🔒 All payments are secure and PCI-DSS compliant</li>
             </ul>

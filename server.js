@@ -22,9 +22,8 @@ const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const WebSocket = require('ws');
 
-// ─── NEW: Payment modules ─────────────────────
+// ─── Payment modules (Pesapal only — handles Card + M-Pesa) ───
 const pesapal = require('./pesapal');
-const mpesa = require('./paystack-mpesa');
 const currency = require('./currency');
 
 const app = express();
@@ -363,7 +362,11 @@ const allowedOrigins = [
   'https://katareel.com',
   'http://localhost:3000',
   'http://localhost:5000',
-  'https://video-creator-api-kjzy.onrender.com'
+  'https://video-creator-api-kjzy.onrender.com',
+  // Allow Pesapal to POST IPN notifications to /api/pesapal/ipn
+  'https://pay.pesapal.com',
+  'https://cybqa.pesapal.com',
+  'https://pesapal.com'
 ];
 
 app.use(cors({
@@ -965,7 +968,7 @@ app.post('/api/test-upload', upload.single('video'), (req, res) => {
 });
 
 // ============================================
-// UPLOAD VIDEO ENDPOINT - WITH DEBUG LOGGING
+// UPLOAD VIDEO ENDPOINT
 // ============================================
 app.post('/api/upload-video', (req, res) => {
   console.log('📤 Upload request received');
@@ -1658,14 +1661,24 @@ app.post('/api/translate-video', async (req, res) => {
       });
     }
 
-    const isValid = await verifyPayment(paymentReference);
-    if (!isValid) {
-      return res.status(402).json({
-        success: false,
-        error: 'Invalid or expired payment.',
-        requiresPayment: true,
-        price: TRANSLATION_PRICE
-      });
+    const isPreVerifiedRef =
+      paymentReference.startsWith('KAT-') ||
+      paymentReference.startsWith('TEST-') ||
+      paymentReference.startsWith('REDO-') ||
+      paymentReference.startsWith('MANUAL-') ||
+      paymentReference.startsWith('BRAND-') ||
+      paymentReference.startsWith('MUSIC-');
+
+    if (!isPreVerifiedRef) {
+      const isValid = await verifyPayment(paymentReference);
+      if (!isValid) {
+        return res.status(402).json({
+          success: false,
+          error: 'Invalid or expired payment.',
+          requiresPayment: true,
+          price: TRANSLATION_PRICE
+        });
+      }
     }
 
     const translatedVideoUrl = await generateTranslatedVideo(
@@ -1968,110 +1981,18 @@ async function sendReceiptEmail(email, amount, reference, serviceType) {
 }
 
 // ============================================
-// PAYMENT ENDPOINTS
+// VERIFY PAYMENT ENDPOINT (legacy — kept for backwards compatibility)
 // ============================================
-
-app.post('/api/initialize-payment', async (req, res) => {
-  try {
-    const { email, amount, serviceType, metadata, callbackUrl } = req.body;
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-
-    console.log('💰 Initializing payment...');
-
-    if (!email) {
-      return res.status(400).json({
-        success: false,
-        error: 'Email is required'
-      });
-    }
-
-    if (!amount || amount <= 0) {
-      return res.status(400).json({
-        success: false,
-        error: 'Valid amount is required'
-      });
-    }
-
-    if (!secretKey || secretKey === 'your_paystack_secret_key' || secretKey.length < 10) {
-      console.error('❌ Invalid Paystack secret key.');
-      return res.status(500).json({
-        success: false,
-        error: 'Payment configuration error. Please contact support.'
-      });
-    }
-
-    const requestBody = {
-      email: email,
-      amount: Math.round(amount * 100),
-      metadata: {
-        serviceType: serviceType || 'translation',
-        ...metadata,
-        custom_fields: [
-          {
-            display_name: "Service Type",
-            variable_name: "service_type",
-            value: serviceType || 'translation'
-          },
-          {
-            display_name: "Amount",
-            variable_name: "amount",
-            value: `${amount} KES`
-          },
-          ...(metadata?.custom_fields || [])
-        ]
-      },
-      callback_url: callbackUrl || process.env.FRONTEND_URL || 'https://www.katareel.com'
-    };
-
-    const response = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify(requestBody)
-    });
-
-    const data = await response.json();
-
-    if (data.status) {
-      console.log('✅ Payment initialized successfully!');
-      return res.status(200).json({
-        success: true,
-        reference: data.data.reference,
-        authorization_url: data.data.authorization_url,
-        metadata: metadata
-      });
-    } else {
-      console.error('❌ Paystack error:', data.message);
-      return res.status(400).json({
-        success: false,
-        error: data.message || 'Payment initialization failed'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Payment initialization error:', error);
-    return res.status(500).json({
-      success: false,
-      error: 'Payment initialization failed. Please try again.'
-    });
-  }
-});
-
 app.post('/api/verify-payment', async (req, res) => {
   try {
     const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
 
     console.log(`🔍 Verifying payment: ${reference}`);
 
     const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions', 'brand-video': 'brandVideo' };
 
-    // Non-Paystack references (Pesapal KAT-*, M-Pesa MPESA-*) are already
-    // verified by their own modules. Treat them as successful here.
     const isExternalRef =
       reference.startsWith('KAT-') ||
-      reference.startsWith('MPESA-') ||
       reference.startsWith('TEST-') ||
       reference.startsWith('REDO-') ||
       reference.startsWith('MANUAL-') ||
@@ -2094,320 +2015,14 @@ app.post('/api/verify-payment', async (req, res) => {
       });
     }
 
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
-      const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-      const serviceKey = serviceMap[serviceType] || 'textToVideo';
-
-      await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
-      await addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
-      await addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
-
-      return res.json({
-        success: true,
-        data: { reference, status: 'success' },
-        message: 'Payment verified successfully (test mode)',
-        transactionId
-      });
-    }
-
-    const response = await fetch(`https://api.paystack.co/transaction/verify/${reference}`, {
-      method: 'GET',
-      headers: { 'Authorization': `Bearer ${secretKey}`, 'Content-Type': 'application/json' }
+    return res.json({
+      success: false,
+      error: 'Unknown payment reference format'
     });
-
-    const data = await response.json();
-
-    if (data.status && data.data.status === 'success') {
-      const serviceKey = serviceMap[serviceType] || 'textToVideo';
-      const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-
-      await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
-      await addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
-      await addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
-
-      res.json({
-        success: true,
-        data: data.data,
-        message: 'Payment verified successfully',
-        transactionId
-      });
-    } else {
-      res.json({
-        success: false,
-        error: data.message || 'Payment verification failed'
-      });
-    }
   } catch (error) {
     console.error('❌ Payment verification error:', error.message);
     res.status(500).json({ success: false, error: error.message });
   }
-});
-
-app.post('/api/webhook/paystack', (req, res) => {
-  try {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
-    const payload = req.body;
-    if (!secret) return res.sendStatus(200);
-
-    const hash = crypto.createHmac('sha512', secret).update(JSON.stringify(payload)).digest('hex');
-    if (hash !== req.headers['x-paystack-signature']) return res.status(401).send('Invalid signature');
-
-    if (payload.event === 'charge.success') {
-      const transaction = payload.data;
-      console.log(`✅ Payment successful!`);
-      console.log(`   Reference: ${transaction.reference}`);
-      console.log(`   Amount: ${transaction.amount / 100} ${transaction.currency}`);
-      console.log(`   Customer: ${transaction.customer.email}`);
-
-      const amount = transaction.amount / 100;
-      const email = transaction.customer.email;
-      const reference = transaction.reference;
-      const serviceType = transaction.metadata?.custom_fields?.find(f => f.display_name === "Video Type")?.value || 'text-to-video';
-      const duration = parseInt(transaction.metadata?.custom_fields?.find(f => f.display_name === "Duration")?.value) || 5;
-
-      addUserPayment(email, amount, 'card', serviceType, reference);
-      addActivityLog(email, `💰 Payment received via webhook`, `Amount: KES ${amount}, Ref: ${reference}, Duration: ${duration}s`, amount);
-    }
-    res.sendStatus(200);
-  } catch (error) {
-    console.error('❌ Webhook error:', error.message);
-    res.status(500).send('Webhook processing failed');
-  }
-});
-
-// ============================================
-// STARTBUTTON PAYMENT ENDPOINTS
-// ============================================
-
-const STARTBUTTON_PUBLIC_KEY = process.env.STARTBUTTON_PUBLIC_KEY;
-const STARTBUTTON_BASE_URL = process.env.STARTBUTTON_BASE_URL || 'https://api.startbutton.tech';
-
-async function initializeStartbuttonPayment(email, amount, serviceType, metadata = {}) {
-    try {
-        console.log('💰 Initializing Startbutton payment...');
-
-        if (!STARTBUTTON_PUBLIC_KEY || STARTBUTTON_PUBLIC_KEY === 'your_startbutton_public_key') {
-            console.warn('⚠️ STARTBUTTON_PUBLIC_KEY not set. Using test mode.');
-            const reference = 'SB-TEST-' + Date.now();
-            return {
-                success: true,
-                reference: reference,
-                authorization_url: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success?reference=${reference}`,
-                testMode: true
-            };
-        }
-
-        const uniqueReference = `SB-${Date.now()}-${Math.random().toString(36).substring(2, 10)}`;
-        const amountInFractionalUnits = Math.round(amount * 100);
-
-        const requestBody = {
-            amount: amountInFractionalUnits,
-            currency: 'KES',
-            email: email,
-            reference: uniqueReference,
-            redirectUrl: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/payment-success`,
-            metadata: {
-                service_type: serviceType || 'text-to-video',
-                ...metadata
-            }
-        };
-
-        const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/initialize`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(requestBody)
-        });
-
-        if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Startbutton API error: ${response.status} - ${errorText}`);
-        }
-
-        const data = await response.json();
-        console.log('✅ Startbutton payment initialized:', data);
-
-        return {
-            success: true,
-            reference: uniqueReference,
-            authorization_url: data.data || data.authorization_url,
-            testMode: false
-        };
-
-    } catch (error) {
-        console.error('❌ Startbutton payment initialization error:', error.message);
-        return {
-            success: false,
-            error: error.message
-        };
-    }
-}
-
-async function verifyStartbuttonPayment(reference) {
-    try {
-        console.log(`🔍 Verifying Startbutton payment: ${reference}`);
-
-        if (!STARTBUTTON_PUBLIC_KEY || STARTBUTTON_PUBLIC_KEY === 'your_startbutton_public_key') {
-            console.warn('⚠️ STARTBUTTON_PUBLIC_KEY not set. Using test mode.');
-            return true;
-        }
-
-        const response = await fetch(`${STARTBUTTON_BASE_URL}/transaction/verify/${reference}`, {
-            method: 'GET',
-            headers: {
-                'Authorization': `Bearer ${STARTBUTTON_PUBLIC_KEY}`,
-                'Content-Type': 'application/json'
-            }
-        });
-
-        if (!response.ok) {
-            console.error('❌ Startbutton verification error:', response.status);
-            return false;
-        }
-
-        const data = await response.json();
-        console.log('✅ Startbutton verification response:', data);
-
-        const status = data.status || data.data?.status;
-        return status === 'successful' || status === 'success' || status === 'completed';
-
-    } catch (error) {
-        console.error('❌ Startbutton verification error:', error.message);
-        return false;
-    }
-}
-
-app.post('/api/initialize-startbutton-payment', async (req, res) => {
-    try {
-        const { email, amount, serviceType, metadata } = req.body;
-
-        console.log('💰 Initializing Startbutton payment...');
-
-        if (!email) {
-            return res.status(400).json({
-                success: false,
-                error: 'Email is required'
-            });
-        }
-
-        if (!amount || amount <= 0) {
-            return res.status(400).json({
-                success: false,
-                error: 'Valid amount is required'
-            });
-        }
-
-        const result = await initializeStartbuttonPayment(email, amount, serviceType, metadata);
-
-        if (result.success) {
-            return res.status(200).json({
-                success: true,
-                reference: result.reference,
-                authorization_url: result.authorization_url,
-                testMode: result.testMode || false
-            });
-        } else {
-            return res.status(400).json({
-                success: false,
-                error: result.error || 'Payment initialization failed'
-            });
-        }
-
-    } catch (error) {
-        console.error('❌ Startbutton payment initialization error:', error);
-        return res.status(500).json({
-            success: false,
-            error: 'Payment initialization failed. Please try again.'
-        });
-    }
-});
-
-app.post('/api/verify-startbutton-payment', async (req, res) => {
-    try {
-        const { reference, email, amount, serviceType, paymentMethod, duration } = req.body;
-
-        console.log(`🔍 Verifying Startbutton payment: ${reference}`);
-
-        const isValid = await verifyStartbuttonPayment(reference);
-
-        if (isValid) {
-            const serviceMap = { 
-                'text-to-video': 'textToVideo', 
-                'photo-to-video': 'photoToVideo', 
-                'translation': 'translation', 
-                'music-captions': 'music-captions',
-                'brand-video': 'brandVideo'
-            };
-            const serviceKey = serviceMap[serviceType] || 'textToVideo';
-            const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
-            const videoDuration = duration || 5;
-
-            await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'startbutton');
-            await addUserPayment(email, amount, paymentMethod || 'startbutton', serviceType, reference);
-            await addActivityLog(email, `💰 Paid for ${serviceType} via Startbutton`, `Amount: KES ${amount}, Duration: ${videoDuration}s`, amount);
-
-            res.json({
-                success: true,
-                message: 'Payment verified successfully',
-                transactionId,
-                reference
-            });
-        } else {
-            res.json({
-                success: false,
-                error: 'Payment verification failed or payment not completed'
-            });
-        }
-
-    } catch (error) {
-        console.error('❌ Startbutton verification error:', error.message);
-        res.status(500).json({ success: false, error: error.message });
-    }
-});
-
-app.post('/api/webhook/startbutton', async (req, res) => {
-    try {
-        const payload = req.body;
-        console.log('📨 Startbutton webhook received:', payload);
-
-        const event = payload.event || payload.type;
-        const data = payload.data || payload;
-
-        if (event === 'payment.success' || event === 'charge.success' || data.status === 'success' || data.status === 'completed' || data.status === 'successful') {
-            const reference = data.reference || data.id;
-            const email = data.customer?.email || data.email;
-            const amount = data.amount || data.amount_paid || 0;
-
-            console.log(`✅ Startbutton payment successful!`);
-            console.log(`   Reference: ${reference}`);
-            console.log(`   Amount: ${amount} KES`);
-            console.log(`   Customer: ${email}`);
-
-            let serviceType = 'text-to-video';
-            let duration = 5;
-            
-            if (data.metadata) {
-                const meta = data.metadata;
-                if (meta.service_type) serviceType = meta.service_type;
-                if (meta.duration) duration = parseInt(meta.duration) || 5;
-            }
-
-            await addUserPayment(email, amount, 'startbutton', serviceType, reference);
-            await addActivityLog(email, `💰 Payment received via Startbutton webhook`, `Amount: KES ${amount}, Ref: ${reference}, Duration: ${duration}s`, amount);
-
-            res.sendStatus(200);
-        } else {
-            console.warn('⚠️ Unhandled Startbutton webhook event:', event);
-            res.sendStatus(200);
-        }
-
-    } catch (error) {
-        console.error('❌ Startbutton webhook error:', error.message);
-        res.status(500).send('Webhook processing failed');
-    }
 });
 
 // ============================================
@@ -2428,8 +2043,7 @@ app.post('/api/generate-redo-coupon', async (req, res) => {
     const isTestMode = paymentReference.startsWith('TEST-') ||
                         paymentReference.startsWith('REDO-') ||
                         paymentReference.startsWith('MANUAL-') ||
-                        paymentReference.startsWith('KAT-') ||
-                        paymentReference.startsWith('MPESA-');
+                        paymentReference.startsWith('KAT-');
 
     const payment = await findPaymentByReference(paymentReference);
 
@@ -3209,7 +2823,6 @@ app.post('/api/generate-video', async (req, res) => {
     } else {
       const isExternalRef =
         paymentReference.startsWith('KAT-') ||
-        paymentReference.startsWith('MPESA-') ||
         paymentReference.startsWith('TEST-') ||
         paymentReference.startsWith('REDO-') ||
         paymentReference.startsWith('MANUAL-') ||
@@ -3341,7 +2954,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
       paymentReference.startsWith('REDO-') ||
       paymentReference.startsWith('MANUAL-') ||
       paymentReference.startsWith('KAT-') ||
-      paymentReference.startsWith('MPESA-') ||
       paymentReference.startsWith('BRAND-') ||
       paymentReference.startsWith('MUSIC-')
     );
@@ -3500,79 +3112,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
 });
 
 // ============================================
-// MUSIC & CAPTIONS PAYMENT INITIALIZATION
-// ============================================
-
-app.post('/api/initialize-music-captions-payment', async (req, res) => {
-  try {
-    const { email } = req.body;
-    const amount = 200;
-
-    console.log('💰 Initializing Music & Captions payment...');
-
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      const reference = 'MUSIC-TEST-' + Date.now();
-      console.log('⚠️ Using test mode, reference:', reference);
-      return res.json({
-        success: true,
-        reference: reference,
-        authorization_url: 'https://www.katareel.com/music-captions?payment=success&reference=' + reference,
-        amount: amount,
-        currency: 'KES',
-        testMode: true
-      });
-    }
-
-    const response = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email: email,
-        amount: amount * 100,
-        metadata: {
-          serviceType: 'music-captions',
-          amount: amount,
-          custom_fields: [
-            { display_name: "Service", variable_name: "service", value: "Music & Captions" },
-            { display_name: "Amount", variable_name: "amount", value: `${amount} KES` }
-          ]
-        },
-        callback_url: process.env.FRONTEND_URL + '/music-captions?payment=success'
-      })
-    });
-
-    const data = await response.json();
-    
-    if (data.status) {
-      console.log('✅ Payment initialized successfully!');
-      res.json({
-        success: true,
-        reference: data.data.reference,
-        authorization_url: data.data.authorization_url,
-        amount: amount,
-        currency: 'KES'
-      });
-    } else {
-      console.error('❌ Paystack error:', data.message);
-      res.status(400).json({
-        success: false,
-        error: data.message || 'Payment initialization failed'
-      });
-    }
-  } catch (error) {
-    console.error('❌ Payment init error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// ============================================
 // ADD MUSIC & CAPTIONS TO VIDEO
 // ============================================
 
@@ -3613,7 +3152,6 @@ app.post('/api/add-music-captions', async (req, res) => {
 
     const isPreVerifiedRef =
       paymentReference.startsWith('KAT-') ||
-      paymentReference.startsWith('MPESA-') ||
       paymentReference.startsWith('TEST-') ||
       paymentReference.startsWith('REDO-') ||
       paymentReference.startsWith('MANUAL-') ||
@@ -4037,72 +3575,6 @@ async function concatClips(clipPaths, outputPath) {
   });
 }
 
-app.post('/api/initialize-brand-video-payment', async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ success: false, error: 'Email is required' });
-    }
-
-    console.log('💰 Initializing Brand Video payment...');
-
-    const secretKey = process.env.PAYSTACK_SECRET_KEY;
-    if (!secretKey || secretKey === 'your_paystack_secret_key') {
-      const reference = 'BRAND-TEST-' + Date.now();
-      console.log('⚠️ Using test mode, reference:', reference);
-      return res.json({
-        success: true,
-        reference,
-        authorization_url: `${process.env.FRONTEND_URL || 'https://www.katareel.com'}/brand-video?payment=success&reference=${reference}`,
-        amount: BRAND_VIDEO_PRICE,
-        currency: 'KES',
-        testMode: true
-      });
-    }
-
-    const response = await fetch('https://api.paystack.co/transaction/initialize', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${secretKey}`,
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({
-        email,
-        amount: BRAND_VIDEO_PRICE * 100,
-        metadata: {
-          serviceType: 'brand-video',
-          amount: BRAND_VIDEO_PRICE,
-          custom_fields: [
-            { display_name: "Service", variable_name: "service", value: "Brand Video" },
-            { display_name: "Amount", variable_name: "amount", value: `${BRAND_VIDEO_PRICE} KES` }
-          ]
-        },
-        callback_url: (process.env.FRONTEND_URL || 'https://www.katareel.com') + '/brand-video?payment=success'
-      })
-    });
-
-    const data = await response.json();
-
-    if (data.status) {
-      console.log('✅ Brand video payment initialized!');
-      return res.json({
-        success: true,
-        reference: data.data.reference,
-        authorization_url: data.data.authorization_url,
-        amount: BRAND_VIDEO_PRICE,
-        currency: 'KES'
-      });
-    }
-
-    console.error('❌ Paystack error:', data.message);
-    return res.status(400).json({ success: false, error: data.message || 'Payment initialization failed' });
-  } catch (error) {
-    console.error('❌ Brand video payment init error:', error.message);
-    res.status(500).json({ success: false, error: error.message });
-  }
-});
-
 const brandVideoInProgress = new Set();
 const MAX_CONCURRENT_BRAND_VIDEOS = 1;
 
@@ -4142,7 +3614,6 @@ app.post('/api/brand-video', async (req, res) => {
     paymentReference.startsWith('MANUAL-') ||
     paymentReference.startsWith('BRAND-FREE-') ||
     paymentReference.startsWith('KAT-') ||
-    paymentReference.startsWith('MPESA-') ||
     paymentReference.startsWith('MUSIC-');
 
   if (!isFreeReference) {
@@ -4667,7 +4138,6 @@ app.get('/api/test', (req, res) => {
       '/api/generate-video',
       '/api/calculate-price',
       '/api/verify-payment',
-      '/api/initialize-payment',
       '/api/send-video-email',
       '/api/test-email',
       '/api/free-languages',
@@ -4676,27 +4146,16 @@ app.get('/api/test', (req, res) => {
       '/api/translations',
       '/api/upload-video',
       '/api/upload-image',
-      '/api/initialize-brand-video-payment',
       '/api/brand-video',
       '/api/admin/dashboard',
-      '/api/admin/add-credits',
-      '/api/admin/balances',
-      '/api/admin/payments',
-      '/api/admin/add-missing-payment',
       '/api/test-google-cloud',
       '/api/translate-video-free',
       '/api/test-tts',
-      '/api/debug-failed',
-      '/api/debug-modelark-ids',
-      '/api/debug-scene-providers',
-      // ─── Pesapal card payments ───
+      // ─── Pesapal (Card + M-Pesa) ───
       '/api/pesapal/initialize',
       '/api/pesapal/verify',
       '/api/pesapal/ipn',
       '/api/pesapal/register-ipn',
-      // ─── Paystack M-Pesa ───
-      '/api/paystack-mpesa/charge',
-      '/api/paystack-mpesa/verify',
       // ─── Currency ───
       '/api/currency/rate'
     ]
@@ -4706,7 +4165,7 @@ app.get('/api/test', (req, res) => {
 app.get('/', (req, res) => {
   res.json({
     name: 'Video Creator API',
-    version: '2.2.0',
+    version: '2.3.0',
     status: 'running',
     contact: {
       sales: 'sales@katareel.com',
@@ -4720,11 +4179,10 @@ app.get('/', (req, res) => {
       'Video Translation with Payment',
       'Music & Captions',
       'Brand Video (Logo Intro/Outro + AI Voiceover)',
-      'Card Payments (Pesapal: Visa / Mastercard)',
-      'M-Pesa Payments (Paystack)',
+      'Card Payments (Pesapal)',
+      'M-Pesa Payments (Pesapal)',
       'USD / KES Dual Pricing',
       'Email Delivery',
-      'Payment Integration',
       'Admin Dashboard',
       'Multi-language Support'
     ]
@@ -4735,7 +4193,7 @@ app.get('/', (req, res) => {
 // ✅ WIRE UP PAYMENT MODULES
 // --------------------------------------------
 // CRITICAL: These MUST be registered BEFORE the 404 catch-all below,
-// otherwise Express answers /api/pesapal/* and /api/paystack-mpesa/*
+// otherwise Express answers /api/pesapal/* and /api/currency/*
 // with "Endpoint not found".
 //
 // Order matters in Express:
@@ -4746,10 +4204,8 @@ app.get('/', (req, res) => {
 //   5. Error handler
 // ============================================
 pesapal.init({ addRevenue, addUserPayment, addActivityLog });
-mpesa.init({ addRevenue, addUserPayment, addActivityLog });
 
 app.use('/api/pesapal', pesapal.router);
-app.use('/api/paystack-mpesa', mpesa.router);
 app.use('/api/currency', currency.router);
 
 // ============================================
@@ -4782,7 +4238,6 @@ app.listen(PORT, '0.0.0.0', () => {
   console.log(`📧 Email Provider: ${emailProvider.toUpperCase()}`);
   console.log(`☁️ Cloudinary storage configured`);
   console.log(`📁 Temp directory: ${tempDir}`);
-  console.log(`💳 Pesapal card payments: ${process.env.PESAPAL_CONSUMER_KEY ? '✅ configured' : '❌ missing credentials'}`);
-  console.log(`📱 Paystack M-Pesa: ${process.env.PAYSTACK_SECRET_KEY ? '✅ configured' : '❌ missing secret key'}`);
+  console.log(`💳 Pesapal (Card + M-Pesa): ${process.env.PESAPAL_CONSUMER_KEY ? '✅ configured' : '❌ missing credentials'}`);
   console.log(`💱 Currency conversion: ✅ enabled`);
 });

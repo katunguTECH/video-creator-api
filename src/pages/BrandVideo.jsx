@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
-import PaymentOptions from '../components/PaymentOptions';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -24,7 +23,6 @@ function BrandVideo() {
   const [voiceoverScript, setVoiceoverScript] = useState('');
   const [email, setEmail] = useState('');
   const [couponCode, setCouponCode] = useState('');
-  const [paymentReference, setPaymentReference] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
   const [resultVideoUrl, setResultVideoUrl] = useState('');
   const [error, setError] = useState('');
@@ -35,7 +33,6 @@ function BrandVideo() {
     getUsdToKesRate().then(setExchangeRate).catch(() => {});
   }, []);
 
-  // Handle Pesapal / Paystack redirect
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     const orderTrackingId = params.get('OrderTrackingId');
@@ -53,10 +50,9 @@ function BrandVideo() {
           });
           const data = await res.json();
           if (data.success && data.status === 'completed') {
-            setPaymentReference(merchantRef || data.reference);
             await processBrandVideo(merchantRef || data.reference);
           } else {
-            setError('Card payment was not completed.');
+            setError('Payment was not completed.');
             setIsProcessing(false);
           }
         } catch (e) {
@@ -114,15 +110,8 @@ function BrandVideo() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          videoUrl,
-          logoUrl,
-          companyName,
-          tagline,
-          contactEmail,
-          contactPhone,
-          voiceoverScript,
-          paymentReference: reference,
-          email,
+          videoUrl, logoUrl, companyName, tagline, contactEmail, contactPhone,
+          voiceoverScript, paymentReference: reference, email,
         }),
       });
       if (!res.ok) throw new Error(`Server error: ${res.status}`);
@@ -142,7 +131,6 @@ function BrandVideo() {
     if (!email || !videoUrl || !logoUrl || !companyName || !contactPhone)
       return setError('Please fill in all required fields first');
     if (!couponCode.trim()) return setError('Please enter a code');
-    setPaymentReference(couponCode.trim());
     await processBrandVideo(couponCode.trim());
   };
 
@@ -151,19 +139,15 @@ function BrandVideo() {
     amount: BRAND_VIDEO_PRICE,
     serviceType: 'brand-video',
     metadata: { companyName, tagline },
-    onMpesaSuccess: (ref) => processBrandVideo(ref),
   });
 
-  const canPay =
-    email && videoUrl && logoUrl && companyName && contactPhone;
+  const canPay = email && videoUrl && logoUrl && companyName && contactPhone;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-900 via-black to-emerald-900 text-white p-6">
       <div className="max-w-3xl mx-auto">
         <div className="flex items-center justify-between mb-8">
-          <button onClick={() => navigate('/')} className="text-white/70 hover:text-white text-sm">
-            ← Back to Home
-          </button>
+          <button onClick={() => navigate('/')} className="text-white/70 hover:text-white text-sm">← Back to Home</button>
           <h1 className="text-3xl font-bold">🎬 Brand Video</h1>
           <div className="w-20"></div>
         </div>
@@ -185,69 +169,20 @@ function BrandVideo() {
 
           <div className="bg-white/10 rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-semibold mb-2">🏢 Company Details</h2>
-            <input
-              type="text"
-              value={companyName}
-              onChange={(e) => setCompanyName(e.target.value)}
-              placeholder="Company name"
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
-            />
-            <input
-              type="text"
-              value={tagline}
-              onChange={(e) => setTagline(e.target.value)}
-              placeholder="Tagline (optional)"
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
-            />
-            <input
-              type="text"
-              value={contactPhone}
-              onChange={(e) => setContactPhone(e.target.value)}
-              placeholder="Contact phone"
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
-            />
-            <input
-              type="email"
-              value={contactEmail}
-              onChange={(e) => setContactEmail(e.target.value)}
-              placeholder="Contact email (shown in video)"
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
-            />
-            <textarea
-              value={voiceoverScript}
-              onChange={(e) => setVoiceoverScript(e.target.value)}
-              placeholder="Custom voiceover script (optional — leave blank to auto-generate)"
-              rows={3}
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
-            />
+            <input type="text" value={companyName} onChange={(e) => setCompanyName(e.target.value)} placeholder="Company name" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+            <input type="text" value={tagline} onChange={(e) => setTagline(e.target.value)} placeholder="Tagline (optional)" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+            <input type="text" value={contactPhone} onChange={(e) => setContactPhone(e.target.value)} placeholder="Contact phone" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+            <input type="email" value={contactEmail} onChange={(e) => setContactEmail(e.target.value)} placeholder="Contact email (shown in video)" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+            <textarea value={voiceoverScript} onChange={(e) => setVoiceoverScript(e.target.value)} placeholder="Custom voiceover script (optional — leave blank to auto-generate)" rows={3} className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
           </div>
 
           <div className="bg-white/10 rounded-xl p-6 space-y-3">
             <h2 className="text-lg font-semibold mb-2">💳 Payment & Delivery</h2>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="Your email"
-              className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2"
-            />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="Your email" className="w-full bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
 
-            {/* Coupon */}
             <div className="flex gap-2">
-              <input
-                type="text"
-                value={couponCode}
-                onChange={(e) => setCouponCode(e.target.value)}
-                placeholder="Have a free code? Enter it here"
-                className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2"
-              />
-              <button
-                onClick={handleUseCoupon}
-                disabled={isProcessing}
-                className="px-5 py-2 rounded-lg font-semibold bg-white/20 hover:bg-white/30"
-              >
-                Use Code
-              </button>
+              <input type="text" value={couponCode} onChange={(e) => setCouponCode(e.target.value)} placeholder="Have a free code? Enter it here" className="flex-1 bg-white/10 border border-white/20 rounded-lg px-4 py-2" />
+              <button onClick={handleUseCoupon} disabled={isProcessing} className="px-5 py-2 rounded-lg font-semibold bg-white/20 hover:bg-white/30">Use Code</button>
             </div>
 
             <div className="flex items-center gap-3 py-1">
@@ -257,52 +192,39 @@ function BrandVideo() {
             </div>
 
             <div className="text-center text-sm text-gray-300">
-              Total: <span className="font-bold">{formatKes(BRAND_VIDEO_PRICE)}</span>{' '}
-              <span className="text-gray-400">
-                (≈ {formatUsd(BRAND_VIDEO_PRICE, exchangeRate)} USD)
-              </span>
+              Total: <strong>{formatKes(BRAND_VIDEO_PRICE)}</strong>{' '}
+              <span className="text-gray-400">(≈ {formatUsd(BRAND_VIDEO_PRICE, exchangeRate)} USD)</span>
             </div>
 
-            <PaymentOptions
-              method={payment.method}
-              setMethod={payment.setMethod}
-              phone={payment.phone}
-              setPhone={payment.setPhone}
-              amountKes={BRAND_VIDEO_PRICE}
-              exchangeRate={exchangeRate}
-              loading={isProcessing || payment.loading}
-              status={payment.status}
-              message={payment.message}
-              error={payment.error || error}
-              onPay={payment.start}
-              disabled={!canPay}
-            />
+            <button
+              type="button"
+              onClick={payment.start}
+              disabled={isProcessing || payment.loading || !canPay}
+              className="w-full py-3 rounded-lg font-bold text-lg transition-all bg-gradient-to-r from-green-500 to-emerald-600 hover:brightness-110 disabled:opacity-60 disabled:cursor-not-allowed text-white"
+            >
+              {isProcessing || payment.loading
+                ? '⏳ Processing...'
+                : `💳 Pay ${formatKes(BRAND_VIDEO_PRICE)} (${formatUsd(BRAND_VIDEO_PRICE, exchangeRate)})`}
+            </button>
+            {(payment.error || error) && (
+              <div className="bg-red-500/20 border border-red-500 rounded-lg p-3 text-red-300 text-sm text-center">❌ {payment.error || error}</div>
+            )}
           </div>
 
           {isProcessing && (
-            <div className="bg-white/10 rounded-xl p-6 text-center text-gray-300">
-              ⏳ Creating your branded video...
-            </div>
+            <div className="bg-white/10 rounded-xl p-6 text-center text-gray-300">⏳ Creating your branded video...</div>
           )}
 
           {resultVideoUrl && (
             <div className="bg-white/10 rounded-xl p-6">
               <h2 className="text-xl font-bold mb-4">✅ Video Ready!</h2>
               <video src={resultVideoUrl} controls className="w-full rounded-lg max-h-96 bg-black" />
-              <a
-                href={resultVideoUrl.replace('/upload/', '/upload/fl_attachment/')}
-                download
-                className="block text-center bg-green-500 mt-4 py-2 rounded-lg"
-              >
-                ⬇️ Download
-              </a>
+              <a href={resultVideoUrl.replace('/upload/', '/upload/fl_attachment/')} download className="block text-center bg-green-500 mt-4 py-2 rounded-lg">⬇️ Download</a>
             </div>
           )}
 
           {success && (
-            <div className="bg-green-500/20 border border-green-500 rounded-lg p-3 text-green-300 text-sm">
-              {success}
-            </div>
+            <div className="bg-green-500/20 border border-green-500 rounded-lg p-3 text-green-300 text-sm">{success}</div>
           )}
         </div>
       </div>

@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom';
 import './TranslateVideo.css';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
-import PaymentOptions from '../components/PaymentOptions';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -66,7 +65,6 @@ function TranslateVideo() {
     })();
   }, []);
 
-  // Redirect handling
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const orderTrackingId = params.get('OrderTrackingId');
@@ -92,7 +90,7 @@ function TranslateVideo() {
               localStorage.getItem('pending_payment_email') || email
             );
           } else {
-            setError('Card payment was not completed.');
+            setError('Payment was not completed.');
             setLoading(false);
           }
         } catch (e) {
@@ -175,10 +173,7 @@ function TranslateVideo() {
       const res = await fetch(`${API_BASE_URL}/api/translate-video-free`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          videoUrl, targetLanguage, sourceLanguage,
-          paymentReference, email, duration: 5,
-        }),
+        body: JSON.stringify({ videoUrl, targetLanguage, sourceLanguage, paymentReference, email, duration: 5 }),
       });
       const data = await res.json();
       if (data.success) {
@@ -198,7 +193,6 @@ function TranslateVideo() {
     amount: TRANSLATION_PRICE,
     serviceType: 'translation',
     metadata: { sourceLanguage, targetLanguage },
-    onMpesaSuccess: (ref) => processTranslation(ref),
   });
 
   const canPay = selectedFile && targetLanguage && email && videoUrl;
@@ -214,12 +208,7 @@ function TranslateVideo() {
         <div className="left-panel">
           <div className="email-section">
             <label>📧 Your Email</label>
-            <input
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              disabled={loading}
-            />
+            <input type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={loading} />
           </div>
 
           <div className="upload-section">
@@ -233,25 +222,10 @@ function TranslateVideo() {
               ) : (
                 <div className="file-info">
                   <span>📹 {selectedFile.name}</span>
-                  <button
-                    className="remove-file"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setSelectedFile(null);
-                      setVideoUrl(null);
-                    }}
-                  >
-                    Remove
-                  </button>
+                  <button className="remove-file" onClick={(e) => { e.stopPropagation(); setSelectedFile(null); setVideoUrl(null); }}>Remove</button>
                 </div>
               )}
-              <input
-                type="file"
-                ref={fileInputRef}
-                onChange={handleFileUpload}
-                accept="video/*"
-                style={{ display: 'none' }}
-              />
+              <input type="file" ref={fileInputRef} onChange={handleFileUpload} accept="video/*" style={{ display: 'none' }} />
             </div>
             {uploading && <div className="spinner">Uploading...</div>}
           </div>
@@ -288,21 +262,23 @@ function TranslateVideo() {
             </div>
           </div>
 
-          <PaymentOptions
-            method={payment.method}
-            setMethod={payment.setMethod}
-            phone={payment.phone}
-            setPhone={payment.setPhone}
-            amountKes={TRANSLATION_PRICE}
-            exchangeRate={exchangeRate}
-            loading={loading || payment.loading}
-            status={payment.status}
-            message={payment.message}
-            error={payment.error || error}
-            onPay={payment.start}
-            disabled={!canPay}
-            accent="from-indigo-500 to-purple-600"
-          />
+          <div className="payment-section" style={{ marginTop: 16 }}>
+            <div style={{ textAlign: 'center', fontSize: 14, color: '#334155', marginBottom: 8 }}>
+              You will be charged <strong>{formatKes(TRANSLATION_PRICE)}</strong>{' '}
+              <span style={{ color: '#64748b' }}>(≈ {formatUsd(TRANSLATION_PRICE, exchangeRate)} USD)</span>
+            </div>
+            <button
+              type="button"
+              onClick={payment.start}
+              disabled={loading || payment.loading || !canPay}
+              className="translate-btn"
+            >
+              {loading || payment.loading
+                ? '⏳ Processing...'
+                : `💳 Pay ${formatKes(TRANSLATION_PRICE)} (${formatUsd(TRANSLATION_PRICE, exchangeRate)})`}
+            </button>
+            {(payment.error || error) && <div className="error-message" style={{ marginTop: 12 }}>❌ {payment.error || error}</div>}
+          </div>
 
           {showRetry && paymentReference && (
             <div className="retry-section">
@@ -317,9 +293,7 @@ function TranslateVideo() {
             <div className="translated-video-section">
               <h3>🎉 Your Translated Video</h3>
               <video controls src={translatedVideo} style={{ width: '100%', borderRadius: 8 }} />
-              <a href={getDownloadUrl(translatedVideo)} download className="download-btn">
-                ⬇️ Download
-              </a>
+              <a href={getDownloadUrl(translatedVideo)} download className="download-btn">⬇️ Download</a>
             </div>
           )}
 
@@ -331,7 +305,7 @@ function TranslateVideo() {
           <ul>
             <li>📤 Upload a video with audio</li>
             <li>🌍 Choose languages</li>
-            <li>💳 Pay by card (Pesapal) or M-Pesa (Paystack)</li>
+            <li>💳 Pay securely via Pesapal (Card or M-Pesa)</li>
             <li>📥 Download the translated video</li>
           </ul>
         </div>
