@@ -227,8 +227,6 @@ async function textToSpeech(text, targetLanguage, speakingRate = 1.0, voiceGende
       languageCode: languageCode,
       ssmlGender: voiceGender.toUpperCase()
     };
-    // An explicit voice name (e.g. a Neural2 voice) gives noticeably more
-    // natural results than letting Google pick its default Standard voice.
     if (voiceName) voiceConfig.name = voiceName;
 
     const requestBody = {
@@ -314,8 +312,6 @@ Rules:
 ffmpeg.setFfmpegPath(ffmpegInstaller.path);
 console.log('✅ FFmpeg configured');
 
-// Font used for Brand Video text overlays (drawtext).
-// Place a real .ttf file at fonts/OpenSans-Bold.ttf in the repo root.
 const FONT_PATH = path.join(__dirname, 'fonts', 'OpenSans-Bold.ttf');
 if (fs.existsSync(FONT_PATH)) {
   console.log('✅ Brand video font found:', FONT_PATH);
@@ -918,7 +914,6 @@ const upload = multer({
   }
 });
 
-// Separate multer config for logo/image uploads (Brand Video feature)
 const imageUpload = multer({
   storage: memoryStorage,
   limits: {
@@ -978,14 +973,12 @@ app.post('/api/upload-video', (req, res) => {
   console.log('📤 Content-Length:', req.headers['content-length']);
   console.log('📤 Host:', req.headers['host']);
 
-  // Set timeouts
   req.setTimeout(300000);
   res.setTimeout(300000);
 
   upload.single('video')(req, res, async function(err) {
     res.setTimeout(0);
 
-    // Log any multer errors
     if (err) {
       console.error('❌ Multer error:', err.message);
       console.error('❌ Multer error stack:', err.stack);
@@ -995,7 +988,6 @@ app.post('/api/upload-video', (req, res) => {
       });
     }
 
-    // Check if file was received
     if (!req.file) {
       console.error('❌ No file in request');
       return res.status(400).json({
@@ -1033,7 +1025,6 @@ app.post('/api/upload-video', (req, res) => {
       console.log(`   URL: ${result.secure_url}`);
       console.log(`   Public ID: ${result.public_id}`);
 
-      // Send response
       return res.status(200).json({
         success: true,
         videoUrl: result.secure_url,
@@ -1048,7 +1039,6 @@ app.post('/api/upload-video', (req, res) => {
       console.error('❌ Upload processing error:', error.message);
       console.error('❌ Error stack:', error.stack);
       
-      // Always send a JSON response
       return res.status(500).json({
         success: false,
         error: 'Server error processing upload: ' + error.message
@@ -1161,10 +1151,6 @@ async function transcribeAudio(audioPath) {
     return "This is a sample transcription for the video. The actual transcription failed, but we're continuing with the translation.";
   }
 }
-
-// ============================================
-// SYNC FIX HELPERS
-// ============================================
 
 function getDuration(filePath) {
   return new Promise((resolve, reject) => {
@@ -1302,9 +1288,6 @@ async function generateTranslatedVideo(originalVideoUrl, targetLanguage, duratio
   }
 }
 
-// ============================================
-// ADD AUDIO NARRATION TO A SCENE-GENERATED VIDEO
-// ============================================
 async function addAudioToSceneVideo(remoteVideoUrl, script, voiceGender = 'MALE') {
   const videoId = crypto.randomUUID();
   const videoPath = path.join(tempDir, `${videoId}.mp4`);
@@ -1714,8 +1697,6 @@ app.post('/api/translate-video', async (req, res) => {
     await addActivityLog(email, '🌐 Video Translation', `Translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}, Duration: ${duration || 5}s, Price: KES ${TRANSLATION_PRICE}`, translationCost);
     await addVideoUsage(paymentReference, email, 'translation', `Video translated to ${FREE_TRANSLATION_LANGUAGES[targetLanguage]}`, translationCost, 'Translation Pipeline', 'google-groq', duration || 5);
 
-    // Send the translated-video email to the user (this was previously missing,
-    // which is why users never received an email even on success)
     let emailResult = { success: false };
     try {
       const languageName = FREE_TRANSLATION_LANGUAGES[targetLanguage] || 'French';
@@ -1856,9 +1837,6 @@ app.post('/api/test-tts', async (req, res) => {
   }
 });
 
-// ============================================
-// TEST AUDIO MUX DEBUG ENDPOINT
-// ============================================
 app.post('/api/test-audio-mux', async (req, res) => {
   try {
     const { videoUrl, script, voiceGender } = req.body;
@@ -2089,8 +2067,33 @@ app.post('/api/verify-payment', async (req, res) => {
 
     const serviceMap = { 'text-to-video': 'textToVideo', 'photo-to-video': 'photoToVideo', 'translation': 'translation', 'music-captions': 'music-captions', 'brand-video': 'brandVideo' };
 
-    // If reference is from Pesapal, defer to the Pesapal module (already handled
-    // by /api/pesapal/verify — this path is Paystack-only).
+    // Non-Paystack references (Pesapal KAT-*, M-Pesa MPESA-*) are already
+    // verified by their own modules. Treat them as successful here.
+    const isExternalRef =
+      reference.startsWith('KAT-') ||
+      reference.startsWith('MPESA-') ||
+      reference.startsWith('TEST-') ||
+      reference.startsWith('REDO-') ||
+      reference.startsWith('MANUAL-') ||
+      reference.startsWith('BRAND-') ||
+      reference.startsWith('MUSIC-');
+
+    if (isExternalRef) {
+      const serviceKey = serviceMap[serviceType] || 'textToVideo';
+      const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
+
+      await addRevenue(transactionId, email, amount, serviceKey, reference, paymentMethod || 'card');
+      await addUserPayment(email, amount, paymentMethod || 'card', serviceType, reference);
+      await addActivityLog(email, `💰 Paid for ${serviceType}`, `Amount: KES ${amount} via ${paymentMethod || 'card'}, Duration: ${duration || 5}s`, amount);
+
+      return res.json({
+        success: true,
+        data: { reference, status: 'success' },
+        message: 'Payment verified successfully',
+        transactionId
+      });
+    }
+
     if (!secretKey || secretKey === 'your_paystack_secret_key') {
       console.warn('⚠️ PAYSTACK_SECRET_KEY not set. Using test mode.');
       const transactionId = Date.now().toString() + '-' + Math.random().toString(36).substr(2, 9);
@@ -2758,10 +2761,6 @@ async function pollDreaminaTask(taskId, token, endpoint) {
   throw new Error('Timeout waiting for Dreamina video generation');
 }
 
-// ============================================
-// SCENE GENERATION PROVIDERS
-// ============================================
-
 function getKlingCredentials() {
   let accessKey = process.env.KLING_ACCESS_KEY;
   let secretKey = process.env.KLING_SECRET_KEY;
@@ -3154,7 +3153,6 @@ async function generateVeoVideo(photoUrl, prompt, duration) {
   throw new Error('Veo: timeout waiting for video');
 }
 
-// Order prioritizes providers that best lock photo facial subject
 const SCENE_PROVIDERS = [
   { name: 'magic_hour', fn: generateMagicHourVideo, enabled: () => !!process.env.MAGIC_HR_API, cost: 0.04 },
   { name: 'kling', fn: generateKlingVideo, enabled: () => { const { accessKey, secretKey } = getKlingCredentials(); return !!accessKey && !!secretKey; }, cost: 0.084 },
@@ -3209,15 +3207,14 @@ app.post('/api/generate-video', async (req, res) => {
         requiresPayment: true
       });
     } else {
-      // Accept non-Paystack references (Pesapal KAT-*, M-Pesa MPESA-*) as
-      // already-verified, since they were confirmed by their own modules.
       const isExternalRef =
         paymentReference.startsWith('KAT-') ||
         paymentReference.startsWith('MPESA-') ||
         paymentReference.startsWith('TEST-') ||
         paymentReference.startsWith('REDO-') ||
         paymentReference.startsWith('MANUAL-') ||
-        paymentReference.startsWith('BRAND-');
+        paymentReference.startsWith('BRAND-') ||
+        paymentReference.startsWith('MUSIC-');
 
       if (!isExternalRef) {
         const isValid = await verifyPayment(paymentReference);
@@ -3239,7 +3236,6 @@ app.post('/api/generate-video', async (req, res) => {
     let cost = 0.08 * durationMultiplier;
     const generationErrors = [];
 
-    // Try Replicate first
     try {
       const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
       if (replicateToken) {
@@ -3340,16 +3336,14 @@ app.post('/api/generate-photo-video', async (req, res) => {
       });
     }
 
-    // Accept any of our known references as "already paid" — the payment
-    // modules (Pesapal, Paystack M-Pesa, Paystack card) verified them before
-    // this endpoint was reached.
     const isPreVerifiedRef = paymentReference && (
       paymentReference.startsWith('TEST-') ||
       paymentReference.startsWith('REDO-') ||
       paymentReference.startsWith('MANUAL-') ||
       paymentReference.startsWith('KAT-') ||
       paymentReference.startsWith('MPESA-') ||
-      paymentReference.startsWith('BRAND-')
+      paymentReference.startsWith('BRAND-') ||
+      paymentReference.startsWith('MUSIC-')
     );
 
     if (!paymentReference) {
@@ -3378,7 +3372,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
     let cost = 0.15 * durationMultiplier;
     const generationErrors = [];
 
-    // Try scene providers
     try {
       const sceneResult = await generateSceneVideo(
         photoUrls[0],
@@ -3394,7 +3387,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
       generationErrors.push(`Scene providers: ${error.message}`);
     }
 
-    // Fallback to Replicate if all scene providers fail
     if (!videoUrl) {
       try {
         const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
@@ -3439,7 +3431,6 @@ app.post('/api/generate-photo-video', async (req, res) => {
       }
     }
 
-    // Add audio narration
     if (videoUrl) {
       let finalScript = audioScript && audioScript.trim().length > 0
         ? audioScript.trim()
@@ -3810,18 +3801,9 @@ app.post('/api/add-music-captions', async (req, res) => {
 // ============================================
 
 const BRAND_VIDEO_PRICE = 250;
-// Intro is just a brief logo reveal — it no longer stretches to match the
-// voiceover length. The full voiceover is layered over the whole video instead
-// (see overlayFullVoiceover), so it's never truncated.
 const BRAND_INTRO_SECONDS = 4;
 const BRAND_OUTRO_SECONDS = 4;
 
-// Converts a plain voiceover script into SSML so Google's TTS can actually
-// follow basic delivery direction (pauses, emphasis) instead of reading
-// everything in a flat monotone. Wrap a word or phrase in *asterisks* in the
-// script to add emphasis to it, e.g. "we *go the extra mile* to source them".
-// If the script already starts with <speak>, it's treated as hand-written
-// SSML and passed through unchanged.
 function buildVoiceoverSsml(rawScript) {
   const trimmed = (rawScript || '').trim();
   if (!trimmed) return '<speak></speak>';
@@ -3832,16 +3814,9 @@ function buildVoiceoverSsml(rawScript) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  // *emphasized text* -> SSML emphasis
   s = s.replace(/\*(.+?)\*/g, '<emphasis level="moderate">$1</emphasis>');
-
-  // "..." -> a slightly longer natural pause
   s = s.replace(/\.\.\.+/g, '<break time="450ms"/>');
-
-  // End of sentence -> short pause before the next one
   s = s.replace(/([.!?])(\s+)/g, '$1<break time="350ms"/>$2');
-
-  // Comma -> brief pause
   s = s.replace(/,(\s+)/g, ',<break time="180ms"/>$1');
 
   return `<speak>${s}</speak>`;
@@ -3916,13 +3891,9 @@ Rules:
 async function createTextCard({ outputPath, logoPath, lines, durationSeconds, withSilentAudio, canvasWidth = 1280, canvasHeight = 720 }) {
   return new Promise((resolve, reject) => {
     const fontArg = fs.existsSync(FONT_PATH) ? `fontfile=${ffmpegSafePath(FONT_PATH)}:` : '';
-    // Logo width scales with the canvas so it isn't oversized/undersized when
-    // switching between portrait and landscape cards.
     const logoWidth = Math.round(canvasWidth * 0.28);
 
     const drawtextFilters = lines.map((line, index) => {
-      // Text block starts right under the logo instead of leaving a large
-      // empty gap in the middle of the card.
       const yPos = `h*0.40+${index * Math.round(canvasHeight * 0.07)}`;
       return `drawtext=${fontArg}text='${escapeDrawtext(line.text)}':fontsize=${line.fontsize || 36}:fontcolor=${line.color || 'white'}:x=(w-text_w)/2:y=${yPos}`;
     }).join(',');
@@ -3998,21 +3969,15 @@ async function overlayFullVoiceover(videoPath, audioBuffer, outputPath) {
   const audioDuration = await getDuration(tempAudioPath);
   console.log(`📏 Final video: ${videoDuration.toFixed(2)}s | Voiceover: ${audioDuration.toFixed(2)}s`);
 
-  // If the narration runs longer than the assembled video, freeze the last
-  // frame for the extra seconds so the voiceover is never cut off mid-sentence.
   const padSeconds = Math.max(0, (audioDuration + 1) - videoDuration);
   if (padSeconds > 0) {
     console.log(`🧊 Extending final video by ${padSeconds.toFixed(2)}s so the voiceover finishes naturally`);
   }
 
   const audioFilters = [
-    // Duck the video's own audio (background music / ambient sound from the
-    // uploaded footage) under the voiceover instead of replacing it outright.
     `[0:a]volume=0.25[bg]`,
     `[1:a]volume=1.6[vo]`,
     `[bg][vo]amix=inputs=2:duration=longest:dropout_transition=3[mixed]`,
-    // Boosting the voiceover can clip on louder syllables — a limiter caps
-    // peaks so the louder mix never distorts.
     `[mixed]alimiter=limit=0.95[aout]`
   ];
 
@@ -4021,7 +3986,6 @@ async function overlayFullVoiceover(videoPath, audioBuffer, outputPath) {
     let outputOptions;
 
     if (padSeconds > 0) {
-      // Video must be re-encoded here since we're extending its length.
       const filters = [
         `[0:v]tpad=stop_mode=clone:stop_duration=${padSeconds.toFixed(2)}[vout]`,
         ...audioFilters
@@ -4030,11 +3994,6 @@ async function overlayFullVoiceover(videoPath, audioBuffer, outputPath) {
       outputOptions = ['-map', '[vout]', '-map', '[aout]', '-preset', 'veryfast'];
       command.videoCodec('libx264');
     } else {
-      // Common case: the voiceover already fits inside the video, so the
-      // video stream doesn't need to change at all. Stream-copying it instead
-      // of routing it through a re-encode avoids by far the most expensive
-      // step in the whole pipeline — important on a memory-constrained
-      // free-tier instance, where a full re-encode was crashing the process.
       command.complexFilter(audioFilters);
       outputOptions = ['-map', '0:v:0', '-map', '[aout]', '-c:v', 'copy'];
     }
@@ -4144,9 +4103,6 @@ app.post('/api/initialize-brand-video-payment', async (req, res) => {
   }
 });
 
-// Prevents duplicate submissions (e.g. double-clicking "Pay" or "Use Code")
-// from starting two simultaneous FFmpeg encoding jobs, which is enough to
-// exhaust memory on a free-tier instance and crash the whole server.
 const brandVideoInProgress = new Set();
 const MAX_CONCURRENT_BRAND_VIDEOS = 1;
 
@@ -4186,7 +4142,8 @@ app.post('/api/brand-video', async (req, res) => {
     paymentReference.startsWith('MANUAL-') ||
     paymentReference.startsWith('BRAND-FREE-') ||
     paymentReference.startsWith('KAT-') ||
-    paymentReference.startsWith('MPESA-');
+    paymentReference.startsWith('MPESA-') ||
+    paymentReference.startsWith('MUSIC-');
 
   if (!isFreeReference) {
     const isValid = await verifyPayment(paymentReference);
@@ -4246,9 +4203,6 @@ app.post('/api/brand-video', async (req, res) => {
     if (!logoRes.ok) throw new Error(`Failed to download logo: ${logoRes.status}`);
     fs.writeFileSync(logoPath, Buffer.from(await logoRes.arrayBuffer()));
 
-    // Match the intro/outro card orientation to the uploaded footage instead
-    // of forcing everything into landscape — a portrait phone video squeezed
-    // into a 1280x720 canvas ends up tiny with thick black bars on the sides.
     let canvasWidth = 1280;
     let canvasHeight = 720;
     try {
@@ -4274,9 +4228,6 @@ app.post('/api/brand-video', async (req, res) => {
     let voiceoverAdded = true;
     try {
       const ssmlScript = buildVoiceoverSsml(script);
-      // en-US-Neural2-F: a warmer, more natural female voice than Google's
-      // default Standard voice. SSML lets the pauses/emphasis in the script
-      // (via *word* markup, sentence breaks, commas) actually come through.
       ttsAudioBuffer = await textToSpeech(ssmlScript, 'en', 1.0, 'FEMALE', true, 'en-US-Neural2-F');
     } catch (ttsError) {
       console.warn('⚠️ TTS failed, continuing with a silent intro card:', ttsError.message);
@@ -4323,10 +4274,6 @@ app.post('/api/brand-video', async (req, res) => {
     console.log('🔗 Concatenating intro + video + outro...');
     await concatClips([introNormPath, mainNormPath, outroNormPath], finalPath);
 
-    // Layer the full voiceover across the ENTIRE assembled video (intro + main
-    // + outro), instead of squeezing it onto just the intro card. If the
-    // narration runs longer than the visuals, the final frame is held so the
-    // voiceover always finishes naturally instead of being cut off.
     let finalVideoForUpload = finalPath;
     if (ttsAudioBuffer) {
       console.log('🎙️ Layering voiceover across the full video...');
@@ -4353,10 +4300,6 @@ app.post('/api/brand-video', async (req, res) => {
 
     const cost = isFreeReference ? 0 : BRAND_VIDEO_PRICE;
     const paymentMethodLabel = isFreeReference ? 'coupon' : 'card';
-    // Free/coupon codes (e.g. "REDO-KATUNGU-001") get reused across multiple
-    // videos, but the payments table has a unique constraint on `reference`.
-    // Suffixing with the jobId keeps each row unique without touching the
-    // paid-payment path, where paymentReference is already unique per charge.
     const paymentRecordReference = isFreeReference ? `${paymentReference}-${jobId}` : paymentReference;
     await addRevenue(jobId, email, cost, 'brand-video', paymentReference, paymentMethodLabel);
     await addUserPayment(email, cost, paymentMethodLabel, 'brand-video', paymentRecordReference);
@@ -4427,15 +4370,13 @@ app.post('/api/calculate-price', (req, res) => {
 // ADMIN DASHBOARD ENDPOINT
 // ============================================
 
-// Normalizes the many slightly-different service_type / video_type strings
-// used across this file into the 4 buckets the admin dashboard UI expects.
 function normalizeServiceKey(rawType) {
   const t = (rawType || '').toLowerCase();
   if (t.includes('photo')) return 'photoToVideo';
   if (t.includes('translat')) return 'translation';
   if (t.includes('music') || t.includes('caption')) return 'musicCaptions';
   if (t.includes('text') || t === 'texttovideo') return 'textToVideo';
-  return 'other'; // e.g. brand-video, brandVideo - counted in totals, not in the 4 buckets
+  return 'other';
 }
 
 async function fetchAdminTable(tableName, fallbackArray, selectCols = '*') {
@@ -4457,9 +4398,6 @@ async function getReplicateCreditBalance() {
       headers: { 'Authorization': `Token ${token}` }
     });
     if (!res.ok) return 0;
-    // Replicate's public /v1/account endpoint does not return a spendable
-    // balance, so this is a best-effort placeholder until a billing
-    // endpoint is wired up. Returns 0 rather than throwing.
     return 0;
   } catch (error) {
     console.warn('⚠️ Could not fetch Replicate balance:', error.message);
@@ -4495,7 +4433,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
       fetchAdminTable('site_visits', memoryStore.siteVisits)
     ]);
 
-    // Normalize field names between Supabase (snake_case) and memoryStore (camelCase)
     const normPayments = payments.map(p => ({
       email: p.email,
       amount: parseFloat(p.amount) || 0,
@@ -4531,7 +4468,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
       createdAt: v.createdAt || v.created_at
     }));
 
-    // ---------- REVENUE ----------
     const revenue = { total: 0, textToVideo: 0, photoToVideo: 0, translation: 0, musicCaptions: 0 };
     for (const r of normRevenues) {
       revenue.total += r.amount;
@@ -4539,7 +4475,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
       if (key !== 'other') revenue[key] += r.amount;
     }
 
-    // ---------- USAGE ----------
     const usage = { totalVideos: 0, textToVideo: 0, photoToVideo: 0, translation: 0, musicCaptions: 0 };
     for (const v of normVideoUsages) {
       usage.totalVideos += 1;
@@ -4547,7 +4482,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
       if (key !== 'other') usage[key] += 1;
     }
 
-    // ---------- SERVICE STATS (count + revenue per bucket) ----------
     const serviceStats = {
       textToVideo: { count: 0, revenue: 0 },
       photoToVideo: { count: 0, revenue: 0 },
@@ -4563,16 +4497,15 @@ app.get('/api/admin/dashboard', async (req, res) => {
       if (key !== 'other') serviceStats[key].revenue += r.amount;
     }
 
-    // ---------- SITE VISITS ----------
     const now = new Date();
     const todayStart = startOfDay(now);
     const weekStart = daysAgo(7);
     const monthStart = daysAgo(30);
 
     let visitsToday = 0, visitsWeek = 0, visitsMonth = 0;
-    const dailyBuckets = {}; // 'YYYY-MM-DD' -> count, last 7 days
-    const weeklyBuckets = [0, 0, 0, 0]; // last 4 weeks
-    const monthlyBuckets = {}; // 'YYYY-MM' -> count, last 6 months
+    const dailyBuckets = {};
+    const weeklyBuckets = [0, 0, 0, 0];
+    const monthlyBuckets = {};
 
     for (let i = 6; i >= 0; i--) {
       const d = daysAgo(i);
@@ -4615,7 +4548,7 @@ app.get('/api/admin/dashboard', async (req, res) => {
       week: visitsWeek,
       month: visitsMonth,
       daily: Object.entries(dailyBuckets).map(([date, count]) => ({
-        date: date.slice(5), // MM-DD
+        date: date.slice(5),
         visits: count
       })),
       weekly: weeklyBuckets.map((count, i) => ({
@@ -4628,7 +4561,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
       })
     };
 
-    // ---------- RECENT ACTIVITY (last 20) ----------
     const recentActivity = normActivity.slice(0, 20).map((a, index) => {
       let service = 'general';
       const text = `${a.action || ''} ${a.details || ''}`.toLowerCase();
@@ -4647,7 +4579,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
       };
     });
 
-    // ---------- USERS (aggregate by email) ----------
     const userMap = {};
     const touchUser = (email) => {
       const key = (email || 'anonymous').toLowerCase();
@@ -4692,7 +4623,6 @@ app.get('/api/admin/dashboard', async (req, res) => {
       }))
       .sort((a, b) => b.totalSpent - a.totalSpent);
 
-    // ---------- CREDITS ----------
     const replicateBalance = await getReplicateCreditBalance();
     const credits = {
       replicate: replicateBalance,
@@ -4759,15 +4689,15 @@ app.get('/api/test', (req, res) => {
       '/api/debug-failed',
       '/api/debug-modelark-ids',
       '/api/debug-scene-providers',
-      // ─── New: Pesapal card payments ───
+      // ─── Pesapal card payments ───
       '/api/pesapal/initialize',
       '/api/pesapal/verify',
       '/api/pesapal/ipn',
       '/api/pesapal/register-ipn',
-      // ─── New: Paystack M-Pesa ───
+      // ─── Paystack M-Pesa ───
       '/api/paystack-mpesa/charge',
       '/api/paystack-mpesa/verify',
-      // ─── New: Currency ───
+      // ─── Currency ───
       '/api/currency/rate'
     ]
   });
@@ -4802,6 +4732,27 @@ app.get('/', (req, res) => {
 });
 
 // ============================================
+// ✅ WIRE UP PAYMENT MODULES
+// --------------------------------------------
+// CRITICAL: These MUST be registered BEFORE the 404 catch-all below,
+// otherwise Express answers /api/pesapal/* and /api/paystack-mpesa/*
+// with "Endpoint not found".
+//
+// Order matters in Express:
+//   1. Route handlers (above)
+//   2. Sub-routers (here)
+//   3. Static assets + SPA fallback
+//   4. 404 catch-all
+//   5. Error handler
+// ============================================
+pesapal.init({ addRevenue, addUserPayment, addActivityLog });
+mpesa.init({ addRevenue, addUserPayment, addActivityLog });
+
+app.use('/api/pesapal', pesapal.router);
+app.use('/api/paystack-mpesa', mpesa.router);
+app.use('/api/currency', currency.router);
+
+// ============================================
 // SERVE FRONTEND IN PRODUCTION
 // ============================================
 const buildPath = path.join(__dirname, 'build');
@@ -4821,19 +4772,6 @@ app.use((err, req, res, next) => {
   console.error('❌ Server error:', err);
   res.status(500).json({ success: false, error: err.message || 'Internal server error' });
 });
-
-// ============================================
-// ✅ WIRE UP PAYMENT MODULES
-// --------------------------------------------
-// Inject our Supabase/memory data helpers into the payment modules so
-// they can record revenue, payments, and activity logs on success.
-// ============================================
-pesapal.init({ addRevenue, addUserPayment, addActivityLog });
-mpesa.init({ addRevenue, addUserPayment, addActivityLog });
-
-app.use('/api/pesapal', pesapal.router);
-app.use('/api/paystack-mpesa', mpesa.router);
-app.use('/api/currency', currency.router);
 
 // ============================================
 // START SERVER
