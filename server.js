@@ -545,7 +545,7 @@ if (!mg) {
 
 async function sendEmail(to, subject, html, text) {
   const fromEmail = process.env.EMAIL_FROM || `noreply@${MAILGUN_DOMAIN}`;
-  const fromName = 'VidAI Creator';
+  const fromName = 'Katareel';
 
   console.log(`📧 Sending email to ${to} via ${emailProvider.toUpperCase()}`);
 

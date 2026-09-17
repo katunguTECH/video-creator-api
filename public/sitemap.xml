@@ -1,18 +1,33 @@
-﻿<?xml version="1.0" encoding="UTF-8"?>
+<?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
     <loc>https://www.katareel.com/</loc>
+    <priority>1.0</priority>
+    <changefreq>weekly</changefreq>
   </url>
   <url>
-    <loc>https://www.katareel.com/create-video</loc>
+    <loc>https://www.katareel.com/create</loc>
+    <priority>0.9</priority>
+    <changefreq>monthly</changefreq>
   </url>
   <url>
     <loc>https://www.katareel.com/photos-to-video</loc>
+    <priority>0.9</priority>
+    <changefreq>monthly</changefreq>
+  </url>
+  <url>
+    <loc>https://www.katareel.com/translate</loc>
+    <priority>0.9</priority>
+    <changefreq>monthly</changefreq>
+  </url>
+  <url>
+    <loc>https://www.katareel.com/brand-video</loc>
+    <priority>0.9</priority>
+    <changefreq>monthly</changefreq>
   </url>
   <url>
     <loc>https://www.katareel.com/music-captions</loc>
-  </url>
-  <url>
-    <loc>https://www.katareel.com/translate-video</loc>
+    <priority>0.9</priority>
+    <changefreq>monthly</changefreq>
   </url>
 </urlset>
