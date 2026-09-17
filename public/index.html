@@ -1,60 +1,123 @@
 <!DOCTYPE html>
 <html lang="en">
   <head>
-    <!-- ✅ PAYSTACK SCRIPT - MUST LOAD FIRST -->
-    <script src="https://js.paystack.co/v1/inline.js"></script>
-    
     <meta charset="utf-8" />
     <link rel="icon" href="%PUBLIC_URL%/favicon.ico" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#8B5CF6" />
+
+    <!-- ============================================================
+         PRIMARY SEO META
+         - Brand corrected: VidAI Creator -> Katareel
+         - Description now covers all 5 services (was translation only)
+         - Length ~155 chars, within Google's display limit
+         ============================================================ -->
+    <title>Katareel — AI Video Generator, Translation &amp; Branding Tools</title>
     <meta
       name="description"
-      content="VidAI Creator - AI Video Translation and Generation. Translate videos to 37 languages with AI. Pay KES 300 per translation."
+      content="Create videos from text or photos, translate to 37 languages, add music and captions, or brand with a logo intro. AI video tools from Katareel."
     />
-    
-    <meta property="og:title" content="VidAI Creator - AI Video Translation" />
-    <meta property="og:description" content="Translate your videos to 37 languages with AI. Pay KES 300 per translation." />
+    <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
+    <link rel="canonical" href="https://www.katareel.com/" />
+
+    <!-- ============================================================
+         OPEN GRAPH (Facebook, LinkedIn, WhatsApp previews)
+         - Absolute URLs (social platforms reject relative paths)
+         - Brand corrected
+         - og:url trailing slash matches the canonical
+         ============================================================ -->
     <meta property="og:type" content="website" />
-    <meta property="og:url" content="https://www.katareel.com" />
-    <meta property="og:image" content="%PUBLIC_URL%/og-image.png" />
-    
+    <meta property="og:site_name" content="Katareel" />
+    <meta property="og:url" content="https://www.katareel.com/" />
+    <meta property="og:title" content="Katareel — AI Video Creation, Translation &amp; Branding" />
+    <meta
+      property="og:description"
+      content="Generate video from text, turn photos into videos, translate to 37 languages, add music and captions, or brand it with your logo — all in one place."
+    />
+    <meta property="og:image" content="https://www.katareel.com/og-image.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:locale" content="en_US" />
+
+    <!-- ============================================================
+         TWITTER / X CARD
+         ============================================================ -->
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="VidAI Creator - AI Video Translation" />
-    <meta name="twitter:description" content="Translate your videos to 37 languages with AI. Pay KES 300 per translation." />
-    <meta name="twitter:image" content="%PUBLIC_URL%/og-image.png" />
-    
-    <title>VidAI Creator - AI Video Translation & Generation</title>
-    
+    <meta name="twitter:title" content="Katareel — AI Video Creation, Translation &amp; Branding" />
+    <meta
+      name="twitter:description"
+      content="Generate video from text, turn photos into videos, translate to 37 languages, add music and captions, or brand it with your logo — all in one place."
+    />
+    <meta name="twitter:image" content="https://www.katareel.com/og-image.png" />
+
+    <!-- ============================================================
+         STRUCTURED DATA — Organization schema
+         Helps Google build a Knowledge Panel for the Katareel brand
+         and links your 5 services to the business entity.
+         ============================================================ -->
+    <script type="application/ld+json">
+    {
+      "@context": "https://schema.org",
+      "@type": "Organization",
+      "name": "Katareel",
+      "url": "https://www.katareel.com/",
+      "logo": "https://www.katareel.com/logo192.png",
+      "description": "AI video tools for text-to-video, photo-to-video, translation, branding, and music & captions.",
+      "contactPoint": [
+        {
+          "@type": "ContactPoint",
+          "contactType": "customer support",
+          "email": "support@katareel.com",
+          "availableLanguage": ["English"]
+        },
+        {
+          "@type": "ContactPoint",
+          "contactType": "sales",
+          "email": "sales@katareel.com",
+          "availableLanguage": ["English"]
+        }
+      ],
+      "sameAs": []
+    }
+    </script>
+
+    <!-- ============================================================
+         PWA / ICONS
+         ============================================================ -->
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
-    
-    <!-- ✅ Paystack Script - Already loaded at top, this is a fallback check -->
-    <script>
-      // Check if Paystack loaded after 3 seconds
-      setTimeout(function() {
-        if (typeof window.PaystackPop === 'undefined') {
-          console.warn('⚠️ Paystack script not loaded, reloading from CDN...');
-          var script = document.createElement('script');
-          script.src = 'https://js.paystack.co/v1/inline.js';
-          script.async = true;
-          script.onload = function() {
-            console.log('✅ Paystack script reloaded successfully!');
-          };
-          document.head.appendChild(script);
-        } else {
-          console.log('✅ Paystack script already loaded!');
-        }
-      }, 3000);
-    </script>
   </head>
   <body>
+    <!-- ============================================================
+         NOSCRIPT FALLBACK — this is what Googlebot sees on first
+         crawl before executing JavaScript. It now contains:
+         - A real <h1> with your primary keyword phrase
+         - A description covering all 5 services
+         - Internal links to every service page (helps discovery)
+         ============================================================ -->
     <noscript>
-      <div style="text-align: center; padding: 50px; font-family: Arial, sans-serif;">
-        <h1>🔧 JavaScript Required</h1>
-        <p>VidAI Creator requires JavaScript to run. Please enable JavaScript in your browser settings.</p>
+      <div style="text-align: center; padding: 50px; font-family: Arial, sans-serif; max-width: 800px; margin: 0 auto; line-height: 1.6;">
+        <h1>Katareel — AI Video Creation, Translation &amp; Branding Tools</h1>
+        <p>
+          Generate video from text prompts, turn photos into videos, translate
+          videos into 37 languages, add logo intros and AI voiceovers, or add
+          music and captions to any video.
+        </p>
+
+        <h2>Our Services</h2>
+        <ul style="text-align: left; display: inline-block;">
+          <li><a href="/create">AI Text to Video</a> — describe a scene and get an AI-generated clip</li>
+          <li><a href="/photos-to-video">Photos to Video</a> — turn your photos into a moving video with AI</li>
+          <li><a href="/translate">Video Translation</a> — dub any video into Swahili, French, Chinese, and more</li>
+          <li><a href="/brand-video">Brand Video</a> — add a logo intro, voiceover, and closing contact card</li>
+          <li><a href="/music-captions">Music &amp; Captions</a> — add background music and on-screen captions</li>
+        </ul>
+
+        <p>Katareel requires JavaScript to run. Please enable JavaScript in your browser settings.</p>
       </div>
     </noscript>
+
+    <!-- React mounts here -->
     <div id="root"></div>
   </body>
 </html>
