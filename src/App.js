@@ -1,5 +1,6 @@
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { HelmetProvider } from 'react-helmet-async';
 import Home from './pages/Home';
 import CreateVideo from './pages/CreateVideo';
 import Preview from './pages/Preview';
@@ -11,18 +12,20 @@ import BrandVideo from './pages/BrandVideo';
 
 function App() {
   return (
-    <Router>
-      <Routes>
-        <Route path="/" element={<Home />} />
-        <Route path="/create" element={<CreateVideo />} />
-        <Route path="/preview" element={<Preview />} />
-        <Route path="/translate" element={<TranslateVideo />} />
-        <Route path="/photos-to-video" element={<PhotosToVideo />} />
-        <Route path="/admin" element={<AdminDashboard />} />
-        <Route path="/music-captions" element={<MusicCaptions />} />
-        <Route path="/brand-video" element={<BrandVideo />} />
-      </Routes>
-    </Router>
+    <HelmetProvider>
+      <Router>
+        <Routes>
+          <Route path="/" element={<Home />} />
+          <Route path="/create" element={<CreateVideo />} />
+          <Route path="/preview" element={<Preview />} />
+          <Route path="/translate" element={<TranslateVideo />} />
+          <Route path="/photos-to-video" element={<PhotosToVideo />} />
+          <Route path="/admin" element={<AdminDashboard />} />
+          <Route path="/music-captions" element={<MusicCaptions />} />
+          <Route path="/brand-video" element={<BrandVideo />} />
+        </Routes>
+      </Router>
+    </HelmetProvider>
   );
 }
 

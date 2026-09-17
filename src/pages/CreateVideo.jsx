@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import './CreateVideo.css';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
+import { Helmet } from 'react-helmet-async';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -121,6 +122,11 @@ function CreateVideo() {
 
   return (
     <div className="create-video-page">
+      <Helmet>
+        <title>AI Text to Video Generator — Create Videos from Prompts | Katareel</title>
+        <meta name="description" content="Describe a scene in plain text and get an AI-generated video in minutes. Text-to-video for marketing, social media, and storytelling. From KES 200." />
+        <link rel="canonical" href="https://www.katareel.com/create" />
+      </Helmet>
       <div className="header">
         <button className="back-btn" onClick={() => navigate('/')}>← Back to Home</button>
         <h1>🎬 AI Text to Video</h1>

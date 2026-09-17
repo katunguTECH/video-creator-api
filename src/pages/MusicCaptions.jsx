@@ -2,6 +2,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
+import { Helmet } from 'react-helmet-async';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -167,6 +168,11 @@ function MusicCaptions() {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white p-6">
+      <Helmet>
+        <title>Add Music & Captions to Any Video — AI Caption Tool | Katareel</title>
+        <meta name="description" content="Add background music and on-screen captions to any video in minutes. Multiple caption styles, positioned exactly where you want. KES 200 flat rate." />
+        <link rel="canonical" href="https://www.katareel.com/music-captions" />
+      </Helmet>
       <div className="max-w-6xl mx-auto">
         <div className="flex items-center justify-between mb-8">
           <button onClick={() => navigate('/')} className="text-white/70 hover:text-white text-sm">← Back to Home</button>

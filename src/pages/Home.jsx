@@ -4,6 +4,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { getUsdToKesRate, formatUsd } from '../utils/currency';
+import { Helmet } from 'react-helmet-async';
 
 const WHATSAPP_URL = 'https://wa.me/254710440648';
 
@@ -144,6 +145,11 @@ function Home() {
 
   return (
     <div className="bg-[#0A0E1A] text-[#F5F7FB]">
+      <Helmet>
+        <title>Katareel — AI Video Generator, Translation & Branding Tools</title>
+        <meta name="description" content="Create videos from text or photos, translate to 37 languages, add music and captions, or brand with your logo. AI video tools from Katareel." />
+        <link rel="canonical" href="https://www.katareel.com/" />
+      </Helmet>
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap');
         .font-display { font-family: 'Space Grotesk', sans-serif; }

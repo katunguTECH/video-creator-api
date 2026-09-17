@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import './PhotosToVideo.css';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
+import { Helmet } from 'react-helmet-async';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -224,6 +225,11 @@ function PhotosToVideo() {
 
   return (
     <div className="photos-to-video-page">
+      <Helmet>
+        <title>AI Photo to Video Maker — Turn Photos into Videos | Katareel</title>
+        <meta name="description" content="Upload photos and let AI turn them into a moving video with narration. Perfect for real estate, products, weddings, and social media. From KES 300." />
+        <link rel="canonical" href="https://www.katareel.com/photos-to-video" />
+      </Helmet>
       <div className="header">
         <button className="back-btn" onClick={() => navigate('/')}>← Back to Home</button>
         <h1>🤖 AI Photo to Video</h1>

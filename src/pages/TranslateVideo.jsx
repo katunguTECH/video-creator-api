@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import './TranslateVideo.css';
 import { getUsdToKesRate, formatKes, formatUsd } from '../utils/currency';
 import { usePayment } from '../hooks/usePayment';
+import { Helmet } from 'react-helmet-async';
 
 const API_BASE_URL =
   process.env.REACT_APP_API_URL || 'https://video-creator-api-kjzy.onrender.com';
@@ -199,6 +200,11 @@ function TranslateVideo() {
 
   return (
     <div className="translate-video-container">
+      <Helmet>
+        <title>AI Video Translation — Translate Videos to 37 Languages | Katareel</title>
+        <meta name="description" content="Dub any video into Swahili, French, Chinese, Arabic, and 33 more languages with AI. Preserves the original voice tone. Flat rate KES 300." />
+        <link rel="canonical" href="https://www.katareel.com/translate" />
+      </Helmet>
       <div className="header">
         <h1>🌐 Translate Video</h1>
         <p>Upload a video and translate it to another language</p>
