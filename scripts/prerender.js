@@ -63,8 +63,49 @@ const PAGES = {
     keepVideos: false,
     schemas: [],
   },
+  '/services/text-to-video': {
+    title: 'AI Text to Video Generator — Create Videos from Prompts | Katareel',
+    description: 'Describe a scene in plain text and get an AI-generated video in minutes. Text-to-video for marketing, social media, and storytelling. From KES 200.',
+    canonical: BASE_URL + '/services/text-to-video',
+    keepVideos: false,
+    schemas: ['t2v_service', 't2v_faq'],
+  },
+  '/services/photos-to-video': {
+    title: 'AI Photo to Video Maker — Turn Photos into Videos | Katareel',
+    description: 'Upload photos and let AI turn them into a moving video with narration. Perfect for real estate, products, weddings, and social media. From KES 300.',
+    canonical: BASE_URL + '/services/photos-to-video',
+    keepVideos: false,
+    schemas: ['p2v_service', 'p2v_faq'],
+  },
+  '/services/brand-video': {
+    title: 'Brand Video Maker — Add Logo Intro, Voiceover & Outro | Katareel',
+    description: 'Upload your video and logo. We add a professional intro card, AI voiceover, and closing contact card automatically. Ideal for SMEs. KES 250 flat rate.',
+    canonical: BASE_URL + '/services/brand-video',
+    keepVideos: false,
+    schemas: ['bv_service', 'bv_faq'],
+  },
+  '/services/music-captions': {
+    title: 'Add Music & Captions to Any Video — AI Caption Tool | Katareel',
+    description: 'Add background music and on-screen captions to any video in minutes. Multiple caption styles, positioned exactly where you want. KES 200 flat rate.',
+    canonical: BASE_URL + '/services/music-captions',
+    keepVideos: false,
+    schemas: ['mc_service', 'mc_faq'],
+  },
 };
 
+
+
+const T2V_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'AI Text to Video Generation', serviceType: 'Text to Video Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'AI-powered text-to-video generation. Describe a scene and receive a generated video clip in minutes.', offers: { '@type': 'Offer', price: 200, priceCurrency: 'KES', url: BASE_URL + '/create' } };
+const T2V_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How does AI text-to-video generation work?', acceptedAnswer: { '@type': 'Answer', text: 'You describe the scene in plain language, and our AI generates a video clip matching your prompt - no cameras, actors, or editing software required.' } }, { '@type': 'Question', name: 'How long can my video be?', acceptedAnswer: { '@type': 'Answer', text: 'Currently we support 5, 10, and 15-second clips.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'Starting at KES 200 for a 5-second clip. Prices scale with duration.' } }, { '@type': 'Question', name: 'Do I own the videos I create?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Once rendered and paid for, the video is yours to use commercially.' } }] };
+
+const P2V_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'AI Photo to Video Maker', serviceType: 'Photo to Video Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'AI-powered photo-to-video generation. Turn still photos into moving videos with narration and transitions.', offers: { '@type': 'Offer', price: 300, priceCurrency: 'KES', url: BASE_URL + '/photos-to-video' } };
+const P2V_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How does AI photo-to-video work?', acceptedAnswer: { '@type': 'Answer', text: 'Upload photos. Our AI analyzes them and generates natural motion, transitions, and pacing to turn stills into a moving video.' } }, { '@type': 'Question', name: 'Can I add a voiceover?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Provide a script and choose a male, female, or neutral voice.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'From KES 300 for a single 5-second clip with one photo.' } }, { '@type': 'Question', name: 'Do I own the resulting video?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Once paid for and downloaded, the video is yours for commercial use.' } }] };
+
+const BV_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Brand Video Maker', serviceType: 'Brand Video Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Automatically add a logo intro, AI voiceover, and closing contact card to any business video.', offers: { '@type': 'Offer', price: 250, priceCurrency: 'KES', url: BASE_URL + '/brand-video' } };
+const BV_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How does brand video generation work?', acceptedAnswer: { '@type': 'Answer', text: 'Upload your video and your logo. Our system adds an intro card, AI voiceover, and closing contact card automatically.' } }, { '@type': 'Question', name: 'Can I write my own voiceover script?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Provide your own script, or leave blank and we will auto-generate one.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat KES 250 per video. No subscription.' } }, { '@type': 'Question', name: 'Can I use the final video commercially?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Once rendered and paid for, the branded video is yours to use.' } }] };
+
+const MC_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Music and Captions for Video', serviceType: 'Video Music and Captions Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Add background music and professionally styled on-screen captions to any video.', offers: { '@type': 'Offer', price: 200, priceCurrency: 'KES', url: BASE_URL + '/music-captions' } };
+const MC_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How does music and captions addition work?', acceptedAnswer: { '@type': 'Answer', text: 'Upload your video, optionally upload a music track, add caption text, and we mix and burn both into the video.' } }, { '@type': 'Question', name: 'What caption styles are available?', acceptedAnswer: { '@type': 'Answer', text: 'Subtle, bold, neon, classic, and karaoke. Each can be positioned at the top, center, or bottom.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat KES 200 per video. No subscription.' } }, { '@type': 'Question', name: 'Will captions work on all platforms?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Captions are burned into the video so they display on any platform.' } }] };
 const BUILD_DIR = path.join(__dirname, '..', 'build');
 const PORT = 45678;
 
@@ -151,6 +192,14 @@ function rewriteHead(html, meta) {
       var obj = null;
       if (s === 'service') obj = SERVICE_SCHEMA;
       if (s === 'faq') obj = FAQ_SCHEMA;
+      if (s === 't2v_service') obj = T2V_SERVICE_SCHEMA;
+      if (s === 't2v_faq') obj = T2V_FAQ_SCHEMA;
+      if (s === 'p2v_service') obj = P2V_SERVICE_SCHEMA;
+      if (s === 'p2v_faq') obj = P2V_FAQ_SCHEMA;
+      if (s === 'bv_service') obj = BV_SERVICE_SCHEMA;
+      if (s === 'bv_faq') obj = BV_FAQ_SCHEMA;
+      if (s === 'mc_service') obj = MC_SERVICE_SCHEMA;
+      if (s === 'mc_faq') obj = MC_FAQ_SCHEMA;
       if (obj) {
         injected += '<script type="application/ld+json">' + JSON.stringify(obj) + '</script>';
       }
@@ -187,11 +236,11 @@ async function prerender() {
       console.log('  Rendering ' + route + '...');
       const page = await browser.newPage();
       await page.goto('http://localhost:' + PORT + route, {
-        waitUntil: 'networkidle0',
-        timeout: 60000,
+        waitUntil: 'load',
+        timeout: 45000,
       });
 
-      await new Promise((r) => setTimeout(r, 800));
+      await new Promise((r) => setTimeout(r, 2000));
 
       let html = await page.content();
       html = rewriteHead(html, PAGES[route]);
