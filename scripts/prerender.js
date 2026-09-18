@@ -91,7 +91,13 @@ const PAGES = {
     keepVideos: false,
     schemas: ['mc_service', 'mc_faq'],
   },
-};
+  '/updates': {
+    title: "What's New at Katareel — SEO & Site Improvements",
+    description: 'A plain-English summary of recent improvements to Katareel: better Google visibility, dedicated service pages, faster loading, and clearer answers in search results.',
+    canonical: BASE_URL + '/updates',
+    keepVideos: false,
+    schemas: [],
+  },};
 
 
 

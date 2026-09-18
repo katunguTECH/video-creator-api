@@ -15,6 +15,7 @@ import TextToVideoService from './pages/TextToVideoService';
 import PhotosToVideoService from './pages/PhotosToVideoService';
 import BrandVideoService from './pages/BrandVideoService';
 import MusicCaptionsService from './pages/MusicCaptionsService';
+import Updates from './pages/Updates';
 
 function App() {
   return (
@@ -28,6 +29,7 @@ function App() {
           <Route path="/services/photos-to-video" element={<PhotosToVideoService />} />
           <Route path="/services/brand-video" element={<BrandVideoService />} />
           <Route path="/services/music-captions" element={<MusicCaptionsService />} />
+          <Route path="/updates" element={<Updates />} />
           <Route path="/create" element={<CreateVideo />} />
           <Route path="/preview" element={<Preview />} />
           <Route path="/translate" element={<TranslateVideo />} />
