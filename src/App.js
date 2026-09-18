@@ -9,6 +9,7 @@ import PhotosToVideo from './pages/PhotosToVideo';
 import AdminDashboard from './pages/AdminDashboard';
 import MusicCaptions from './pages/MusicCaptions';
 import BrandVideo from './pages/BrandVideo';
+import Services from './pages/Services';
 
 function App() {
   return (
@@ -16,6 +17,7 @@ function App() {
       <Router>
         <Routes>
           <Route path="/" element={<Home />} />
+          <Route path="/services" element={<Services />} />
           <Route path="/create" element={<CreateVideo />} />
           <Route path="/preview" element={<Preview />} />
           <Route path="/translate" element={<TranslateVideo />} />
