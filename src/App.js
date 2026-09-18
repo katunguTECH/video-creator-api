@@ -17,6 +17,8 @@ import BrandVideoService from './pages/BrandVideoService';
 import MusicCaptionsService from './pages/MusicCaptionsService';
 import Updates from './pages/Updates';
 import ToolPage from './pages/ToolPage';
+import Blog from './pages/Blog';
+import BlogPost from './pages/BlogPost';
 
 function App() {
   return (
@@ -32,6 +34,8 @@ function App() {
           <Route path="/services/music-captions" element={<MusicCaptionsService />} />
           <Route path="/updates" element={<Updates />} />
           <Route path="/services/:service/:slug" element={<ToolPage />} />
+          <Route path="/blog" element={<Blog />} />
+          <Route path="/blog/:slug" element={<BlogPost />} />
           <Route path="/create" element={<CreateVideo />} />
           <Route path="/preview" element={<Preview />} />
           <Route path="/translate" element={<TranslateVideo />} />

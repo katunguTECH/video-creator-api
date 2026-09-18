@@ -140,9 +140,104 @@ const PAGES = {
     keepVideos: false,
     schemas: ['tt_service', 'tt_faq'],
   },
-};
+  '/blog': {
+    title: 'Blog — AI Video Tips, Guides & Case Studies | Katareel',
+    description: 'Practical guides on AI video translation, text-to-video, photo-to-video, brand videos, and captions for creators and small businesses.',
+    canonical: BASE_URL + '/blog',
+    keepVideos: false,
+    schemas: [],
+  },
+  '/blog/translate-video-to-swahili': {
+    title: 'How to Translate a Video to Swahili — Complete 2026 Guide | Katareel',
+    description: 'A step-by-step guide to translating any video into Swahili with AI. Covers cost, accuracy, timing, and use cases for Kenyan and East African audiences.',
+    canonical: BASE_URL + '/blog/translate-video-to-swahili',
+    keepVideos: false,
+    schemas: ['translate-video-to-swahili_article', 'translate-video-to-swahili_faq'],
+  },
+  '/blog/ai-video-translation-guide': {
+    title: 'AI Video Translation Guide 2026 — Cost, Accuracy, Languages | Katareel',
+    description: 'Everything you need to know about AI video translation in 2026: how it works, what it costs, which languages are supported, and when to use it.',
+    canonical: BASE_URL + '/blog/ai-video-translation-guide',
+    keepVideos: false,
+    schemas: ['ai-video-translation-guide_article', 'ai-video-translation-guide_faq'],
+  },
+  '/blog/photos-to-video-real-estate': {
+    title: 'Real Estate Photo to Video — AI Listing Videos | Katareel',
+    description: 'How real estate agents use AI to turn property photos into walkthrough-style listing videos.',
+    canonical: BASE_URL + '/blog/photos-to-video-real-estate',
+    keepVideos: false,
+    schemas: ['photos-to-video-real-estate_article', 'photos-to-video-real-estate_faq'],
+  },
+  '/blog/wedding-photo-video': {
+    title: 'Wedding Photo to Video — AI Slideshow Maker | Katareel',
+    description: 'Turn your wedding photos into a moving slideshow video with music and narration.',
+    canonical: BASE_URL + '/blog/wedding-photo-video',
+    keepVideos: false,
+    schemas: ['wedding-photo-video_article', 'wedding-photo-video_faq'],
+  },
+  '/blog/restaurant-promo-video': {
+    title: 'Restaurant Promo Video — Logo, Voiceover & Hours | Katareel',
+    description: 'How restaurants can create branded promo videos from phone footage.',
+    canonical: BASE_URL + '/blog/restaurant-promo-video',
+    keepVideos: false,
+    schemas: ['restaurant-promo-video_article', 'restaurant-promo-video_faq'],
+  },
+  '/blog/add-captions-tiktok': {
+    title: 'How to Add Captions to TikTok Videos — Complete Guide | Katareel',
+    description: 'Add burned-in captions to TikTok videos in minutes. Learn why captions boost watch time.',
+    canonical: BASE_URL + '/blog/add-captions-tiktok',
+    keepVideos: false,
+    schemas: ['add-captions-tiktok_article', 'add-captions-tiktok_faq'],
+  },
+  '/blog/brand-video-logo-voiceover': {
+    title: 'Add Logo Intro & Voiceover to Video — AI Brand Video | Katareel',
+    description: 'Add a professional logo intro, AI voiceover, and closing contact card to any business video.',
+    canonical: BASE_URL + '/blog/brand-video-logo-voiceover',
+    keepVideos: false,
+    schemas: ['brand-video-logo-voiceover_article', 'brand-video-logo-voiceover_faq'],
+  },
+  '/blog/text-to-video-vs-photo-to-video': {
+    title: 'Text to Video vs Photo to Video — Full Comparison | Katareel',
+    description: 'A practical comparison of AI text-to-video and AI photo-to-video. When to use each and how to choose.',
+    canonical: BASE_URL + '/blog/text-to-video-vs-photo-to-video',
+    keepVideos: false,
+    schemas: ['text-to-video-vs-photo-to-video_article', 'text-to-video-vs-photo-to-video_faq'],
+  },
+  '/blog/ai-video-cost-guide': {
+    title: 'AI Video Generator Pricing 2026 — Full Cost Breakdown | Katareel',
+    description: 'A complete cost breakdown of AI video generation in 2026.',
+    canonical: BASE_URL + '/blog/ai-video-cost-guide',
+    keepVideos: false,
+    schemas: ['ai-video-cost-guide_article', 'ai-video-cost-guide_faq'],
+  },
+  '/blog/ai-video-kenya-small-business': {
+    title: 'AI Video for Kenyan Small Business — Complete 2026 Guide | Katareel',
+    description: 'How Kenyan small businesses use AI video to compete with larger brands.',
+    canonical: BASE_URL + '/blog/ai-video-kenya-small-business',
+    keepVideos: false,
+    schemas: ['ai-video-kenya-small-business_article', 'ai-video-kenya-small-business_faq'],
+  },};
 
 
+
+const BLOG_META = [
+  { slug: 'translate-video-to-swahili', title: 'How to Translate a Video to Swahili (Step-by-Step)', description: 'A step-by-step guide to translating any video into Swahili with AI.', date: '2026-01-15', faqs: [{ q: 'Can I translate a video that is already in Swahili into another language?', a: 'Yes. Upload the Swahili video and choose any target language.' }, { q: 'Will the translated voice sound like the original speaker?', a: 'Not exactly. The AI voice matches gender and pacing but is not a clone.' }, { q: 'Can I use the Swahili video commercially?', a: 'Yes. Once paid for and downloaded, the video is yours for any commercial purpose.' }, { q: 'What if my video has no speech, only music?', a: 'Translation works best with videos that have clear speech.' }] },
+  { slug: 'ai-video-translation-guide', title: 'AI Video Translation: The Complete 2026 Guide', description: 'Everything you need to know about AI video translation in 2026.', date: '2026-01-18', faqs: [{ q: 'How long does AI video translation take?', a: 'Videos under 5 minutes are typically translated in 60 to 180 seconds.' }, { q: 'Does AI translation preserve the original speakers voice?', a: 'No. The AI voice matches gender and pacing but is not a clone.' }, { q: 'What video formats can I upload?', a: 'MP4, AVI, MOV, and WEBM, up to 50 MB per video.' }, { q: 'Can I get a refund if the translation is poor?', a: 'Contact support@katareel.com within 24 hours of your order.' }] },
+  { slug: 'photos-to-video-real-estate', title: 'Why Real Estate Agents Are Switching to Photo-to-Video Listings', description: 'How real estate agents use AI to turn property photos into walkthrough-style listing videos.', date: '2026-01-20', faqs: [{ q: 'How many photos do I need?', a: 'Between 1 and 10. For real estate, 5 to 8 photos work best.' }, { q: 'Can I add narration with the price and my contact?', a: 'Yes. Provide a script and choose a voice.' }, { q: 'How long is a typical listing video?', a: '5, 10, or 15 seconds depending on duration and photo count.' }, { q: 'Can I use the video on Property24 and BuyRentKenya?', a: 'Yes. The output is a standard MP4 file that uploads to any portal.' }] },
+  { slug: 'wedding-photo-video', title: 'How to Make a Wedding Photo Slideshow Video in Minutes', description: 'Turn your wedding photos into a moving slideshow video with music and narration.', date: '2026-01-22', faqs: [{ q: 'Can I use my own music?', a: 'Yes. Upload an MP3, WAV, or M4A file that you have rights to use.' }, { q: 'How long is the final video?', a: 'Typically 5, 10, or 15 seconds.' }, { q: 'Can I share it on WhatsApp?', a: 'Yes. The output is a standard MP4 file.' }, { q: 'Will it look professional?', a: 'Yes. The AI adds natural motion, pacing, and transitions.' }] },
+  { slug: 'restaurant-promo-video', title: 'Restaurant Promo Videos Without a Videographer', description: 'How restaurants create branded promo videos from phone footage.', date: '2026-01-25', faqs: [{ q: 'Do I need a logo?', a: 'Yes, upload your logo as a PNG with transparent background.' }, { q: 'Can I add my opening hours?', a: 'Yes. Enter your phone, address, and hours.' }, { q: 'What voice is used?', a: 'A natural, friendly female voice suited to restaurant promos.' }, { q: 'Can I post the same video on multiple platforms?', a: 'Yes. The output is a standard MP4.' }] },
+  { slug: 'add-captions-tiktok', title: 'How to Add Captions to TikTok Videos (Without an Editor)', description: 'Add burned-in captions to TikTok videos in minutes.', date: '2026-01-28', faqs: [{ q: 'Can I use trending audio on TikTok with captions?', a: 'Yes. Upload your video with the trending audio already included.' }, { q: 'How many captions can I add?', a: 'Unlimited. Each caption displays for 1.5 seconds by default.' }, { q: 'Will captions affect the algorithm?', a: 'Positively. TikTok reads on-screen text as part of its ranking.' }, { q: 'How much does it cost?', a: 'A flat KES 200 per video. No subscription.' }] },
+  { slug: 'brand-video-logo-voiceover', title: 'How to Add a Logo Intro and Voiceover to Any Video', description: 'Add a professional logo intro, AI voiceover, and closing contact card to any video.', date: '2026-02-01', faqs: [{ q: 'Can I use my own voiceover script?', a: 'Yes. Provide the text and the AI reads it.' }, { q: 'What if I do not have a logo?', a: 'You need a PNG image with transparent background.' }, { q: 'How long should the raw video be?', a: 'Anywhere from 10 seconds to several minutes.' }, { q: 'How much does it cost?', a: 'A flat KES 250 per video.' }] },
+  { slug: 'text-to-video-vs-photo-to-video', title: 'Text to Video vs Photo to Video: Which Do You Need?', description: 'A practical comparison of AI text-to-video and AI photo-to-video.', date: '2026-02-05', faqs: [{ q: 'Which produces more realistic output?', a: 'Photo-to-video preserves realism because it starts from real photos.' }, { q: 'Can I use text-to-video for real estate?', a: 'Photo-to-video is far better for real estate.' }, { q: 'Which is faster?', a: 'Both finish in under 2 minutes for most projects.' }, { q: 'Do I need to pick one?', a: 'No. Many creators use both.' }] },
+  { slug: 'ai-video-cost-guide', title: 'How Much Does AI Video Generation Cost in 2026?', description: 'A complete cost breakdown of AI video generation in 2026.', date: '2026-02-08', faqs: [{ q: 'Do you charge per minute or per video?', a: 'Per video. A 30-second video and a 5-minute video cost the same for most services.' }, { q: 'Are there any hidden fees?', a: 'No. The price shown at checkout is the price charged.' }, { q: 'Can I get a bulk discount?', a: 'Contact sales@katareel.com for volumes above 50 videos per month.' }, { q: 'What payment methods do you accept?', a: 'Card and M-Pesa through Pesapal.' }] },
+  { slug: 'ai-video-kenya-small-business', title: 'How Kenyan Small Businesses Are Using AI Video in 2026', description: 'How Kenyan small businesses use AI video to compete with larger brands.', date: '2026-02-12', faqs: [{ q: 'Do I need special equipment?', a: 'No. A modern smartphone is more than enough.' }, { q: 'Can I pay with M-Pesa?', a: 'Yes. All payments accept M-Pesa, Airtel Money, and cards.' }, { q: 'Do I need technical skills?', a: 'No. If you can upload a photo to WhatsApp, you can use Katareel.' }, { q: 'How fast is delivery?', a: 'Most videos finish in under 3 minutes.' }] }
+];
+
+const BLOG_SCHEMAS = {};
+BLOG_META.forEach(function(post) {
+  BLOG_SCHEMAS[post.slug + '_article'] = { '@context': 'https://schema.org', '@type': 'BlogPosting', headline: post.title, description: post.description, datePublished: post.date, dateModified: post.date, author: { '@type': 'Organization', name: 'Katareel Team', url: BASE_URL + '/' }, publisher: { '@type': 'Organization', name: 'Katareel', logo: { '@type': 'ImageObject', url: BASE_URL + '/logo192.png' } }, mainEntityOfPage: { '@type': 'WebPage', '@id': BASE_URL + '/blog/' + post.slug } };
+  BLOG_SCHEMAS[post.slug + '_faq'] = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: post.faqs.map(function(f) { return { '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } }; }) };
+});
 
 const T2V_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'AI Text to Video Generation', serviceType: 'Text to Video Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'AI-powered text-to-video generation. Describe a scene and receive a generated video clip in minutes.', offers: { '@type': 'Offer', price: 200, priceCurrency: 'KES', url: BASE_URL + '/create' } };
 const T2V_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How does AI text-to-video generation work?', acceptedAnswer: { '@type': 'Answer', text: 'You describe the scene in plain language, and our AI generates a video clip matching your prompt - no cameras, actors, or editing software required.' } }, { '@type': 'Question', name: 'How long can my video be?', acceptedAnswer: { '@type': 'Answer', text: 'Currently we support 5, 10, and 15-second clips.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'Starting at KES 200 for a 5-second clip. Prices scale with duration.' } }, { '@type': 'Question', name: 'Do I own the videos I create?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Once rendered and paid for, the video is yours to use commercially.' } }] };
@@ -278,6 +373,7 @@ function rewriteHead(html, meta) {
       if (s === 'rt_faq') obj = RT_FAQ_SCHEMA;
       if (s === 'tt_service') obj = TT_SERVICE_SCHEMA;
       if (s === 'tt_faq') obj = TT_FAQ_SCHEMA;
+      if (BLOG_SCHEMAS[s]) obj = BLOG_SCHEMAS[s];
       if (obj) {
         injected += '<script type="application/ld+json">' + JSON.stringify(obj) + '</script>';
       }
