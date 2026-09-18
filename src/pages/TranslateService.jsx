@@ -60,8 +60,8 @@ function TranslateService() {
         <title>AI Video Translation — Translate Videos to 37 Languages | Katareel</title>
         <meta name="description" content="Dub any video into Swahili, French, Spanish, Chinese, Arabic, and 33 more languages with AI. Preserves voice tone and pacing. Flat rate KES 300." />
         <link rel="canonical" href="https://www.katareel.com/services/translate" />
-        <script type="application/ld+json">{JSON.stringify(serviceSchema)}</script>
-        <script type="application/ld+json">{JSON.stringify(faqSchema)}</script>
+        <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(serviceSchema) }} />
+        <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }} />
       </Helmet>
 
       <style>{`@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600;700&display=swap'); .font-display { font-family: 'Space Grotesk', sans-serif; } .font-body { font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }`}</style>
