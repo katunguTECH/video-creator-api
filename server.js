@@ -515,7 +515,7 @@ if (MAILGUN_API_KEY && MAILGUN_API_KEY !== 'your_mailgun_api_key') {
     emailProvider = 'mailgun';
     console.log('📧 Mailgun configured successfully!');
     console.log(`   Domain: ${MAILGUN_DOMAIN}`);
-    console.log(`   From: VidAI Creator <noreply@${MAILGUN_DOMAIN}>`);
+    console.log(`   From: Katareel <noreply@${MAILGUN_DOMAIN}>`);
   } catch (error) {
     console.error('❌ Mailgun configuration error:', error.message);
   }
@@ -619,7 +619,7 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
   };
 
   return {
-    subject: '🧾 Payment Confirmation - VidAI Creator',
+    subject: '🧾 Payment Confirmation - Katareel',
     html: `
       <!DOCTYPE html>
       <html>
@@ -671,7 +671,7 @@ function generatePaymentReceiptEmail(email, amount, reference, serviceType, dura
 
           <p style="margin-top: 20px;">Your video is being generated and will be sent to you shortly.</p>
           <p>If you have any questions, please reply to this email.</p>
-          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+          <p>Best regards,<br><strong>Katareel Team</strong></p>
         </div>
         <div class="footer">
           <p>This is a system-generated receipt. Please keep it for your records.</p>
@@ -747,8 +747,8 @@ function generateVideoDeliveryEmail(email, videoUrl, prompt, amount, duration) {
             </p>
           </div>
 
-          <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
-          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+          <p style="margin-top: 20px;">Thank you for using Katareel! 🚀</p>
+          <p>Best regards,<br><strong>Katareel Team</strong></p>
         </div>
         <div class="footer">
           <p>This email was sent to ${email}. If you have any questions, reply to this email.</p>
@@ -834,8 +834,8 @@ function generateTranslationEmail(email, videoUrl, translatedText, language, amo
             <p><strong>Status:</strong> ✅ Completed</p>
           </div>
 
-          <p style="margin-top: 20px;">Thank you for using VidAI Creator! 🚀</p>
-          <p>Best regards,<br><strong>VidAI Creator Team</strong></p>
+          <p style="margin-top: 20px;">Thank you for using Katareel! 🚀</p>
+          <p>Best regards,<br><strong>Katareel Team</strong></p>
         </div>
         <div class="footer">
           <p>This email was sent to ${email}. If you have any questions, reply to this email.</p>
@@ -2272,7 +2272,7 @@ app.post('/api/test-email', async (req, res) => {
 
     const result = await sendEmail(
       email,
-      '✅ Test Email from VidAI Creator',
+      '✅ Test Email from Katareel',
       `
         <h1>Test Email Successful!</h1>
         <p>Your email configuration is working correctly.</p>
