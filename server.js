@@ -405,6 +405,19 @@ app.use((req, res, next) => {
 // ============================================
 // MIDDLEWARE
 // ============================================
+// ============================================
+// PRERENDER MIDDLEWARE FOR SEO
+// Serves fully-rendered HTML to search engine bots
+// ============================================
+const prerender = require('prerender-node');
+const PRERENDER_TOKEN = process.env.PRERENDER_TOKEN;
+
+if (PRERENDER_TOKEN) {
+  app.use(prerender.set('prerenderToken', PRERENDER_TOKEN));
+  console.log('✅ Prerender middleware enabled for SEO bots');
+} else {
+  console.warn('⚠️ PRERENDER_TOKEN not set - bot requests will serve the SPA shell');
+}
 app.use(express.json({ limit: '100mb' }));
 app.use(express.urlencoded({ extended: true, limit: '100mb' }));
 
