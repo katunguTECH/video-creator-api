@@ -16,6 +16,7 @@ import PhotosToVideoService from './pages/PhotosToVideoService';
 import BrandVideoService from './pages/BrandVideoService';
 import MusicCaptionsService from './pages/MusicCaptionsService';
 import Updates from './pages/Updates';
+import ToolPage from './pages/ToolPage';
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
           <Route path="/services/brand-video" element={<BrandVideoService />} />
           <Route path="/services/music-captions" element={<MusicCaptionsService />} />
           <Route path="/updates" element={<Updates />} />
+          <Route path="/services/:service/:slug" element={<ToolPage />} />
           <Route path="/create" element={<CreateVideo />} />
           <Route path="/preview" element={<Preview />} />
           <Route path="/translate" element={<TranslateVideo />} />

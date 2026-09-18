@@ -97,7 +97,50 @@ const PAGES = {
     canonical: BASE_URL + '/updates',
     keepVideos: false,
     schemas: [],
-  },};
+  },
+  '/services/translate/swahili': {
+    title: 'Translate Video to Swahili — AI Dubbing | Katareel',
+    description: 'Dub any video into Swahili with AI. Preserves voice tone, pacing, and meaning. Flat rate KES 300. Popular for Kenyan and East African audiences.',
+    canonical: BASE_URL + '/services/translate/swahili',
+    keepVideos: false,
+    schemas: ['sw_service', 'sw_faq'],
+  },
+  '/services/translate/french': {
+    title: 'Translate Video to French — AI Dubbing | Katareel',
+    description: 'Dub any video into French with AI. Natural tone, correct pacing. Flat rate KES 300. Ideal for West African, European, and Canadian audiences.',
+    canonical: BASE_URL + '/services/translate/french',
+    keepVideos: false,
+    schemas: ['fr_service', 'fr_faq'],
+  },
+  '/services/photos-to-video/real-estate': {
+    title: 'Real Estate Photo to Video — AI Listing Videos | Katareel',
+    description: 'Turn property photos into a moving listing video in minutes. No videographer needed. Perfect for agents and landlords. From KES 300 per property.',
+    canonical: BASE_URL + '/services/photos-to-video/real-estate',
+    keepVideos: false,
+    schemas: ['re_service', 're_faq'],
+  },
+  '/services/photos-to-video/wedding': {
+    title: 'Wedding Photo to Video — AI Wedding Slideshow | Katareel',
+    description: 'Turn wedding photos into a moving video with music and narration. Share with family, keep forever. From KES 300. No editing skills needed.',
+    canonical: BASE_URL + '/services/photos-to-video/wedding',
+    keepVideos: false,
+    schemas: ['wd_service', 'wd_faq'],
+  },
+  '/services/brand-video/restaurants': {
+    title: 'Restaurant Promo Video — Add Logo, Voiceover & Hours | Katareel',
+    description: 'Turn your food footage into a branded restaurant promo with logo intro, AI voiceover, and closing contact card. Flat rate KES 250. Ready in minutes.',
+    canonical: BASE_URL + '/services/brand-video/restaurants',
+    keepVideos: false,
+    schemas: ['rt_service', 'rt_faq'],
+  },
+  '/services/music-captions/tiktok': {
+    title: 'Add Captions to TikTok Videos — AI Caption Tool | Katareel',
+    description: 'Add burned-in captions to TikTok videos with multiple styles and positions. KES 200 flat rate. Works with trending-style text overlays.',
+    canonical: BASE_URL + '/services/music-captions/tiktok',
+    keepVideos: false,
+    schemas: ['tt_service', 'tt_faq'],
+  },
+};
 
 
 
@@ -112,6 +155,23 @@ const BV_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', ma
 
 const MC_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Music and Captions for Video', serviceType: 'Video Music and Captions Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Add background music and professionally styled on-screen captions to any video.', offers: { '@type': 'Offer', price: 200, priceCurrency: 'KES', url: BASE_URL + '/music-captions' } };
 const MC_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How does music and captions addition work?', acceptedAnswer: { '@type': 'Answer', text: 'Upload your video, optionally upload a music track, add caption text, and we mix and burn both into the video.' } }, { '@type': 'Question', name: 'What caption styles are available?', acceptedAnswer: { '@type': 'Answer', text: 'Subtle, bold, neon, classic, and karaoke. Each can be positioned at the top, center, or bottom.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat KES 200 per video. No subscription.' } }, { '@type': 'Question', name: 'Will captions work on all platforms?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Captions are burned into the video so they display on any platform.' } }] };
+const SW_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Translate Your Video to Swahili', serviceType: 'Video Translation to Swahili', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Dub any video into Swahili with AI.', url: BASE_URL + '/services/translate/swahili' };
+const SW_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How accurate is AI Swahili translation?', acceptedAnswer: { '@type': 'Answer', text: 'Our AI produces natural-sounding Swahili that a native speaker will understand.' } }, { '@type': 'Question', name: 'Does it handle Kenyan Swahili slang?', acceptedAnswer: { '@type': 'Answer', text: 'It handles standard Swahili well. Very localised sheng may not translate perfectly.' } }, { '@type': 'Question', name: 'How long does Swahili translation take?', acceptedAnswer: { '@type': 'Answer', text: 'Videos under 5 minutes are typically translated in 60 to 180 seconds.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat KES 300 per video, regardless of length up to 50 MB.' } }] };
+
+const FR_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Translate Your Video to French', serviceType: 'Video Translation to French', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Dub any video into French with AI.', url: BASE_URL + '/services/translate/french' };
+const FR_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'Is the French translation European or Canadian?', acceptedAnswer: { '@type': 'Answer', text: 'Our default is standard European French, widely understood globally including in Canada and Africa.' } }, { '@type': 'Question', name: 'How accurate is the AI French?', acceptedAnswer: { '@type': 'Answer', text: 'Highly accurate for standard business and conversational content.' } }, { '@type': 'Question', name: 'How long does French translation take?', acceptedAnswer: { '@type': 'Answer', text: 'Most videos are translated in 60 to 180 seconds.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat KES 300 per video, regardless of length up to 50 MB.' } }] };
+
+const RE_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Real Estate Photo to Video', serviceType: 'Real Estate Video Generation', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Turn property photos into a moving listing video in minutes.', url: BASE_URL + '/services/photos-to-video/real-estate' };
+const RE_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How many photos do I need?', acceptedAnswer: { '@type': 'Answer', text: 'Between 1 and 10 photos work best.' } }, { '@type': 'Question', name: 'Can I add narration?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Provide a script and choose male, female, or neutral voice.' } }, { '@type': 'Question', name: 'How long is the video?', acceptedAnswer: { '@type': 'Answer', text: 'Typically 5, 10, or 15 seconds depending on the number of photos and duration.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'From KES 300 for a single photo in a 5-second clip.' } }] };
+
+const WD_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Wedding Photo to Video', serviceType: 'Wedding Video Generation', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Turn wedding photos into a moving video with music and narration.', url: BASE_URL + '/services/photos-to-video/wedding' };
+const WD_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'How many photos can I include?', acceptedAnswer: { '@type': 'Answer', text: 'Between 1 and 10 photos per video.' } }, { '@type': 'Question', name: 'Can I add music or narration?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Add background music and/or a voiceover script.' } }, { '@type': 'Question', name: 'How long is the video?', acceptedAnswer: { '@type': 'Answer', text: 'Typically 5, 10, or 15 seconds depending on the number of photos.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'From KES 300 per video.' } }] };
+
+const RT_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Restaurant Promo Video', serviceType: 'Restaurant Video Marketing', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Turn your food footage into a branded restaurant promo.', url: BASE_URL + '/services/brand-video/restaurants' };
+const RT_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'What should I upload?', acceptedAnswer: { '@type': 'Answer', text: 'Any food photos or short video clips.' } }, { '@type': 'Question', name: 'How do I add my logo and hours?', acceptedAnswer: { '@type': 'Answer', text: 'Upload your logo as a PNG and enter your contact details.' } }, { '@type': 'Question', name: 'What voice is used for the narration?', acceptedAnswer: { '@type': 'Answer', text: 'A natural, friendly female voice suited to restaurant promos.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat KES 250 per video.' } }] };
+
+const TT_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Add Captions to TikTok Videos', serviceType: 'TikTok Caption Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Add burned-in captions to TikTok videos with multiple styles and positions.', url: BASE_URL + '/services/music-captions/tiktok' };
+const TT_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'What caption styles are available?', acceptedAnswer: { '@type': 'Answer', text: 'Subtle, bold, neon, classic, and karaoke styles.' } }, { '@type': 'Question', name: 'How many captions can I add?', acceptedAnswer: { '@type': 'Answer', text: 'Unlimited. Each caption displays for 1.5 seconds by default.' } }, { '@type': 'Question', name: 'Will the captions play on any device?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Captions are burned into the video itself.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat KES 200 per video.' } }] };
 const BUILD_DIR = path.join(__dirname, '..', 'build');
 const PORT = 45678;
 
@@ -206,6 +266,18 @@ function rewriteHead(html, meta) {
       if (s === 'bv_faq') obj = BV_FAQ_SCHEMA;
       if (s === 'mc_service') obj = MC_SERVICE_SCHEMA;
       if (s === 'mc_faq') obj = MC_FAQ_SCHEMA;
+      if (s === 'sw_service') obj = SW_SERVICE_SCHEMA;
+      if (s === 'sw_faq') obj = SW_FAQ_SCHEMA;
+      if (s === 'fr_service') obj = FR_SERVICE_SCHEMA;
+      if (s === 'fr_faq') obj = FR_FAQ_SCHEMA;
+      if (s === 're_service') obj = RE_SERVICE_SCHEMA;
+      if (s === 're_faq') obj = RE_FAQ_SCHEMA;
+      if (s === 'wd_service') obj = WD_SERVICE_SCHEMA;
+      if (s === 'wd_faq') obj = WD_FAQ_SCHEMA;
+      if (s === 'rt_service') obj = RT_SERVICE_SCHEMA;
+      if (s === 'rt_faq') obj = RT_FAQ_SCHEMA;
+      if (s === 'tt_service') obj = TT_SERVICE_SCHEMA;
+      if (s === 'tt_faq') obj = TT_FAQ_SCHEMA;
       if (obj) {
         injected += '<script type="application/ld+json">' + JSON.stringify(obj) + '</script>';
       }
