@@ -64,7 +64,7 @@ const BLOG_POSTS = [
       {
         h2: 'Cost and turnaround',
         paras: [
-          'At Katareel, Swahili video translation costs a flat $1 (KES 300) per video, regardless of length up to 50 MB. There is no subscription, no monthly fee, and no per-minute pricing.',
+          'At Katareel, Swahili video translation costs a flat $2.32 (KES 300) per video, regardless of length up to 50 MB. There is no subscription, no monthly fee, and no per-minute pricing.',
           'Most videos finish in 60 to 180 seconds. Longer videos take proportionally longer but rarely exceed 10 minutes.'
         ]
       }

@@ -11,7 +11,7 @@ const FAQS = [
   { q: 'How does AI text-to-video generation work?', a: 'You describe the scene in plain language, and our AI generates a video clip matching your prompt - no cameras, actors, or editing software required. Most videos render in 30 to 90 seconds.' },
   { q: 'What kinds of prompts work best?', a: 'Be specific about the scene, mood, and style. For example: a slow drone shot over a coastal town at sunrise, cinematic, warm colors produces better results than just a town.' },
   { q: 'How long can my video be?', a: 'Currently we support 5, 10, and 15-second clips. Longer durations cost proportionally more and take longer to render.' },
-  { q: 'How much does it cost?', a: 'Starting at $1 (KES 200) for a 5-second clip. Prices scale with duration - you pay per video, no subscription.' },
+  { q: 'How much does it cost?', a: 'Starting at $1.54 (KES 200) for a 5-second clip. Prices scale with duration - you pay per video, no subscription.' },
   { q: 'Do I own the videos I create?', a: 'Yes. Once rendered and paid for, the video is yours to use for marketing, social media, client work, or any commercial purpose.' },
   { q: 'How do I pay?', a: 'Card, PayPal, or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
 ];

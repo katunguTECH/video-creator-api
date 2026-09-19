@@ -12,7 +12,7 @@ const FAQS = [
   { q: 'What caption styles are available?', a: 'Subtle, bold, neon, classic, and karaoke styles. Each can be positioned at the top, center, or bottom of the frame.' },
   { q: 'Can I control when captions appear?', a: 'Yes. Captions are timed to your video. By default they display at 1.5-second intervals, and you can add as many caption lines as you need.' },
   { q: 'What music can I upload?', a: 'Any audio file you have the rights to use - MP3, WAV, or M4A. We mix it under your existing audio at a volume you control.' },
-  { q: 'How much does it cost?', a: 'A flat $1 (KES 200) per video. No subscription. Pay only when you add music or captions.' },
+  { q: 'How much does it cost?', a: 'A flat $1.54 (KES 200) per video. No subscription. Pay only when you add music or captions.' },
   { q: 'Will captions work on all platforms?', a: 'Yes. Captions are permanently burned into the video, so they display on TikTok, Instagram, YouTube, LinkedIn, and any other platform.' },
 ];
 

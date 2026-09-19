@@ -12,7 +12,7 @@ const FAQS = [
   { q: 'What video should I upload?', a: 'Any business video works - a product demo, behind-the-scenes footage, testimonials, or a service walkthrough. It should be MP4, MOV, AVI, or WEBM up to 50 MB.' },
   { q: 'Can I write my own voiceover script?', a: 'Yes. Provide your own script and we will narrate it. Or leave the field blank and we will auto-generate a script based on your company name and tagline.' },
   { q: 'What voice is used for the voiceover?', a: 'We use a natural-sounding neural voice. The default is a confident, friendly female voice suited to brand promos.' },
-  { q: 'How much does it cost?', a: 'A flat $1 (KES 250) per video. No subscription, no monthly fee - you pay only for the brand video you generate.' },
+  { q: 'How much does it cost?', a: 'A flat $1.93 (KES 250) per video. No subscription, no monthly fee - you pay only for the brand video you generate.' },
   { q: 'Can I use the final video commercially?', a: 'Yes. Once rendered and paid for, the branded video is yours to use on any platform - social, ads, website, or client work.' },
 ];
 
