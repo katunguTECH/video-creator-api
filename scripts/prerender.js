@@ -216,7 +216,43 @@ const PAGES = {
     canonical: BASE_URL + '/blog/ai-video-small-business-growth',
     keepVideos: false,
     schemas: ['ai-video-small-business-growth_article', 'ai-video-small-business-growth_faq'],
-  },};
+  },
+  '/services/translate/spanish': {
+    title: 'Translate Video to Spanish — AI Dubbing | Katareel',
+    description: 'Dub any video into Spanish with AI. Natural tone, correct pacing. Flat rate $2.32 (KES 300). Ideal for Latin America, Spain, and US Hispanic audiences.',
+    canonical: BASE_URL + '/services/translate/spanish',
+    keepVideos: false,
+    schemas: ['es_service', 'es_faq'],
+  },
+  '/services/translate/arabic': {
+    title: 'Translate Video to Arabic — AI Dubbing | Katareel',
+    description: 'Dub any video into Modern Standard Arabic with AI. Natural tone, correct pacing. Flat rate $2.32 (KES 300). Ideal for GCC, MENA, and global Arab audiences.',
+    canonical: BASE_URL + '/services/translate/arabic',
+    keepVideos: false,
+    schemas: ['ar_service', 'ar_faq'],
+  },
+  '/services/photos-to-video/product-shots': {
+    title: 'Product Photos to Video — AI E-commerce Video Maker | Katareel',
+    description: 'Turn product photos into video for e-commerce, Instagram Shop, Amazon, Shopify, and social ads. No videographer needed. From $2.32 (KES 300).',
+    canonical: BASE_URL + '/services/photos-to-video/product-shots',
+    keepVideos: false,
+    schemas: ['ps_service', 'ps_faq'],
+  },
+  '/services/brand-video/real-estate-agents': {
+    title: 'Real Estate Agent Video — Intro, Listings & Promo | Katareel',
+    description: 'Create branded real estate videos with logo intro, AI voiceover, and closing contact card. Flat rate $1.93 (KES 250). Perfect for agents and brokerages.',
+    canonical: BASE_URL + '/services/brand-video/real-estate-agents',
+    keepVideos: false,
+    schemas: ['ra_service', 'ra_faq'],
+  },
+  '/services/music-captions/instagram-reels': {
+    title: 'Add Captions to Instagram Reels — AI Caption Tool | Katareel',
+    description: 'Add burned-in captions to Instagram Reels with multiple styles and positions. Flat rate $1.54 (KES 200). Works with trending audio and reel transitions.',
+    canonical: BASE_URL + '/services/music-captions/instagram-reels',
+    keepVideos: false,
+    schemas: ['ir_service', 'ir_faq'],
+  },
+};
 
 
 
@@ -267,6 +303,45 @@ const RT_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', ma
 
 const TT_SERVICE_SCHEMA = { '@context': 'https://schema.org', '@type': 'Service', name: 'Add Captions to TikTok Videos', serviceType: 'TikTok Caption Service', provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: 'Add burned-in captions to TikTok videos with multiple styles and positions.', url: BASE_URL + '/services/music-captions/tiktok' };
 const TT_FAQ_SCHEMA = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: [{ '@type': 'Question', name: 'What caption styles are available?', acceptedAnswer: { '@type': 'Answer', text: 'Subtle, bold, neon, classic, and karaoke styles.' } }, { '@type': 'Question', name: 'How many captions can I add?', acceptedAnswer: { '@type': 'Answer', text: 'Unlimited. Each caption displays for 1.5 seconds by default.' } }, { '@type': 'Question', name: 'Will the captions play on any device?', acceptedAnswer: { '@type': 'Answer', text: 'Yes. Captions are burned into the video itself.' } }, { '@type': 'Question', name: 'How much does it cost?', acceptedAnswer: { '@type': 'Answer', text: 'A flat $1.54 (KES 200) per video.' } }] };
+
+const PROGRAMMATIC_META = [
+  { key: 'es', name: 'Translate Your Video to Spanish', svcType: 'Video Translation to Spanish', url: '/services/translate/spanish', desc: 'Dub any video into Spanish with AI.', faqs: [
+    { q: 'Is the Spanish translation Latin American or European?', a: 'Our default Spanish is neutral Latin American Spanish, widely understood in both Spain and Latin America.' },
+    { q: 'How accurate is the AI Spanish?', a: 'Highly accurate for business, marketing, and conversational content.' },
+    { q: 'How long does Spanish translation take?', a: 'Most videos are translated in 60 to 180 seconds.' },
+    { q: 'How much does it cost?', a: 'A flat $2.32 (KES 300) per video.' }
+  ]},
+  { key: 'ar', name: 'Translate Your Video to Arabic', svcType: 'Video Translation to Arabic', url: '/services/translate/arabic', desc: 'Dub any video into Modern Standard Arabic with AI.', faqs: [
+    { q: 'Is the Arabic translation Modern Standard or a dialect?', a: 'Our default is Modern Standard Arabic (MSA), understood across all Arab countries.' },
+    { q: 'How accurate is the AI Arabic?', a: 'Highly accurate for business, marketing, and informational content.' },
+    { q: 'How long does Arabic translation take?', a: 'Most videos are translated in 60 to 180 seconds.' },
+    { q: 'How much does it cost?', a: 'A flat $2.32 (KES 300) per video.' }
+  ]},
+  { key: 'ps', name: 'Product Photos to Video', svcType: 'E-commerce Product Video', url: '/services/photos-to-video/product-shots', desc: 'Turn product photos into video for e-commerce.', faqs: [
+    { q: 'What kind of product photos work best?', a: 'Clean, well-lit photos with the product as the subject.' },
+    { q: 'How many photos can I use per product?', a: 'Between 1 and 10 photos.' },
+    { q: 'Can I add a voiceover with price and features?', a: 'Yes. Provide a script with key selling points.' },
+    { q: 'How much does it cost?', a: 'From $2.32 (KES 300) per video.' }
+  ]},
+  { key: 'ra', name: 'Real Estate Agent Brand Videos', svcType: 'Real Estate Video Branding', url: '/services/brand-video/real-estate-agents', desc: 'Create branded real estate videos with logo intro and AI voiceover.', faqs: [
+    { q: 'What should I upload?', a: 'Any agent footage — listing walkthroughs, talking-head clips, or drone shots.' },
+    { q: 'How do I add my logo and contact details?', a: 'Upload your logo as a PNG and enter your phone, email, and brokerage.' },
+    { q: 'Can I write my own voiceover script?', a: 'Yes. Provide the text and the AI reads it.' },
+    { q: 'How much does it cost?', a: 'A flat $1.93 (KES 250) per video.' }
+  ]},
+  { key: 'ir', name: 'Add Captions to Instagram Reels', svcType: 'Instagram Reel Captions', url: '/services/music-captions/instagram-reels', desc: 'Add burned-in captions to Instagram Reels.', faqs: [
+    { q: 'What caption styles are available?', a: 'Subtle, bold, neon, classic, and karaoke styles.' },
+    { q: 'Will captions work with trending audio?', a: 'Yes. Upload your reel with the trending audio already attached.' },
+    { q: 'How many captions can I add?', a: 'Unlimited. Each caption displays for 1.5 seconds by default.' },
+    { q: 'How much does it cost?', a: 'A flat $1.54 (KES 200) per video.' }
+  ]}
+];
+
+const PROGRAMMATIC_SCHEMAS = {};
+PROGRAMMATIC_META.forEach(function(p) {
+  PROGRAMMATIC_SCHEMAS[p.key + '_service'] = { '@context': 'https://schema.org', '@type': 'Service', name: p.name, serviceType: p.svcType, provider: { '@type': 'Organization', name: 'Katareel', url: BASE_URL + '/' }, areaServed: 'Worldwide', description: p.desc, url: BASE_URL + p.url };
+  PROGRAMMATIC_SCHEMAS[p.key + '_faq'] = { '@context': 'https://schema.org', '@type': 'FAQPage', mainEntity: p.faqs.map(function(f) { return { '@type': 'Question', name: f.q, acceptedAnswer: { '@type': 'Answer', text: f.a } }; }) };
+});
 const BUILD_DIR = path.join(__dirname, '..', 'build');
 const PORT = 45678;
 
@@ -374,6 +449,7 @@ function rewriteHead(html, meta) {
       if (s === 'tt_service') obj = TT_SERVICE_SCHEMA;
       if (s === 'tt_faq') obj = TT_FAQ_SCHEMA;
       if (BLOG_SCHEMAS[s]) obj = BLOG_SCHEMAS[s];
+      if (PROGRAMMATIC_SCHEMAS[s]) obj = PROGRAMMATIC_SCHEMAS[s];
       if (obj) {
         injected += '<script type="application/ld+json">' + JSON.stringify(obj) + '</script>';
       }
