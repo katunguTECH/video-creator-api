@@ -35,7 +35,7 @@ const FAQS = [
   { q: 'What kinds of videos can I create?',    a: 'Five tools in one: text-to-video, photo-to-video, translation, branding, and music & captions. Use them standalone or chain them together.' },
   { q: 'How much does it cost?',                a: 'Prices start at KES 200 (about $1.55) per video. Everything is billed per video — no subscription, no hidden fees.' },
   { q: 'How long does it take?',                a: 'Text-to-video and photo-to-video generate in 30–90 seconds. Translation and music/captions finish in about 60–180 seconds.' },
-  { q: 'How do I pay?',                         a: 'Card or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
+  { q: 'How do I pay?',                         a: 'Card, PayPal, or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
   { q: 'What languages can I translate into?',  a: '37 languages including Swahili, French, Spanish, Mandarin, Arabic, Hindi, Portuguese, and more. Voice tone and timing are preserved.' },
 ];
 
@@ -172,7 +172,7 @@ function Home() {
     <div className="bg-[#0A0E1A] text-[#F5F7FB] font-body min-h-screen">
       <Helmet>
         <title>Katareel — AI Video Translator, Creator & Branding Tools</title>
-        <meta name="description" content="AI video translator, text-to-video generator, photo-to-video, brand video, and music & captions — all in one place. Pay by card or M-Pesa." />
+        <meta name="description" content="AI video translator, text-to-video generator, photo-to-video, brand video, and music & captions — all in one place. Pay by card, PayPal, or M-Pesa." />
         <link rel="canonical" href="https://www.katareel.com/" />
       </Helmet>
 
@@ -243,7 +243,7 @@ function Home() {
 
           <p className="text-base text-[#7C87A3] max-w-2xl mx-auto mb-10">
             Generate, translate, brand, caption, or animate — all in one place.
-            Prices in USD, billed in KES via card or M-Pesa.
+            Prices in USD. Available worldwide. Card, PayPal, or M-Pesa.
           </p>
 
           <div className="flex flex-wrap justify-center items-center gap-3 mb-6">
@@ -258,8 +258,8 @@ function Home() {
           </div>
 
           <div className="flex flex-wrap justify-center items-center gap-x-6 gap-y-2 text-xs text-[#5C6478]">
-            <span>✦ Pay by card or M-Pesa</span>
-            <span>✦ Delivered in minutes</span>
+            <span>✦ Pay by card, PayPal, or M-Pesa</span>
+            <span>✦ Delivered worldwide in minutes</span>
             <span>✦ No subscription</span>
           </div>
         </div>
@@ -380,7 +380,7 @@ function Home() {
               { n: 37,  s: '+', label: 'Languages supported' },
               { n: 5,   s: '',  label: 'AI tools in one' },
               { n: 90,  s: 's', label: 'Typical generation time' },
-              { n: 200, s: '',  label: 'Starting price (KES)' },
+              { n: 100, s: '%', label: 'Commercial rights included' },
             ].map((stat, i) => (
               <div key={i} className="bg-[#10162A] border border-white/10 rounded-2xl p-6 text-center">
                 <div className="font-display text-4xl font-semibold text-white mb-2">
@@ -401,7 +401,7 @@ function Home() {
         <div className="grid sm:grid-cols-3 gap-8">
           {[
             { n: '01', t: 'Pick a tool',       d: 'Text, photos, translation, branding, or music & captions. Each one stands alone.' },
-            { n: '02', t: 'Pay & upload',      d: 'Card or M-Pesa through Pesapal. Prices in USD, billed in KES. No subscription.' },
+            { n: '02', t: 'Pay & upload',      d: 'Card, PayPal, or M-Pesa through Pesapal. Prices in USD, billed in KES. No subscription.' },
             { n: '03', t: 'Download or share', d: 'Your video arrives by email in minutes, ready to post wherever your audience is.' },
           ].map((step, i) => (
             <Reveal key={i} delay={i * 120}>
@@ -445,7 +445,7 @@ function Home() {
         </div>
         <Reveal delay={300}>
           <p className="text-center text-xs text-[#5C6478] mt-6">
-            Prices shown in USD at today's live exchange rate. Billed in Kenyan Shillings via card or M-Pesa.
+            Prices shown in USD at today's live exchange rate. Billed in Kenyan Shillings via card, PayPal, or M-Pesa.
           </p>
         </Reveal>
       </section>
@@ -485,7 +485,7 @@ function Home() {
           <div className="grid sm:grid-cols-3 gap-8">
             <div>
               <div className="font-display text-lg font-semibold text-white mb-2">Katareel</div>
-              <p className="text-sm text-[#7C87A3]">AI video tools for creators, teams, and small businesses.</p>
+              <p className="text-sm text-[#7C87A3]">AI video tools for creators, teams, and businesses worldwide.</p>
             </div>
             <div>
               <div className="text-xs uppercase tracking-wider text-[#5C6478] mb-3">Contact</div>

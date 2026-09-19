@@ -89,7 +89,7 @@ function PhotosToVideoService() {
             { n: '01', t: 'Upload your photos', d: 'Add 1 to 10 photos. JPG, PNG, or WEBP up to 10 MB each. Clear subjects work best.' },
             { n: '02', t: 'Describe the mood', d: 'A short prompt guides pacing, transitions, and tone. Optional but recommended.' },
             { n: '03', t: 'Add narration (optional)', d: 'Provide a script and choose male, female, or neutral voice. We generate the audio.' },
-            { n: '04', t: 'Pay securely', d: 'Card or M-Pesa through Pesapal. Price scales with photo count and duration.' },
+            { n: '04', t: 'Pay securely', d: 'Card, PayPal, or M-Pesa through Pesapal. Price scales with photo count and duration.' },
             { n: '05', t: 'Download and share', d: 'Your finished video arrives in minutes by email and in the browser. Yours forever.' },
           ].map((step) => (
             <div key={step.n} className="flex gap-6">

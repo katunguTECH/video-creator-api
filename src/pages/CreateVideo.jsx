@@ -231,7 +231,7 @@ function CreateVideo() {
             <h4>ℹ️ How It Works</h4>
             <ul>
               <li>📝 Describe what you want the AI to generate</li>
-              <li>💳 Pay securely via Pesapal (Card or M-Pesa)</li>
+              <li>💳 Pay securely via Pesapal (Card, PayPal, or M-Pesa)</li>
               <li>📥 Download your AI-generated video</li>
               <li>🔒 All payments are secure and PCI-DSS compliant</li>
             </ul>

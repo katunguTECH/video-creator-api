@@ -311,7 +311,7 @@ function TranslateVideo() {
           <ul>
             <li>📤 Upload a video with audio</li>
             <li>🌍 Choose languages</li>
-            <li>💳 Pay securely via Pesapal (Card or M-Pesa)</li>
+            <li>💳 Pay securely via Pesapal (Card, PayPal, or M-Pesa)</li>
             <li>📥 Download the translated video</li>
           </ul>
         </div>

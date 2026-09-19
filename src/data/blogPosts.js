@@ -38,7 +38,7 @@ const BLOG_POSTS = [
         bullets: [
           'Step 1: Go to katareel.com/translate and upload your video (MP4, MOV, AVI, or WEBM up to 50 MB).',
           'Step 2: Select Swahili as your target language.',
-          'Step 3: Pay KES 300 via card or M-Pesa through Pesapal.',
+          'Step 3: Pay KES 300 via card, PayPal, or M-Pesa through Pesapal.',
           'Step 4: The AI transcribes, translates, and generates the Swahili voiceover. Takes 60 to 180 seconds.',
           'Step 5: Download your finished Swahili video from the browser or from your email.'
         ]
@@ -194,7 +194,7 @@ const BLOG_POSTS = [
           'Step 1: Upload 3 to 10 property photos at katareel.com/photos-to-video',
           'Step 2: Add a short prompt describing the property (optional but recommended)',
           'Step 3: Add narration script with key features, price, and contact (optional)',
-          'Step 4: Pay KES 300 via card or M-Pesa',
+          'Step 4: Pay KES 300 via card, PayPal, or M-Pesa',
           'Step 5: Download the finished video and post it to your listing'
         ]
       },
@@ -211,7 +211,7 @@ const BLOG_POSTS = [
       { q: 'How many photos do I need?', a: 'Between 1 and 10. For real estate, 5 to 8 photos work best — exterior, main rooms, kitchen, bathroom, and outdoor space.' },
       { q: 'Can I add narration with the price and my contact?', a: 'Yes. Provide a script and choose a voice. The AI generates the audio and mixes it in.' },
       { q: 'How long is a typical listing video?', a: '5, 10, or 15 seconds depending on your chosen duration and photo count.' },
-      { q: 'Can I use the video on Property24 and BuyRentKenya?', a: 'Yes. The output is a standard MP4 file that uploads to any portal.' }
+      { q: 'Can I use the video on property portals?', a: 'Yes. The output is a standard MP4 file that uploads to any major property portal — Zillow, Rightmove, Property24, Realtor.com, and more.' }
     ],
     cta: {
       text: 'Turn your next property listing into a video.',
@@ -517,7 +517,7 @@ const BLOG_POSTS = [
       {
         h2: 'What text-to-video does',
         paras: [
-          'Text-to-video takes a written description and generates a video clip from scratch. You describe a scene — "a drone shot over a Nairobi skyline at sunset" — and the AI creates the footage.',
+          'Text-to-video takes a written description and generates a video clip from scratch. You describe a scene — "a drone shot over a coastal city at sunset" — and the AI creates the footage.',
           'Nothing is uploaded. Nothing is filmed. The video is entirely synthesised.'
         ]
       },
@@ -662,21 +662,21 @@ const BLOG_POSTS = [
     }
   },
   {
-    slug: 'ai-video-kenya-small-business',
+    slug: 'ai-video-small-business-growth',
     category: 'Business',
     accent: '#4C6FFF',
     heroEmoji: '🇰🇪',
     readingTime: 6,
     publishedDate: '2026-02-12',
-    title: 'How Kenyan Small Businesses Are Using AI Video in 2026',
-    metaTitle: 'AI Video for Kenyan Small Business — Complete 2026 Guide | Katareel',
-    description: 'How Kenyan small businesses use AI video to compete with larger brands. Real use cases, costs, and step-by-step guidance.',
-    intro: 'For years, small Kenyan businesses had two choices: no video at all, or an expensive production that ate a chunk of their marketing budget. AI video has closed that gap. Today, a Nairobi restaurant, a Mombasa real estate agent, and a Kisumu e-learning startup can all produce professional video at small-business prices.',
+    title: 'How Small Businesses Worldwide Are Using AI Video in 2026',
+    metaTitle: 'AI Video for Small Business — Complete 2026 Guide | Katareel',
+    description: 'How small businesses worldwide use AI video to compete with larger brands. Real use cases, costs, and step-by-step guidance.',
+    intro: 'For years, small businesses had two choices: no video at all, or an expensive production that ate a chunk of their marketing budget. AI video has closed that gap. Today, a Lagos restaurant, a London real estate agent, and a Toronto e-learning startup can all produce professional video at small-business prices.',
     sections: [
       {
         h2: 'The problem small businesses faced',
         paras: [
-          'Traditional video production in Kenya costs KES 15,000 to KES 100,000 per project, plus scheduling, reshoots, and delays. Most small businesses simply could not afford it. They relied on photos and text, and lost customers to competitors who invested in video.',
+          'Traditional video production costs anywhere from $200 to $2,000 per project, plus scheduling, reshoots, and delays. Most small businesses simply could not afford it. They relied on photos and text, and lost customers to competitors who invested in video.',
           'Meanwhile, the platforms that matter most — Instagram, TikTok, WhatsApp Business, and Google Business Profile — all prioritise video content.'
         ]
       },
@@ -690,11 +690,11 @@ const BLOG_POSTS = [
         ]
       },
       {
-        h2: 'Real use cases from Kenyan businesses',
-        paras: ['The most common ways small Kenyan businesses are using AI video:'],
+        h2: 'Real use cases from businesses worldwide',
+        paras: ['The most common ways small businesses are using AI video:'],
         bullets: [
           'Restaurants: weekly specials videos for Instagram and TikTok',
-          'Real estate agents: listing videos for Property24, BuyRentKenya, and Instagram',
+          'Real estate agents: listing videos for property portals, Instagram, and TikTok',
           'E-commerce shops: product showcase videos for social media',
           'E-learning startups: localised course content in Swahili and English',
           'NGOs and health organisations: public health messages in multiple languages',
@@ -713,7 +713,7 @@ const BLOG_POSTS = [
         ]
       },
       {
-        h2: 'Step-by-step for a Kenyan small business',
+        h2: 'Step-by-step for any small business',
         paras: ['A typical workflow for a restaurant or shop:'],
         bullets: [
           'Step 1: Take a few photos or short video clips on your phone',
@@ -726,14 +726,14 @@ const BLOG_POSTS = [
       {
         h2: 'Why this matters',
         paras: [
-          'The businesses that win over the next two years will be the ones that treat video as a weekly habit, not a yearly project. AI video makes that possible for the first time in Kenya.',
+          'The businesses that win over the next two years will be the ones that treat video as a weekly habit, not a yearly project. AI video makes that possible for the first time.',
           'Instead of one big production per year, small businesses can now produce one video per day, test what works, and iterate based on results.'
         ]
       }
     ],
     faqs: [
       { q: 'Do I need special equipment?', a: 'No. A modern smartphone with a decent camera is more than enough. Most of our customers upload phone photos and videos.' },
-      { q: 'Can I pay with M-Pesa?', a: 'Yes. All payments are processed through Pesapal and accept M-Pesa, Airtel Money, and cards.' },
+      { q: 'What payment methods do you accept?', a: 'Card, PayPal, and M-Pesa through Pesapal. Every payment method works globally.' },
       { q: 'Do I need technical skills?', a: 'No. If you can upload a photo to WhatsApp, you can use Katareel.' },
       { q: 'How fast is delivery?', a: 'Most videos finish in under 3 minutes.' }
     ],

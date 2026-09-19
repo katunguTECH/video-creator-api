@@ -391,7 +391,7 @@ function PhotosToVideo() {
             <ul>
               <li>📤 Upload a photo</li>
               <li>📝 Describe what you want</li>
-              <li>💳 Pay securely via Pesapal (Card or M-Pesa)</li>
+              <li>💳 Pay securely via Pesapal (Card, PayPal, or M-Pesa)</li>
               <li>📥 Download your video</li>
               <li>🔄 Use your redo coupon for free regeneration</li>
             </ul>

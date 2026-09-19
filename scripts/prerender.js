@@ -210,12 +210,12 @@ const PAGES = {
     keepVideos: false,
     schemas: ['ai-video-cost-guide_article', 'ai-video-cost-guide_faq'],
   },
-  '/blog/ai-video-kenya-small-business': {
-    title: 'AI Video for Kenyan Small Business — Complete 2026 Guide | Katareel',
-    description: 'How Kenyan small businesses use AI video to compete with larger brands.',
-    canonical: BASE_URL + '/blog/ai-video-kenya-small-business',
+  '/blog/ai-video-small-business-growth': {
+    title: 'AI Video for Small Business — Complete 2026 Guide | Katareel',
+    description: 'How small businesses worldwide use AI video to compete with larger brands.',
+    canonical: BASE_URL + '/blog/ai-video-small-business-growth',
     keepVideos: false,
-    schemas: ['ai-video-kenya-small-business_article', 'ai-video-kenya-small-business_faq'],
+    schemas: ['ai-video-small-business-growth_article', 'ai-video-small-business-growth_faq'],
   },};
 
 
@@ -230,7 +230,7 @@ const BLOG_META = [
   { slug: 'brand-video-logo-voiceover', title: 'How to Add a Logo Intro and Voiceover to Any Video', description: 'Add a professional logo intro, AI voiceover, and closing contact card to any video.', date: '2026-02-01', faqs: [{ q: 'Can I use my own voiceover script?', a: 'Yes. Provide the text and the AI reads it.' }, { q: 'What if I do not have a logo?', a: 'You need a PNG image with transparent background.' }, { q: 'How long should the raw video be?', a: 'Anywhere from 10 seconds to several minutes.' }, { q: 'How much does it cost?', a: 'A flat KES 250 per video.' }] },
   { slug: 'text-to-video-vs-photo-to-video', title: 'Text to Video vs Photo to Video: Which Do You Need?', description: 'A practical comparison of AI text-to-video and AI photo-to-video.', date: '2026-02-05', faqs: [{ q: 'Which produces more realistic output?', a: 'Photo-to-video preserves realism because it starts from real photos.' }, { q: 'Can I use text-to-video for real estate?', a: 'Photo-to-video is far better for real estate.' }, { q: 'Which is faster?', a: 'Both finish in under 2 minutes for most projects.' }, { q: 'Do I need to pick one?', a: 'No. Many creators use both.' }] },
   { slug: 'ai-video-cost-guide', title: 'How Much Does AI Video Generation Cost in 2026?', description: 'A complete cost breakdown of AI video generation in 2026.', date: '2026-02-08', faqs: [{ q: 'Do you charge per minute or per video?', a: 'Per video. A 30-second video and a 5-minute video cost the same for most services.' }, { q: 'Are there any hidden fees?', a: 'No. The price shown at checkout is the price charged.' }, { q: 'Can I get a bulk discount?', a: 'Contact sales@katareel.com for volumes above 50 videos per month.' }, { q: 'What payment methods do you accept?', a: 'Card and M-Pesa through Pesapal.' }] },
-  { slug: 'ai-video-kenya-small-business', title: 'How Kenyan Small Businesses Are Using AI Video in 2026', description: 'How Kenyan small businesses use AI video to compete with larger brands.', date: '2026-02-12', faqs: [{ q: 'Do I need special equipment?', a: 'No. A modern smartphone is more than enough.' }, { q: 'Can I pay with M-Pesa?', a: 'Yes. All payments accept M-Pesa, Airtel Money, and cards.' }, { q: 'Do I need technical skills?', a: 'No. If you can upload a photo to WhatsApp, you can use Katareel.' }, { q: 'How fast is delivery?', a: 'Most videos finish in under 3 minutes.' }] }
+  { slug: 'ai-video-small-business-growth', title: 'How Small Businesses Worldwide Are Using AI Video in 2026', description: 'How small businesses worldwide use AI video to compete with larger brands.', date: '2026-02-12', faqs: [{ q: 'Do I need special equipment?', a: 'No. A modern smartphone is more than enough.' }, { q: 'What payment methods do you accept?', a: 'Yes. All payments accept M-Pesa, Airtel Money, and cards.' }, { q: 'Do I need technical skills?', a: 'No. If you can upload a photo to WhatsApp, you can use Katareel.' }, { q: 'How fast is delivery?', a: 'Most videos finish in under 3 minutes.' }] }
 ];
 
 const BLOG_SCHEMAS = {};

@@ -13,7 +13,7 @@ const FAQS = [
   { q: 'How long does video translation take?', a: 'Most videos under 5 minutes are translated in 60-180 seconds. Longer videos take proportionally longer - usually under 10 minutes.' },
   { q: 'What video formats do you accept?', a: 'We accept MP4, AVI, MOV, and WEBM files up to 50 MB. If your video is hosted elsewhere (YouTube, Drive, etc.), you can download it first and upload the file.' },
   { q: 'How much does video translation cost?', a: 'Translation is a flat rate of KES 300 (about $2.30) per video, regardless of length up to 50 MB. There are no subscriptions and no hidden fees - you pay per video.' },
-  { q: 'How do I pay?', a: 'Card or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
+  { q: 'How do I pay?', a: 'Card, PayPal, or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
   { q: 'Can I use the translated video commercially?', a: 'Yes. Once you have paid for the translation and downloaded the file, you own the output and can use it for any commercial purpose - marketing, social media, client work, e-learning, and more.' },
 ];
 

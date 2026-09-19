@@ -13,7 +13,7 @@ const FAQS = [
   { q: 'How long can my video be?', a: 'Currently we support 5, 10, and 15-second clips. Longer durations cost proportionally more and take longer to render.' },
   { q: 'How much does it cost?', a: 'Starting at KES 200 (about $1.55) for a 5-second clip. Prices scale with duration - you pay per video, no subscription.' },
   { q: 'Do I own the videos I create?', a: 'Yes. Once rendered and paid for, the video is yours to use for marketing, social media, client work, or any commercial purpose.' },
-  { q: 'How do I pay?', a: 'Card or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
+  { q: 'How do I pay?', a: 'Card, PayPal, or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
 ];
 
 const USE_CASES = [
@@ -88,7 +88,7 @@ function TextToVideoService() {
           {[
             { n: '01', t: 'Write your prompt', d: 'Describe what you want to see. Be specific about subject, mood, camera angle, and lighting for best results.' },
             { n: '02', t: 'Pick duration', d: 'Choose 5, 10, or 15 seconds. Longer clips cost proportionally more and take slightly longer to render.' },
-            { n: '03', t: 'Pay securely', d: 'Card or M-Pesa through Pesapal. Prices shown in USD, billed in Kenyan Shillings.' },
+            { n: '03', t: 'Pay securely', d: 'Card, PayPal, or M-Pesa through Pesapal. Prices shown in USD, billed in Kenyan Shillings.' },
             { n: '04', t: 'AI renders your clip', d: 'Our models process your prompt and generate a matching video. Typically 30-90 seconds.' },
             { n: '05', t: 'Download and use', d: 'The finished video arrives in your browser and by email. Use it commercially with no restrictions.' },
           ].map((step) => (
