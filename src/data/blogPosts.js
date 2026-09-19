@@ -38,7 +38,7 @@ const BLOG_POSTS = [
         bullets: [
           'Step 1: Go to katareel.com/translate and upload your video (MP4, MOV, AVI, or WEBM up to 50 MB).',
           'Step 2: Select Swahili as your target language.',
-          'Step 3: Pay KES 300 via card, PayPal, or M-Pesa through Pesapal.',
+          'Step 3: Pay $2.32 (KES 300) via card, PayPal, or M-Pesa through Pesapal.',
           'Step 4: The AI transcribes, translates, and generates the Swahili voiceover. Takes 60 to 180 seconds.',
           'Step 5: Download your finished Swahili video from the browser or from your email.'
         ]
@@ -64,7 +64,7 @@ const BLOG_POSTS = [
       {
         h2: 'Cost and turnaround',
         paras: [
-          'At Katareel, Swahili video translation costs a flat KES 300 (about $2.30) per video, regardless of length up to 50 MB. There is no subscription, no monthly fee, and no per-minute pricing.',
+          'At Katareel, Swahili video translation costs a flat $1 (KES 300) per video, regardless of length up to 50 MB. There is no subscription, no monthly fee, and no per-minute pricing.',
           'Most videos finish in 60 to 180 seconds. Longer videos take proportionally longer but rarely exceed 10 minutes.'
         ]
       }
@@ -116,8 +116,8 @@ const BLOG_POSTS = [
       {
         h2: 'What does AI video translation cost?',
         paras: [
-          'Traditional video translation with human translators and voice artists costs anywhere from KES 15,000 to KES 80,000 per video, depending on length and language.',
-          'AI video translation with Katareel costs a flat KES 300 per video. No subscription, no per-minute pricing, no minimum order. You pay only when you translate.'
+          'Traditional video translation with human translators and voice artists costs anywhere from $115.77 (KES 15,000) to $617.50 (KES 80,000) per video, depending on length and language.',
+          'AI video translation with Katareel costs a flat $2.32 (KES 300) per video. No subscription, no per-minute pricing, no minimum order. You pay only when you translate.'
         ]
       },
       {
@@ -166,7 +166,7 @@ const BLOG_POSTS = [
       {
         h2: 'The problem with traditional property video',
         paras: [
-          'Hiring a videographer for a single property costs KES 8,000 to KES 25,000, plus scheduling, weather delays, and reshoot risk. For agents with 10+ listings, that is not scalable.',
+          'Hiring a videographer for a single property costs $61.75 (KES 8,000) to $193.00 (KES 25,000), plus scheduling, weather delays, and reshoot risk. For agents with 10+ listings, that is not scalable.',
           'Photo-only listings, meanwhile, get passed over. Buyers scroll past static galleries because they cannot picture how the space flows.'
         ]
       },
@@ -194,16 +194,16 @@ const BLOG_POSTS = [
           'Step 1: Upload 3 to 10 property photos at katareel.com/photos-to-video',
           'Step 2: Add a short prompt describing the property (optional but recommended)',
           'Step 3: Add narration script with key features, price, and contact (optional)',
-          'Step 4: Pay KES 300 via card, PayPal, or M-Pesa',
+          'Step 4: Pay $2.32 (KES 300) via card, PayPal, or M-Pesa',
           'Step 5: Download the finished video and post it to your listing'
         ]
       },
       {
         h2: 'Cost comparison',
         paras: [
-          'Traditional videographer: KES 8,000 to KES 25,000 per property, 3 to 7 days turnaround.',
-          'AI photo-to-video: KES 300 per property, under 5 minutes turnaround.',
-          'For a portfolio of 20 listings, this is the difference between KES 160,000 and KES 6,000.'
+          'Traditional videographer: $61.75 (KES 8,000) to $193.00 (KES 25,000) per property, 3 to 7 days turnaround.',
+          'AI photo-to-video: $2.32 (KES 300) per property, under 5 minutes turnaround.',
+          'For a portfolio of 20 listings, this is the difference between $1235.20 (KES 160,000) and $46.32 (KES 6,000).'
         ]
       }
     ],
@@ -228,7 +228,7 @@ const BLOG_POSTS = [
     publishedDate: '2026-01-22',
     title: 'How to Make a Wedding Photo Slideshow Video in Minutes',
     metaTitle: 'Wedding Photo to Video — AI Slideshow Maker | Katareel',
-    description: 'Turn your wedding photos into a moving slideshow video with music and narration. No editing skills needed. From KES 300 per video.',
+    description: 'Turn your wedding photos into a moving slideshow video with music and narration. No editing skills needed. From $2.32 (KES 300) per video.',
     intro: 'Your wedding photographer delivered 500 photos on a USB stick. They are beautiful, but they sit on a hard drive and rarely get shared. AI photo-to-video turns your best 10 shots into a moving slideshow video you can actually send to family, post on social media, and keep forever.',
     sections: [
       {
@@ -257,7 +257,7 @@ const BLOG_POSTS = [
           'Step 2: Upload them at katareel.com/photos-to-video',
           'Step 3: Describe the mood (romantic, joyful, cinematic)',
           'Step 4: Add background music and/or a narration script',
-          'Step 5: Pay KES 300 and download your video in minutes'
+          'Step 5: Pay $2.32 (KES 300) and download your video in minutes'
         ]
       },
       {
@@ -293,7 +293,7 @@ const BLOG_POSTS = [
     publishedDate: '2026-01-25',
     title: 'Restaurant Promo Videos Without a Videographer',
     metaTitle: 'Restaurant Promo Video — Logo, Voiceover & Hours | Katareel',
-    description: 'How restaurants can create branded promo videos from phone footage. Logo intro, AI voiceover, and closing contact card. Flat rate KES 250.',
+    description: 'How restaurants can create branded promo videos from phone footage. Logo intro, AI voiceover, and closing contact card. Flat rate $1.93 (KES 250).',
     intro: 'Independent restaurants cannot afford a videographer for every menu update, but they also cannot compete on social media without video. AI-powered brand video bridges that gap: you upload phone footage of your food, and get back a professional promo in minutes.',
     sections: [
       {
@@ -337,7 +337,7 @@ const BLOG_POSTS = [
       {
         h2: 'Cost and speed',
         paras: [
-          'Katareel brand videos cost a flat KES 250 per video. Most restaurants order three to five videos per month, one for each weekly special.',
+          'Katareel brand videos cost a flat $1.93 (KES 250) per video. Most restaurants order three to five videos per month, one for each weekly special.',
           'Turnaround is under five minutes per video. You can schedule a lunch special promo the same morning it is being served.'
         ]
       }
@@ -363,7 +363,7 @@ const BLOG_POSTS = [
     publishedDate: '2026-01-28',
     title: 'How to Add Captions to TikTok Videos (Without an Editor)',
     metaTitle: 'How to Add Captions to TikTok Videos — Complete Guide | Katareel',
-    description: 'Add burned-in captions to TikTok videos in minutes. Learn why captions boost watch time, and how to do it without editing software. Flat rate KES 200.',
+    description: 'Add burned-in captions to TikTok videos in minutes. Learn why captions boost watch time, and how to do it without editing software. Flat rate $1.54 (KES 200).',
     intro: 'TikTok auto-captions exist, but they are often inaccurate, poorly positioned, and lack style. Burned-in captions give you full control over what your audience sees, and they work even when a viewer watches with sound off — which is how 85% of TikTok is consumed.',
     sections: [
       {
@@ -403,7 +403,7 @@ const BLOG_POSTS = [
           'Step 2: Type each caption line one at a time',
           'Step 3: Choose style, position, and font size',
           'Step 4: Optionally add background music and control the mix',
-          'Step 5: Pay KES 200 and download the captioned video'
+          'Step 5: Pay $1.54 (KES 200) and download the captioned video'
         ]
       },
       {
@@ -422,7 +422,7 @@ const BLOG_POSTS = [
       { q: 'Can I use trending audio on TikTok with captions?', a: 'Yes. Upload your video with the trending audio already included, and add captions on top.' },
       { q: 'How many captions can I add?', a: 'Unlimited. Each caption displays for 1.5 seconds by default.' },
       { q: 'Will captions affect the algorithm?', a: 'Positively. TikTok reads on-screen text as part of its ranking. Captions help your video appear in more search results.' },
-      { q: 'How much does it cost?', a: 'A flat KES 200 per video. No subscription.' }
+      { q: 'How much does it cost?', a: 'A flat $1.54 (KES 200) per video. No subscription.' }
     ],
     cta: {
       text: 'Add captions to your next TikTok.',
@@ -439,7 +439,7 @@ const BLOG_POSTS = [
     publishedDate: '2026-02-01',
     title: 'How to Add a Logo Intro and Voiceover to Any Video',
     metaTitle: 'Add Logo Intro & Voiceover to Video — AI Brand Video | Katareel',
-    description: 'Add a professional logo intro, AI voiceover, and closing contact card to any business video. No editing skills needed. Flat rate KES 250.',
+    description: 'Add a professional logo intro, AI voiceover, and closing contact card to any business video. No editing skills needed. Flat rate $1.93 (KES 250).',
     intro: 'A raw video without branding looks unprofessional. A video with a clean logo intro, natural voiceover, and closing contact card looks like it came from a production house. AI makes the second option possible in minutes, at a fraction of the cost.',
     sections: [
       {
@@ -466,7 +466,7 @@ const BLOG_POSTS = [
           'Step 2: Upload your logo as a PNG with transparent background',
           'Step 3: Enter your company name, tagline, and contact details',
           'Step 4: Provide a voiceover script, or leave blank for auto-generation',
-          'Step 5: Pay KES 250 and download the branded video'
+          'Step 5: Pay $1.93 (KES 250) and download the branded video'
         ]
       },
       {
@@ -494,7 +494,7 @@ const BLOG_POSTS = [
       { q: 'Can I use my own voiceover script?', a: 'Yes. Provide the text and the AI reads it. Or leave blank and the AI generates a script based on your company name and tagline.' },
       { q: 'What if I do not have a logo?', a: 'You need a PNG image with transparent background. If you do not have one, we can suggest free tools to create one in minutes.' },
       { q: 'How long should the raw video be?', a: 'Anywhere from 10 seconds to several minutes. The AI layers voiceover across the full duration.' },
-      { q: 'How much does it cost?', a: 'A flat KES 250 per video. No subscription.' }
+      { q: 'How much does it cost?', a: 'A flat $1.93 (KES 250) per video. No subscription.' }
     ],
     cta: {
       text: 'Brand your next video in minutes.',
@@ -553,8 +553,8 @@ const BLOG_POSTS = [
       {
         h2: 'Cost and turnaround',
         paras: [
-          'Text-to-video starts at KES 200 for a 5-second clip.',
-          'Photo-to-video starts at KES 300 for a single-photo 5-second clip, with prices scaling by photo count and duration.',
+          'Text-to-video starts at $1.54 (KES 200) for a 5-second clip.',
+          'Photo-to-video starts at $2.32 (KES 300) for a single-photo 5-second clip, with prices scaling by photo count and duration.',
           'Both finish in under 2 minutes for most projects.'
         ]
       },
@@ -606,21 +606,21 @@ const BLOG_POSTS = [
         h2: 'What each AI video service should cost',
         paras: ['Fair pricing for AI video services in 2026:'],
         bullets: [
-          'Text-to-video: KES 200 to KES 500 for 5 seconds',
-          'Photo-to-video: KES 300 to KES 800 depending on photo count',
-          'Video translation: KES 200 to KES 500 flat rate',
-          'Brand video with logo intro and voiceover: KES 200 to KES 400',
-          'Music and captions: KES 150 to KES 400'
+          'Text-to-video: $1.54 (KES 200) to $3.86 (KES 500) for 5 seconds',
+          'Photo-to-video: $2.32 (KES 300) to $6.18 (KES 800) depending on photo count',
+          'Video translation: $1.54 (KES 200) to $3.86 (KES 500) flat rate',
+          'Brand video with logo intro and voiceover: $1.54 (KES 200) to $3.09 (KES 400)',
+          'Music and captions: $1.16 (KES 150) to $3.09 (KES 400)'
         ]
       },
       {
         h2: 'Comparison with traditional video production',
         paras: ['For context, here is what traditional video production costs:'],
         bullets: [
-          'Videographer on location: KES 15,000 to KES 50,000 per day',
-          'Voiceover artist: KES 5,000 to KES 20,000 per minute',
-          'Professional video editor: KES 10,000 to KES 40,000 per project',
-          'Video translator with human voice actor: KES 15,000 to KES 80,000 per video'
+          'Videographer on location: $115.77 (KES 15,000) to $386.00 (KES 50,000) per day',
+          'Voiceover artist: $38.60 (KES 5,000) to $154.35 (KES 20,000) per minute',
+          'Professional video editor: $77.20 (KES 10,000) to $308.80 (KES 40,000) per project',
+          'Video translator with human voice actor: $115.77 (KES 15,000) to $617.50 (KES 80,000) per video'
         ],
         parasAfter: [
           'AI replaces most of these costs with per-video pricing that is 10x to 100x cheaper.'
@@ -630,11 +630,11 @@ const BLOG_POSTS = [
         h2: 'Our pricing at Katareel',
         paras: ['Every Katareel service is priced per video, no subscription:'],
         bullets: [
-          'Text to Video: from KES 200',
-          'Photos to Video: from KES 300',
-          'Video Translation: KES 300 flat',
-          'Brand Video: KES 250 flat',
-          'Music & Captions: KES 200 flat'
+          'Text to Video: from $1.54 (KES 200)',
+          'Photos to Video: from $2.32 (KES 300)',
+          'Video Translation: $2.32 (KES 300) flat',
+          'Brand Video: $1.93 (KES 250) flat',
+          'Music & Captions: $1.54 (KES 200) flat'
         ]
       },
       {
@@ -705,11 +705,11 @@ const BLOG_POSTS = [
         h2: 'What it costs',
         paras: [
           'AI video pricing is not just lower than traditional production — it is often less than the price of a single meal.',
-          'Text to Video: from KES 200',
-          'Photos to Video: from KES 300',
-          'Video Translation (to Swahili, French, and 35 others): KES 300',
-          'Brand Video (logo intro + voiceover + contact card): KES 250',
-          'Music and Captions: KES 200'
+          'Text to Video: from $1.54 (KES 200)',
+          'Photos to Video: from $2.32 (KES 300)',
+          'Video Translation (to Swahili, French, and 35 others): $2.32 (KES 300)',
+          'Brand Video (logo intro + voiceover + contact card): $1.93 (KES 250)',
+          'Music and Captions: $1.54 (KES 200)'
         ]
       },
       {

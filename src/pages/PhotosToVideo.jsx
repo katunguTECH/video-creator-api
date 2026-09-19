@@ -227,7 +227,7 @@ function PhotosToVideo() {
     <div className="photos-to-video-page">
       <Helmet>
         <title>AI Photo to Video Maker — Turn Photos into Videos | Katareel</title>
-        <meta name="description" content="Upload photos and let AI turn them into a moving video with narration. Perfect for real estate, products, weddings, and social media. From KES 300." />
+        <meta name="description" content="Upload photos and let AI turn them into a moving video with narration. Perfect for real estate, products, weddings, and social media. From $2.32 (KES 300)." />
         <link rel="canonical" href="https://www.katareel.com/photos-to-video" />
       </Helmet>
       <div className="header">

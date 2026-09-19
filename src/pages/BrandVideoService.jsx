@@ -12,7 +12,7 @@ const FAQS = [
   { q: 'What video should I upload?', a: 'Any business video works - a product demo, behind-the-scenes footage, testimonials, or a service walkthrough. It should be MP4, MOV, AVI, or WEBM up to 50 MB.' },
   { q: 'Can I write my own voiceover script?', a: 'Yes. Provide your own script and we will narrate it. Or leave the field blank and we will auto-generate a script based on your company name and tagline.' },
   { q: 'What voice is used for the voiceover?', a: 'We use a natural-sounding neural voice. The default is a confident, friendly female voice suited to brand promos.' },
-  { q: 'How much does it cost?', a: 'A flat KES 250 (about $1.93) per video. No subscription, no monthly fee - you pay only for the brand video you generate.' },
+  { q: 'How much does it cost?', a: 'A flat $1 (KES 250) per video. No subscription, no monthly fee - you pay only for the brand video you generate.' },
   { q: 'Can I use the final video commercially?', a: 'Yes. Once rendered and paid for, the branded video is yours to use on any platform - social, ads, website, or client work.' },
 ];
 
@@ -42,7 +42,7 @@ function BrandVideoService() {
     <div className="bg-[#0A0E1A] text-[#F5F7FB] min-h-screen font-body">
       <Helmet>
         <title>Brand Video Maker — Add Logo Intro, Voiceover & Outro | Katareel</title>
-        <meta name="description" content="Upload your video and logo. We add a professional intro card, AI voiceover, and closing contact card automatically. Ideal for SMEs. KES 250 flat rate." />
+        <meta name="description" content="Upload your video and logo. We add a professional intro card, AI voiceover, and closing contact card automatically. Ideal for SMEs. $1.93 (KES 250) flat rate." />
         <link rel="canonical" href="https://www.katareel.com/services/brand-video" />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(serviceSchema) }} />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }} />
@@ -76,7 +76,7 @@ function BrandVideoService() {
           <a href="#how" className="border border-white/15 hover:border-white/40 hover:bg-white/5 text-white px-7 py-3.5 rounded-xl transition-all">How it works</a>
         </div>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[#7C87A3]">
-          <span>✦ Flat rate {rate ? formatUsd(PRICE_KES, rate) : 'KES 250'}</span>
+          <span>✦ Flat rate {rate ? formatUsd(PRICE_KES, rate) : '$1.93 (KES 250)'}</span>
           <span>✦ Automatic narration</span>
           <span>✦ Commercial use included</span>
         </div>

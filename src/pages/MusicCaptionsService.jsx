@@ -12,7 +12,7 @@ const FAQS = [
   { q: 'What caption styles are available?', a: 'Subtle, bold, neon, classic, and karaoke styles. Each can be positioned at the top, center, or bottom of the frame.' },
   { q: 'Can I control when captions appear?', a: 'Yes. Captions are timed to your video. By default they display at 1.5-second intervals, and you can add as many caption lines as you need.' },
   { q: 'What music can I upload?', a: 'Any audio file you have the rights to use - MP3, WAV, or M4A. We mix it under your existing audio at a volume you control.' },
-  { q: 'How much does it cost?', a: 'A flat KES 200 (about $1.54) per video. No subscription. Pay only when you add music or captions.' },
+  { q: 'How much does it cost?', a: 'A flat $1 (KES 200) per video. No subscription. Pay only when you add music or captions.' },
   { q: 'Will captions work on all platforms?', a: 'Yes. Captions are permanently burned into the video, so they display on TikTok, Instagram, YouTube, LinkedIn, and any other platform.' },
 ];
 
@@ -42,7 +42,7 @@ function MusicCaptionsService() {
     <div className="bg-[#0A0E1A] text-[#F5F7FB] min-h-screen font-body">
       <Helmet>
         <title>Add Music & Captions to Any Video — AI Caption Tool | Katareel</title>
-        <meta name="description" content="Add background music and on-screen captions to any video in minutes. Multiple caption styles, positioned exactly where you want. KES 200 flat rate." />
+        <meta name="description" content="Add background music and on-screen captions to any video in minutes. Multiple caption styles, positioned exactly where you want. $1.54 (KES 200) flat rate." />
         <link rel="canonical" href="https://www.katareel.com/services/music-captions" />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(serviceSchema) }} />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }} />
@@ -76,7 +76,7 @@ function MusicCaptionsService() {
           <a href="#how" className="border border-white/15 hover:border-white/40 hover:bg-white/5 text-white px-7 py-3.5 rounded-xl transition-all">How it works</a>
         </div>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[#7C87A3]">
-          <span>✦ Flat rate {rate ? formatUsd(PRICE_KES, rate) : 'KES 200'}</span>
+          <span>✦ Flat rate {rate ? formatUsd(PRICE_KES, rate) : '$1.54 (KES 200)'}</span>
           <span>✦ Burned-in captions</span>
           <span>✦ Commercial use included</span>
         </div>

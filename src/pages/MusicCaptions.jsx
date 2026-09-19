@@ -170,7 +170,7 @@ function MusicCaptions() {
     <div className="min-h-screen bg-gradient-to-br from-purple-900 via-black to-pink-900 text-white p-6">
       <Helmet>
         <title>Add Music & Captions to Any Video — AI Caption Tool | Katareel</title>
-        <meta name="description" content="Add background music and on-screen captions to any video in minutes. Multiple caption styles, positioned exactly where you want. KES 200 flat rate." />
+        <meta name="description" content="Add background music and on-screen captions to any video in minutes. Multiple caption styles, positioned exactly where you want. $1.54 (KES 200) flat rate." />
         <link rel="canonical" href="https://www.katareel.com/music-captions" />
       </Helmet>
       <div className="max-w-6xl mx-auto">

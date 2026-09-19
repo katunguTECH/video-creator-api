@@ -12,7 +12,7 @@ const FAQS = [
   { q: 'Will the translated voice sound like the original speaker?', a: 'The AI voice is generated in a natural tone that matches the gender and pacing of the original speech. It is not a clone of the original speaker, but it sounds natural and professional.' },
   { q: 'How long does video translation take?', a: 'Most videos under 5 minutes are translated in 60-180 seconds. Longer videos take proportionally longer - usually under 10 minutes.' },
   { q: 'What video formats do you accept?', a: 'We accept MP4, AVI, MOV, and WEBM files up to 50 MB. If your video is hosted elsewhere (YouTube, Drive, etc.), you can download it first and upload the file.' },
-  { q: 'How much does video translation cost?', a: 'Translation is a flat rate of KES 300 (about $2.30) per video, regardless of length up to 50 MB. There are no subscriptions and no hidden fees - you pay per video.' },
+  { q: 'How much does video translation cost?', a: 'Translation is a flat rate of $1 (KES 300) per video, regardless of length up to 50 MB. There are no subscriptions and no hidden fees - you pay per video.' },
   { q: 'How do I pay?', a: 'Card, PayPal, or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
   { q: 'Can I use the translated video commercially?', a: 'Yes. Once you have paid for the translation and downloaded the file, you own the output and can use it for any commercial purpose - marketing, social media, client work, e-learning, and more.' },
 ];
@@ -58,7 +58,7 @@ function TranslateService() {
     <div className="bg-[#0A0E1A] text-[#F5F7FB] min-h-screen font-body">
       <Helmet>
         <title>AI Video Translation — Translate Videos to 37 Languages | Katareel</title>
-        <meta name="description" content="Dub any video into Swahili, French, Spanish, Chinese, Arabic, and 33 more languages with AI. Preserves voice tone and pacing. Flat rate KES 300." />
+        <meta name="description" content="Dub any video into Swahili, French, Spanish, Chinese, Arabic, and 33 more languages with AI. Preserves voice tone and pacing. Flat rate $2.32 (KES 300)." />
         <link rel="canonical" href="https://www.katareel.com/services/translate" />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(serviceSchema) }} />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }} />
@@ -94,7 +94,7 @@ function TranslateService() {
           <a href="#how" className="border border-white/15 hover:border-white/40 hover:bg-white/5 text-white px-7 py-3.5 rounded-xl transition-all">How it works</a>
         </div>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[#7C87A3]">
-          <span>✦ Flat rate {rate ? formatUsd(PRICE_KES, rate) : 'KES 300'}</span>
+          <span>✦ Flat rate {rate ? formatUsd(PRICE_KES, rate) : '$2.32 (KES 300)'}</span>
           <span>✦ Delivered in minutes</span>
           <span>✦ Commercial use included</span>
         </div>

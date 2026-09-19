@@ -12,7 +12,7 @@ const FAQS = [
   { q: 'How many photos can I upload?', a: 'Between 1 and 10 photos per video. Pricing depends on the number of photos and video duration.' },
   { q: 'What kinds of photos work best?', a: 'Clear, well-lit photos with a distinct subject work best. Portrait shots of people, product photos on plain backgrounds, and real estate photos all produce strong results.' },
   { q: 'Can I add a voiceover?', a: 'Yes. Provide a script and choose a male, female, or neutral voice. We generate the audio and mix it into the video automatically.' },
-  { q: 'How much does it cost?', a: 'From KES 300 for a single 5-second clip with one photo. Multiple photos and longer durations scale proportionally.' },
+  { q: 'How much does it cost?', a: 'From $2.32 (KES 300) for a single 5-second clip with one photo. Multiple photos and longer durations scale proportionally.' },
   { q: 'Do I own the resulting video?', a: 'Yes. Once paid for and downloaded, the video is yours for commercial use without restriction.' },
 ];
 
@@ -42,7 +42,7 @@ function PhotosToVideoService() {
     <div className="bg-[#0A0E1A] text-[#F5F7FB] min-h-screen font-body">
       <Helmet>
         <title>AI Photo to Video Maker — Turn Photos into Videos | Katareel</title>
-        <meta name="description" content="Upload photos and let AI turn them into a moving video with narration. Perfect for real estate, products, weddings, and social media. From KES 300." />
+        <meta name="description" content="Upload photos and let AI turn them into a moving video with narration. Perfect for real estate, products, weddings, and social media. From $2.32 (KES 300)." />
         <link rel="canonical" href="https://www.katareel.com/services/photos-to-video" />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(serviceSchema) }} />
         <script type="application/ld+json" data-rh="true" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqSchema) }} />
@@ -76,7 +76,7 @@ function PhotosToVideoService() {
           <a href="#how" className="border border-white/15 hover:border-white/40 hover:bg-white/5 text-white px-7 py-3.5 rounded-xl transition-all">How it works</a>
         </div>
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm text-[#7C87A3]">
-          <span>✦ From {rate ? formatUsd(PRICE_KES, rate) : 'KES 300'}</span>
+          <span>✦ From {rate ? formatUsd(PRICE_KES, rate) : '$2.32 (KES 300)'}</span>
           <span>✦ Optional AI voiceover</span>
           <span>✦ Commercial use included</span>
         </div>

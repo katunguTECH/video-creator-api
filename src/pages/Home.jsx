@@ -33,7 +33,7 @@ const LANGS = [
 
 const FAQS = [
   { q: 'What kinds of videos can I create?',    a: 'Five tools in one: text-to-video, photo-to-video, translation, branding, and music & captions. Use them standalone or chain them together.' },
-  { q: 'How much does it cost?',                a: 'Prices start at KES 200 (about $1.55) per video. Everything is billed per video — no subscription, no hidden fees.' },
+  { q: 'How much does it cost?',                a: 'Prices start at $1 (KES 200) per video. Everything is billed per video — no subscription, no hidden fees.' },
   { q: 'How long does it take?',                a: 'Text-to-video and photo-to-video generate in 30–90 seconds. Translation and music/captions finish in about 60–180 seconds.' },
   { q: 'How do I pay?',                         a: 'Card, PayPal, or M-Pesa through Pesapal. Prices are shown in USD but billed in Kenyan Shillings at the live exchange rate.' },
   { q: 'What languages can I translate into?',  a: '37 languages including Swahili, French, Spanish, Mandarin, Arabic, Hindi, Portuguese, and more. Voice tone and timing are preserved.' },

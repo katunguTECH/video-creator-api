@@ -124,7 +124,7 @@ function CreateVideo() {
     <div className="create-video-page">
       <Helmet>
         <title>AI Text to Video Generator — Create Videos from Prompts | Katareel</title>
-        <meta name="description" content="Describe a scene in plain text and get an AI-generated video in minutes. Text-to-video for marketing, social media, and storytelling. From KES 200." />
+        <meta name="description" content="Describe a scene in plain text and get an AI-generated video in minutes. Text-to-video for marketing, social media, and storytelling. From $1.54 (KES 200)." />
         <link rel="canonical" href="https://www.katareel.com/create" />
       </Helmet>
       <div className="header">

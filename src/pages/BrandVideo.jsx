@@ -148,7 +148,7 @@ function BrandVideo() {
     <div className="min-h-screen bg-gradient-to-br from-green-900 via-black to-emerald-900 text-white p-6">
       <Helmet>
         <title>Brand Video Maker — Add Logo Intro, Voiceover & Outro | Katareel</title>
-        <meta name="description" content="Upload your video and logo. We add a professional intro card, AI voiceover, and closing contact card automatically. Ideal for SMEs. KES 250 flat rate." />
+        <meta name="description" content="Upload your video and logo. We add a professional intro card, AI voiceover, and closing contact card automatically. Ideal for SMEs. $1.93 (KES 250) flat rate." />
         <link rel="canonical" href="https://www.katareel.com/brand-video" />
       </Helmet>
       <div className="max-w-3xl mx-auto">

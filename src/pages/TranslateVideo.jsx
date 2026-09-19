@@ -202,7 +202,7 @@ function TranslateVideo() {
     <div className="translate-video-container">
       <Helmet>
         <title>AI Video Translation — Translate Videos to 37 Languages | Katareel</title>
-        <meta name="description" content="Dub any video into Swahili, French, Chinese, Arabic, and 33 more languages with AI. Preserves the original voice tone. Flat rate KES 300." />
+        <meta name="description" content="Dub any video into Swahili, French, Chinese, Arabic, and 33 more languages with AI. Preserves the original voice tone. Flat rate $2.32 (KES 300)." />
         <link rel="canonical" href="https://www.katareel.com/translate" />
       </Helmet>
       <div className="header">
