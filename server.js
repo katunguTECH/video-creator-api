@@ -2894,7 +2894,7 @@ app.post('/api/generate-video', async (req, res) => {
             console.log(`✅ ModelArk succeeded with ${modelId}`);
             break;
           } catch (e) {
-            console.warn(`❌ ModelArk ${modelId} failed:, e.message);
+            console.warn(`❌ ModelArk ${modelId} failed:`, e.message);
             if (/Timeout/i.test(e.message)) break;
           }
         }
