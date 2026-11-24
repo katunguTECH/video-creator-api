@@ -13,6 +13,19 @@ const CONSUMER_KEY = process.env.PESAPAL_CONSUMER_KEY;
 const CONSUMER_SECRET = process.env.PESAPAL_CONSUMER_SECRET;
 const CALLBACK_URL =
   process.env.PESAPAL_CALLBACK_URL || 'https://www.katareel.com/payment/callback';
+const CALLBACK_FROM_ENV = !!process.env.PESAPAL_CALLBACK_URL;
+const SITE_URL = (process.env.SITE_URL || 'https://www.katareel.com').replace(/\/$/, '');
+const SERVICE_ROUTES = {
+  'text-to-video': '/create',
+  'translation': '/translate',
+  'photo-to-video': '/photos-to-video',
+  'brand-video': '/brand-video',
+  'music-captions': '/music-captions',
+};
+function callbackFor(serviceType) {
+  if (CALLBACK_FROM_ENV) return CALLBACK_URL;
+  return SITE_URL + (SERVICE_ROUTES[serviceType] || '/create');
+}
 const IPN_URL =
   process.env.PESAPAL_IPN_URL ||
   'https://video-creator-api-kjzy.onrender.com/api/pesapal/ipn';
@@ -26,6 +39,7 @@ let hooks = {
   addRevenue: async () => {},
   addUserPayment: async () => {},
   addActivityLog: async () => {},
+  findPaymentByReference: async () => null,
 };
 
 function init(h) {
@@ -123,8 +137,8 @@ router.post('/initialize', async (req, res) => {
       currency,
       amount: Number(amount),
       description: `Katareel – ${serviceType}`,
-      callback_url: CALLBACK_URL,
-      cancellation_url: `${CALLBACK_URL}?cancelled=1`,
+      callback_url: callbackFor(serviceType),
+      cancellation_url: `${callbackFor(serviceType)}?cancelled=1`,
       notification_id: NOTIFICATION_ID,
       billing_address: {
         email_address: email,
@@ -185,91 +199,104 @@ router.post('/initialize', async (req, res) => {
 });
 
 /**
+ * Ask Pesapal for the real status of an order. If it is Completed, record the
+ * payment exactly once (payments table + revenue + activity log). This does not
+ * depend on the in-memory orders Map, so it survives server restarts.
+ */
+const recording = new Map(); // merchant reference -> promise (single-flight)
+
+function serviceFromDescription(desc) {
+  const m = String(desc || '').match(/([a-z][a-z-]*)\s*$/i);
+  return m ? m[1].toLowerCase() : 'unknown';
+}
+
+async function confirmAndRecord(orderTrackingId) {
+  const token = await getToken();
+  const statusRes = await fetch(
+    BASE_URL + '/api/Transactions/GetTransactionStatus?orderTrackingId=' + encodeURIComponent(orderTrackingId),
+    { headers: { Authorization: 'Bearer ' + token, Accept: 'application/json' } }
+  );
+  const data = await statusRes.json();
+  if (!statusRes.ok) {
+    throw new Error('Pesapal status check failed: ' + statusRes.status);
+  }
+
+  const completed =
+    data.payment_status_description === 'Completed' || data.status_code === 1;
+  if (!completed) return { completed: false, data };
+
+  const order = orders.get(orderTrackingId);
+  const reference = data.merchant_reference || (order && order.merchantReference);
+  if (!reference) throw new Error('Pesapal did not return a merchant reference');
+
+  const amount = Number(data.amount) || (order && order.amount) || 0;
+  const currency = data.currency || (order && order.currency) || 'KES';
+  if (currency !== 'KES') {
+    console.warn('Pesapal payment in non-KES currency:', currency, amount, reference);
+  }
+  const email = (order && order.email) || 'unknown';
+  const serviceType = (order && order.serviceType) || serviceFromDescription(data.description);
+
+  if (!recording.has(reference)) {
+    const job = (async () => {
+      const existing = await hooks.findPaymentByReference(reference);
+      if (existing) return false;
+      const txId = Date.now() + '-' + Math.random().toString(36).slice(2, 10);
+      await hooks.addUserPayment(email, amount, 'pesapal_card', serviceType, reference);
+      try {
+        await hooks.addRevenue(txId, email, amount, serviceType, reference, 'pesapal_card');
+        await hooks.addActivityLog(
+          email,
+          'Payment confirmed via Pesapal',
+          'Amount: ' + amount + ' ' + currency + ', Ref: ' + reference,
+          amount
+        );
+      } catch (e) {
+        console.error('Pesapal revenue/activity recording error:', e.message);
+      }
+      console.log('Pesapal payment recorded:', reference, amount, currency, serviceType);
+      return true;
+    })();
+    recording.set(reference, job);
+    job.catch(() => recording.delete(reference));
+  }
+  await recording.get(reference);
+
+  if (order) order.status = 'completed';
+  return { completed: true, data, reference, serviceType, amount };
+}
+
+/**
  * POST /api/pesapal/verify
- * Body: { orderTrackingId, merchantReference? }
+ * Body: { orderTrackingId }
  */
 router.post('/verify', async (req, res) => {
   try {
-    const { orderTrackingId } = req.body;
+    const { orderTrackingId } = req.body || {};
     if (!orderTrackingId) {
-      return res
-        .status(400)
-        .json({ success: false, error: 'orderTrackingId is required' });
+      return res.status(400).json({ success: false, error: 'orderTrackingId is required' });
     }
-
-    const token = await getToken();
-    const statusRes = await fetch(
-      `${BASE_URL}/api/Transactions/GetTransactionStatus?orderTrackingId=${encodeURIComponent(
-        orderTrackingId
-      )}`,
-      {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
-      }
-    );
-    const data = await statusRes.json();
-    if (!statusRes.ok) {
-      throw new Error(`Pesapal status check failed: ${statusRes.status}`);
-    }
-
-    const order = orders.get(orderTrackingId);
-    const isSuccess =
-      data.payment_status_description === 'Completed' ||
-      data.status_code === 1;
-
-    if (isSuccess) {
-      if (order && order.status !== 'completed') {
-        order.status = 'completed';
-        order.confirmationCode = data.confirmation_code;
-        order.paymentMethod = data.payment_method || 'card';
-
-        const txId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        try {
-          await hooks.addRevenue(
-            txId,
-            order.email,
-            order.amount,
-            order.serviceType,
-            order.merchantReference,
-            'pesapal_card'
-          );
-          await hooks.addUserPayment(
-            order.email,
-            order.amount,
-            'pesapal_card',
-            order.serviceType,
-            order.merchantReference
-          );
-          await hooks.addActivityLog(
-            order.email,
-            '💳 Card payment via Pesapal',
-            `Amount: ${order.amount} ${order.currency}, Ref: ${order.merchantReference}`,
-            order.amount
-          );
-        } catch (e) {
-          console.error('Pesapal post-verify recording error:', e.message);
-        }
-      }
-
+    const r = await confirmAndRecord(orderTrackingId);
+    if (r.completed) {
       return res.json({
         success: true,
         status: 'completed',
-        paymentMethod: data.payment_method,
-        amount: data.amount,
-        currency: data.currency,
-        confirmationCode: data.confirmation_code,
+        paymentMethod: r.data.payment_method,
+        amount: r.data.amount,
+        currency: r.data.currency,
+        confirmationCode: r.data.confirmation_code,
         orderTrackingId,
-        reference: order?.merchantReference,
-        serviceType: order?.serviceType,
+        reference: r.reference,
+        serviceType: r.serviceType,
       });
     }
-
     res.json({
       success: false,
-      status: data.payment_status_description || 'pending',
+      status: r.data.payment_status_description || 'pending',
       error: 'Payment not yet completed.',
     });
   } catch (err) {
-    console.error('❌ Pesapal verify error:', err.message);
+    console.error('Pesapal verify error:', err.message);
     res.status(500).json({ success: false, error: err.message });
   }
 });
@@ -281,68 +308,14 @@ router.post('/verify', async (req, res) => {
 router.post('/ipn', async (req, res) => {
   try {
     const body = req.body || {};
-    const orderTrackingId =
-      body.OrderTrackingId || body.order_tracking_id;
-    const merchantReference =
-      body.OrderMerchantReference || body.merchant_reference;
-    const status =
-      body.OrderNotificationType ||
-      body.payment_status_description ||
-      body.status;
-
-    console.log('📨 Pesapal IPN:', { orderTrackingId, merchantReference, status });
-
-    // Pesapal's IPN body only contains the tracking ID; fetch real status.
+    const orderTrackingId = body.OrderTrackingId || body.order_tracking_id;
+    console.log('Pesapal IPN:', { orderTrackingId, merchantReference: body.OrderMerchantReference });
     if (orderTrackingId) {
-      const token = await getToken();
-      const statusRes = await fetch(
-        `${BASE_URL}/api/Transactions/GetTransactionStatus?orderTrackingId=${encodeURIComponent(
-          orderTrackingId
-        )}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const data = await statusRes.json();
-
-      const order = orders.get(orderTrackingId);
-      const isSuccess =
-        data.payment_status_description === 'Completed' || data.status_code === 1;
-
-      if (isSuccess && order && order.status !== 'completed') {
-        order.status = 'completed';
-        order.confirmationCode = data.confirmation_code;
-
-        const txId = `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-        try {
-          await hooks.addRevenue(
-            txId,
-            order.email,
-            order.amount,
-            order.serviceType,
-            order.merchantReference,
-            'pesapal_card'
-          );
-          await hooks.addUserPayment(
-            order.email,
-            order.amount,
-            'pesapal_card',
-            order.serviceType,
-            order.merchantReference
-          );
-          await hooks.addActivityLog(
-            order.email,
-            '💳 Card payment confirmed (Pesapal IPN)',
-            `Amount: ${order.amount} ${order.currency}, Ref: ${order.merchantReference}`,
-            order.amount
-          );
-        } catch (e) {
-          console.error('Pesapal IPN recording error:', e.message);
-        }
-      }
+      await confirmAndRecord(orderTrackingId);
     }
-
     res.status(200).json({ success: true, message: 'IPN received' });
   } catch (err) {
-    console.error('❌ Pesapal IPN error:', err.message);
+    console.error('Pesapal IPN error:', err.message);
     res.status(200).json({ success: true, message: 'Received' });
   }
 });

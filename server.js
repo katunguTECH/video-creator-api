@@ -37,12 +37,13 @@ console.log('📡 Environment:', isProduction ? 'production' : 'development');
 // SUPABASE CONFIGURATION
 // ============================================
 const supabaseUrl = process.env.SUPABASE_URL || 'https://ocllfaqgqbpqiszkghcj.supabase.co';
-const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im9jbGxmYXFncWJwcWlzemtnaGNqIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc4NjE0NjI5OSwiZXhwIjoyMTAxNzIyMjk5fQ.uBMUxzomxE18alp1zyqd8filjet1oth_bzwZrELXq8o';
+const supabaseServiceKey = process.env.SUPABASE_SERVICE_KEY;
+if (!supabaseServiceKey) console.error('SUPABASE_SERVICE_KEY is NOT set - database calls will fail');
 
 console.log('🔗 Supabase URL:', supabaseUrl);
 console.log('🔑 Supabase Service Key:', supabaseServiceKey ? '✅ Configured' : '❌ Missing');
 
-const supabase = createClient(supabaseUrl, supabaseServiceKey, {
+const supabase = createClient(supabaseUrl, supabaseServiceKey || 'missing-key', {
     realtime: {
         transport: WebSocket
     }
@@ -2820,38 +2821,100 @@ function createFallbackVideo(prompt, paymentReference) {
 // ============================================
 // TEXT TO VIDEO GENERATION
 // ============================================
+// ---- Payment authorization for text-to-video ----
+const TEXT_TO_VIDEO_PRICE_KES = { 5: 200, 10: 400, 15: 600 };
+const generationsInProgress = new Set();
+const PRIVILEGED_REF_PREFIXES = ['TEST-', 'REDO-', 'MANUAL-', 'BRAND-', 'MUSIC-'];
+
+async function isReferenceUsed(reference) {
+  try {
+    const { data, error } = await supabase
+      .from('video_usage')
+      .select('id')
+      .eq('transaction_id', reference)
+      .limit(1);
+    if (error) throw error;
+    if (data && data.length > 0) return true;
+  } catch (e) {
+    console.error('Usage lookup failed:', e.message);
+  }
+  return memoryStore.videoUsages.some((u) => u.transactionId === reference);
+}
+
+async function authorizeTextToVideo(reference, durationSec, req) {
+  if (!reference || typeof reference !== 'string') {
+    return { ok: false, status: 402, error: 'Payment required.' };
+  }
+
+  // Free/manual references only work with the admin key.
+  if (PRIVILEGED_REF_PREFIXES.some((p) => reference.startsWith(p))) {
+    const adminKey = process.env.ADMIN_API_KEY;
+    const given = req.headers['x-admin-key'];
+    if (adminKey && given && given === adminKey) return { ok: true, privileged: true };
+    return { ok: false, status: 402, error: 'Invalid or expired payment.' };
+  }
+
+  const payment = await findPaymentByReference(reference);
+  if (!payment) {
+    return {
+      ok: false,
+      status: 402,
+      error: 'Payment not found. If you just paid, wait a minute and try again.'
+    };
+  }
+  if (payment.status && payment.status !== 'completed') {
+    return { ok: false, status: 402, error: 'Payment is not completed.' };
+  }
+
+  const required = TEXT_TO_VIDEO_PRICE_KES[durationSec];
+  if (!(Number(payment.amount) >= required)) {
+    return {
+      ok: false,
+      status: 402,
+      error: 'This payment does not cover a ' + durationSec + '-second video.'
+    };
+  }
+
+  const svc = payment.service_type || payment.serviceType;
+  if (svc && svc !== 'unknown' && svc !== 'text-to-video') {
+    return { ok: false, status: 402, error: 'This payment was made for a different service.' };
+  }
+
+  if (generationsInProgress.has(reference)) {
+    return { ok: false, status: 409, error: 'A video is already being generated for this payment.' };
+  }
+  if (await isReferenceUsed(reference)) {
+    return { ok: false, status: 409, error: 'This payment has already been used to generate a video.' };
+  }
+
+  generationsInProgress.add(reference);
+  req._genLockRef = reference;
+  return { ok: true };
+}
+
 app.post('/api/generate-video', async (req, res) => {
+  try {
+    await generateVideoHandler(req, res);
+  } finally {
+    if (req._genLockRef) generationsInProgress.delete(req._genLockRef);
+  }
+});
+
+async function generateVideoHandler(req, res) {
   try {
     const { prompt, paymentReference, email, retry, duration } = req.body;
     const videoDuration = duration || 5;
 
-    if (retry && paymentReference && failedGenerations[paymentReference]) {
-      console.log(`✅ Free retry allowed for payment: ${paymentReference}`);
-    } else if (!paymentReference) {
-      return res.status(402).json({
+    if (![5, 10, 15].includes(Number(videoDuration))) {
+      return res.status(400).json({ success: false, error: 'Duration must be 5, 10 or 15 seconds.' });
+    }
+    const auth = await authorizeTextToVideo(paymentReference, Number(videoDuration), req);
+    if (!auth.ok) {
+      return res.status(auth.status).json({
         success: false,
-        error: 'Payment required.',
-        requiresPayment: true
+        error: auth.error,
+        requiresPayment: auth.status === 402
       });
-    } else {
-      const isExternalRef =
-        paymentReference.startsWith('KAT-') ||
-        paymentReference.startsWith('TEST-') ||
-        paymentReference.startsWith('REDO-') ||
-        paymentReference.startsWith('MANUAL-') ||
-        paymentReference.startsWith('BRAND-') ||
-        paymentReference.startsWith('MUSIC-');
-
-      if (!isExternalRef) {
-        const isValid = await verifyPayment(paymentReference);
-        if (!isValid) {
-          return res.status(402).json({
-            success: false,
-            error: 'Invalid or expired payment.',
-            requiresPayment: true
-          });
-        }
-      }
     }
 
     const durationMultiplier = videoDuration === 5 ? 1 : videoDuration === 10 ? 2 : videoDuration === 15 ? 3 : 1;
@@ -2964,6 +3027,25 @@ app.post('/api/generate-video', async (req, res) => {
       });
     }
 
+    if (!auth.privileged) {
+      try {
+        await addVideoUsage(paymentReference, email || 'anonymous', 'text-to-video', prompt, cost, usedModel, provider, Number(videoDuration));
+      } catch (usageErr) {
+        console.error('Could not record video usage:', usageErr.message);
+      }
+    }
+
+    let emailSent = false;
+    if (email) {
+      try {
+        const mail = generateVideoDeliveryEmail(email, videoUrl, prompt, TEXT_TO_VIDEO_PRICE_KES[Number(videoDuration)], Number(videoDuration));
+        const mailResult = await sendEmail(email, mail.subject, mail.html);
+        emailSent = !!(mailResult && mailResult.success);
+      } catch (mailErr) {
+        console.error('Video email failed:', mailErr.message);
+      }
+    }
+
     res.json({
       success: true,
       videoUrl: videoUrl,
@@ -2973,7 +3055,7 @@ app.post('/api/generate-video', async (req, res) => {
       duration: videoDuration,
       paymentReference,
       userEmail: email,
-      emailSent: true
+      emailSent: emailSent
     });
   } catch (error) {
     res.json({
@@ -2982,7 +3064,7 @@ app.post('/api/generate-video', async (req, res) => {
       isFallback: true
     });
   }
-});
+}
 
 // ============================================
 // PHOTO TO VIDEO GENERATION
@@ -4258,7 +4340,7 @@ app.get('/', (req, res) => {
 //   4. 404 catch-all
 //   5. Error handler
 // ============================================
-pesapal.init({ addRevenue, addUserPayment, addActivityLog });
+pesapal.init({ addRevenue, addUserPayment, addActivityLog, findPaymentByReference });
 
 app.use('/api/pesapal', pesapal.router);
 app.use('/api/currency', currency.router);
