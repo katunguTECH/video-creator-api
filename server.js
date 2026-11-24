@@ -2860,11 +2860,51 @@ app.post('/api/generate-video', async (req, res) => {
     let usedModel = null;
     let provider = null;
     let cost = 0.08 * durationMultiplier;
+    // --- BytePlus ModelArk (Seedance) first ---
+    try {
+      const arkKey = (process.env.MODELARK_API_KEY || '').trim();
+      const arkEndpoint = (process.env.MODELARK_ENDPOINT || 'https://ark.ap-southeast.bytepluses.com/api/v3').replace(/\/$/, '');
+      if (!arkKey) {
+        console.warn('⚠️ MODELARK_API_KEY not set, skipping ModelArk');
+      } else {
+        for (const modelId of getModelArkModelIds()) {
+          try {
+            console.log(`🎬 ModelArk: trying ${modelId}`);
+            const createRes = await fetch(`${arkEndpoint}/contents/generations/tasks`, {
+              method: 'POST',
+              headers: { 'Authorization': `Bearer ${arkKey}`, 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                model: modelId,
+                content: [{ type: 'text', text: prompt }],
+                duration: videoDuration,
+                ratio: req.body.aspectRatio || '16:9'
+              })
+            });
+            const createText = await createRes.text();
+            if (!createRes.ok) throw new Error(`HTTP ${createRes.status} ${createText.substring(0, 400)}`);
+            const created = JSON.parse(createText);
+            if (!created.id) throw new Error(`no task id: ${createText.substring(0, 300)}`);
+            const result = await pollDreaminaTask(created.id, arkKey, arkEndpoint);
+            const url = result.content && result.content.video_url;
+            if (!url) throw new Error(`no video_url in result: ${JSON.stringify(result).substring(0, 300)}`);
+            videoUrl = url;
+            usedModel = 'Seedance';
+            provider = 'modelark';
+            console.log(`✅ ModelArk succeeded with ${modelId}`);
+            break;
+          } catch (e) {
+            console.warn(`❌ ModelArk ${modelId} failed:`, e.message);
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('❌ ModelArk block error:', e.message);
+    }
     const generationErrors = [];
 
     try {
       const replicateToken = (process.env.REPLICATE_API_TOKEN || '').trim();
-      if (replicateToken) {
+      if (replicateToken && !videoUrl) {
         const response = await fetch('https://api.replicate.com/v1/predictions', {
           method: 'POST',
           headers: {
