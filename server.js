@@ -2364,7 +2364,7 @@ function getModelArkModelIds() {
 
 async function pollDreaminaTask(taskId, token, endpoint) {
   let attempts = 0;
-  while (attempts < 60) {
+  while (attempts < 160) {
     await new Promise(resolve => setTimeout(resolve, 3000));
     try {
       const pollResponse = await fetch(`${endpoint}/contents/generations/tasks/${taskId}`, {
@@ -2883,6 +2883,7 @@ app.post('/api/generate-video', async (req, res) => {
             const createText = await createRes.text();
             if (!createRes.ok) throw new Error(`HTTP ${createRes.status} ${createText.substring(0, 400)}`);
             const created = JSON.parse(createText);
+            console.log('ModelArk task id:', created.id);
             if (!created.id) throw new Error(`no task id: ${createText.substring(0, 300)}`);
             const result = await pollDreaminaTask(created.id, arkKey, arkEndpoint);
             const url = result.content && result.content.video_url;
@@ -2893,7 +2894,8 @@ app.post('/api/generate-video', async (req, res) => {
             console.log(`✅ ModelArk succeeded with ${modelId}`);
             break;
           } catch (e) {
-            console.warn(`❌ ModelArk ${modelId} failed:`, e.message);
+            console.warn(`❌ ModelArk ${modelId} failed:, e.message);
+            if (/Timeout/i.test(e.message)) break;
           }
         }
       }
