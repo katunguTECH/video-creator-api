@@ -31,7 +31,7 @@ const fetchWithRetry = async (url, options, maxRetries = 2) => {
 
 function CreateVideo() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState('katungu1@gmail.com');
+  const [email, setEmail] = useState('katungu@gmail.com');
   const [prompt, setPrompt] = useState('');
   const [duration, setDuration] = useState(5);
   const [aspectRatio, setAspectRatio] = useState('16:9');
