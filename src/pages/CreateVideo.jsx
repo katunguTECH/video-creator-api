@@ -41,6 +41,7 @@ function CreateVideo() {
   const [success, setSuccess] = useState('');
   const [videoUrl, setVideoUrl] = useState(null);
   const [exchangeRate, setExchangeRate] = useState(129.55);
+  const [paidReference, setPaidReference] = useState(null);
 
   useEffect(() => {
     getUsdToKesRate().then(setExchangeRate).catch(() => {});
@@ -69,7 +70,21 @@ function CreateVideo() {
           });
           const data = await res.json();
           if (data.success && data.status === 'completed') {
-            await processVideoGeneration(merchantRef || data.reference);
+            const ref = merchantRef || data.reference;
+            let saved = {};
+            try { saved = JSON.parse(localStorage.getItem('pending_video_request') || '{}'); } catch (e) {}
+            localStorage.removeItem('pending_video_request');
+            if (saved.prompt) {
+              setPrompt(saved.prompt);
+              setDuration(saved.duration || 5);
+              setAspectRatio(saved.aspectRatio || '16:9');
+              if (saved.email) setEmail(saved.email);
+              await processVideoGeneration(ref, saved);
+            } else {
+              setPaidReference(ref);
+              setSuccess('Payment confirmed! Enter your prompt below and click Generate.');
+              setLoading(false);
+            }
           } else {
             setError('Payment was not completed.');
             setLoading(false);
@@ -83,7 +98,12 @@ function CreateVideo() {
     }
   }, []); // eslint-disable-line
 
-  const processVideoGeneration = async (reference) => {
+  const processVideoGeneration = (reference, req) => {
+    const r = req || { prompt, duration, aspectRatio, email };
+    setLoading(true);
+    return runGeneration(reference, r.prompt, r.duration, r.aspectRatio, r.email);
+  };
+  const runGeneration = async (reference, prompt, duration, aspectRatio, email) => {
     try {
       setSuccess('🔄 Processing your video...');
       const gen = await fetchWithRetry(`${API_BASE_URL}/api/generate-video`, {
@@ -192,6 +212,17 @@ function CreateVideo() {
           </div>
 
           <div className="payment-section" style={{ marginTop: 16 }}>
+            {paidReference && (
+              <button
+                type="button"
+                className="generate-btn"
+                disabled={loading || !prompt.trim()}
+                onClick={() => processVideoGeneration(paidReference)}
+                style={{ marginBottom: 12 }}
+              >
+                Generate my video (already paid)
+              </button>
+            )}
             <div style={{ textAlign: 'center', fontSize: 14, color: '#cbd5e1', marginBottom: 8 }}>
               You will be charged{' '}
               <strong style={{ color: '#fff' }}>{price ? formatKes(price.finalPrice) : '—'}</strong>{' '}
@@ -199,7 +230,7 @@ function CreateVideo() {
             </div>
             <button
               type="button"
-              onClick={payment.start}
+              onClick={() => { localStorage.setItem('pending_video_request', JSON.stringify({ prompt, duration, aspectRatio, email })); payment.start(); }}
               disabled={loading || payment.loading || !canPay}
               className="generate-btn"
               style={{ background: 'linear-gradient(135deg, #EC4899, #8B5CF6)' }}
