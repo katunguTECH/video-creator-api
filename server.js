@@ -1,3 +1,13 @@
+// TEMP: show why fetch fails
+const realFetch = global.fetch;
+global.fetch = async (...args) => {
+  try {
+    return await realFetch(...args);
+  } catch (e) {
+    console.log('FETCH DEBUG:', String(args[0]?.url || args[0]).split('/')[2], e.cause?.code, e.cause?.message);
+    throw e;
+  }
+};
 // ============================================
 // LOAD ENVIRONMENT VARIABLES
 // ============================================
